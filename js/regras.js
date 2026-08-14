@@ -90,3 +90,62 @@ export function euclidiana(a, b) {
 export function dia(iso) {
   return String(iso).slice(0, 10);
 }
+
+/* ---------------------------------------------------- painel do RH */
+
+/** Indicadores do período, calculados no cliente a partir do que /rh/dados devolve. */
+export function indicadores(marcacoes, pessoas, equipes) {
+  const ms = marcacoes || [];
+  const ativos = (pessoas || []).filter(p => p.ativo);
+  const porEquipe = {};
+  for (const e of (equipes || [])) {
+    porEquipe[e.equipe_id] = {
+      equipe_id: e.equipe_id, nome: e.nome, pessoas: 0,
+      marcacoes: 0, manuais: 0, cinzentas: 0, pendentes: 0, taxa_manual: 0
+    };
+  }
+  for (const p of ativos) if (porEquipe[p.equipe_id]) porEquipe[p.equipe_id].pessoas++;
+  for (const m of ms) {
+    const g = porEquipe[m.equipe_id];
+    if (!g) continue;
+    g.marcacoes++;
+    if (m.origem === 'manual') g.manuais++;
+    if (m.veredito === 'revisar') g.cinzentas++;
+    if (m.pendente) g.pendentes++;
+  }
+  const lista = Object.keys(porEquipe).map(k => porEquipe[k]);
+  for (const g of lista) {
+    g.taxa_manual = g.marcacoes === 0 ? 0 : Math.round((g.manuais / g.marcacoes) * 1000) / 10;
+  }
+  lista.sort((a, b) => b.taxa_manual - a.taxa_manual);
+  return {
+    equipes: lista,
+    total: ms.length,
+    manuais: ms.filter(m => m.origem === 'manual').length,
+    cinzentas: ms.filter(m => m.veredito === 'revisar').length,
+    pendentes: ms.filter(m => m.pendente).length,
+    semBiometria: ativos.filter(p => !p.tem_biometria).length,
+    taxaManual: ms.length === 0 ? 0 : Math.round((ms.filter(m => m.origem === 'manual').length / ms.length) * 1000) / 10
+  };
+}
+
+/** Espelho de ponto de uma pessoa: um dia por linha, com os pares na ordem. */
+export function espelho(marcacoes, pessoaId) {
+  const dias = {};
+  for (const m of (marcacoes || [])) {
+    if (m.pessoa_id !== pessoaId) continue;
+    (dias[m.marcado_dia] = dias[m.marcado_dia] || []).push(m);
+  }
+  return Object.keys(dias).sort().reverse().map(d => ({
+    dia: d,
+    marcacoes: dias[d].slice().sort((a, b) => String(a.marcado_em).localeCompare(String(b.marcado_em)))
+  }));
+}
+
+/** O gestor precisa registrar o próprio ponto ao abrir a fila? */
+export function gestorDeveMarcar(marcacoesDoGestorHoje, agoraMs, cooldownMs) {
+  const ms = marcacoesDoGestorHoje || [];
+  if (ms.length === 0) return true;
+  const ultima = ms.slice().sort((a, b) => String(b.marcado_em).localeCompare(String(a.marcado_em)))[0];
+  return (agoraMs - Date.parse(ultima.marcado_em)) >= cooldownMs;
+}

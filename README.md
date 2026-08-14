@@ -8,16 +8,33 @@ Backend do piloto em n8n + Data Tables — contrato em [`docs/api-piloto.md`](do
 
 ---
 
+## Duas portas, dois apps
+
+A tela inicial tem dois botões e nada mais:
+
+```
+   REGISTRAR PONTO      → câmera. Nenhum login.
+   Acessar              → usuário e senha. Só o RH.
+```
+
+O gestor com 20 pessoas na fila e o RH fechando a folha têm pressa de coisas opostas. Uma tela que serve aos dois atrapalha os dois — e "cadastrar colaborador" ao lado de "marcar ponto" é um botão errado a um toque de distância.
+
 ## Como funciona um turno
 
 ```
-1. Gestor entra com o token do aparelho     → baixa a carga da unidade
-2. Toca em INICIAR FILA                     → câmera liga, captura é automática
-3. Colaborador olha                         → sistema propõe o nome
-4. Gestor confirma                          → comprovante, e já vai para o próximo
+1. Gestor toca em REGISTRAR PONTO   → a câmera descobre QUEM segura o aparelho
+2. Reconheceu o gestor              → registra o ponto dele e abre a fila da equipe
+3. Colaborador olha                 → sistema propõe o nome
+4. Gestor confirma                  → comprovante, e já vai para o próximo
 ```
 
-Sem digitar, sem rolar lista, sem escolher entrada ou saída — o sistema deduz do que a pessoa já tem no dia.
+Sem digitar, sem rolar lista, sem escolher entrada ou saída — o sistema deduz do que a pessoa já tem no dia. O gestor nunca informa quem ele é: o rosto dele é a credencial, e o cooldown impede que reabrir a fila remarque o ponto dele.
+
+## O painel do RH
+
+Atrás de `Acessar`, com usuário e senha: **pendências** (zona cinzenta, manual, ponto do gestor, recadastros), **pessoas**, **equipes**, **registros** com espelho de ponto por colaborador e **indicadores** — com a taxa de registro manual por equipe em primeiro lugar, que é o alarme que antecipa problema de biometria em campo.
+
+A senha nunca trafega: o navegador pede o sal, deriva PBKDF2-SHA256 (150 000 iterações) e envia só a chave.
 
 **Nenhuma operação de campo espera pela internet.** A marcação é gravada no aparelho e confirmada na tela na hora; um processo de fundo esvazia a fila quando houver rede. O único sinal visível é o contador "Na fila".
 
@@ -36,8 +53,8 @@ Para produção, publique como site estático (sem build). Na Vercel: Framework 
 ## Testes
 
 ```bash
-npm run test:unit   # 24 testes das regras, em Node puro
-npm run test:e2e    # 14 testes de fluxo, navegador com câmera falsa
+npm run test:unit   # 37 testes de regras e de estáticos, em Node puro
+npm run test:e2e    # 19 testes de fluxo, navegador com câmera falsa
 ```
 
 O E2E roda com o **motor de reconhecimento fingido**, de propósito: o que está sob teste é o fluxo que escrevemos, não a biblioteca de terceiros. Assim o CI é determinístico e não depende do rosto de ninguém.
@@ -58,6 +75,12 @@ O que o E2E cobre, e por que cada um está lá:
 | Marcação aceita não carrega foto | encher o armazenamento de base64 |
 | Remanejado aparece ao trocar o escopo | virar registro manual à toa |
 | Sessão sobrevive ao recarregar | gestor preso na tela de login no meio da fila |
+| A porta só libera o ponto depois do pareamento | aparelho novo marcando com carga vazia |
+| Abrir a fila identifica o gestor e marca o ponto dele | gestor sem registro no próprio turno |
+| Reabrir a fila no mesmo minuto não remarca o gestor | ponto dobrado por sair e voltar da tela |
+| RH não entra com senha errada | painel aberto a quem tem só o link |
+| RH vê a pendência do gestor e decide | marcação sem conferente passando batido |
+| Espelho de ponto mostra as marcações do colaborador | fechamento sem rastro por pessoa |
 
 ## Estrutura
 
@@ -66,9 +89,13 @@ index.html              telas e estilos
 js/config.js            configuração de runtime (editável sem rebuild)
 js/regras.js            regras puras — é o que os testes de unidade cobrem
 js/store.js             IndexedDB: sessão, fila de envio, histórico do dia
-js/api.js               chamadas e sincronismo da fila
+js/api.js               chamadas do aparelho e do RH, e o sincronismo da fila
 js/face.js              motor: modelos, rastreamento, qualidade, captura
-js/app.js               orquestração das telas
+js/cripto.js            derivação PBKDF2 da senha do RH, no navegador
+js/ui.js                helpers de tela — $, mostrar, toast, formatação
+js/fila.js              app do gestor: identifica, marca, comprova
+js/rh.js                painel do RH: pendências, pessoas, equipes, registros
+js/app.js               a porta e o roteamento entre os dois apps
 vendor/ models/         face-api.js 1.7.15 (@vladmandic) e pesos
 tests/                  unidade, fluxo e o servidor falso
 docs/                   fluxo operacional, API e as análises técnicas
@@ -85,6 +112,8 @@ docs/                   fluxo operacional, API e as análises técnicas
 **A nitidez é medida sobre o rosto reamostrado para 160×160.** Sem normalizar, o mesmo limiar se comporta diferente em cada câmera. Referência: nítido ≈ 48, desfoque forte ≈ 6.
 
 **A deriva do relógio desconta metade da ida e volta.** Sem isso, latência de rede vira "relógio errado" e enche a fila do RH à toa. Acima de 2 minutos de desvio, a marcação vai para revisão.
+
+**O cadeado de envio único fecha no mesmo tique da chamada.** `Api.sincronizar` não é `async` de propósito: se a checagem ficasse antes de um `await`, três chamadas seguidas passariam as três antes de qualquer uma marcar o voo — e a Data Table não tem índice único para segurar o resto. Quem chega no meio recebe a mesma promessa.
 
 **Só sai da fila local o que o servidor confirmou.** `aceito` e `duplicado` somem; `rejeitado` fica retido e visível em Ajustes.
 

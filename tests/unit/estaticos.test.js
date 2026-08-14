@@ -60,3 +60,24 @@ test('o service worker nao intercepta chamadas de outra origem', () => {
   assert.match(sw, /url\.origin\s*!==\s*location\.origin/,
     'sem esse guarda, resposta de marcacao pode ser servida do cache');
 });
+
+test('todo modulo de js/ esta no cache do service worker', () => {
+  // Modulo fora da lista funciona online e some no primeiro uso offline —
+  // exatamente o cenario do gestor no campo sem sinal.
+  const sw = ler('sw.js');
+  for (const f of fs.readdirSync(path.join(RAIZ, 'js')).filter(f => f.endsWith('.js'))) {
+    assert.ok(sw.includes("'./js/" + f + "'"), 'js/' + f + ' nao esta em ASSETS do sw.js');
+  }
+});
+
+test('as cinco telas do fluxo existem no index', () => {
+  const html = ler('index.html');
+  for (const id of ['porta', 'fila', 'rh', 'loginRh', 'pareamento']) {
+    assert.match(html, new RegExp('id="' + id + '"'), 'falta a secao #' + id);
+  }
+});
+
+test('a versao do cache do sw acompanha o conjunto de arquivos', () => {
+  const sw = ler('sw.js');
+  assert.match(sw, /const CACHE = 'efrat-ponto-v\d+'/, 'sw.js precisa de versao de cache explicita');
+});

@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   tipoDaVez, vereditoPorDistancia, ranquear, precisaRevisao, emCooldown,
-  itensParaRemover, agoraCorrigido, calcularDeriva, cargaValida, euclidiana, dia
+  itensParaRemover, agoraCorrigido, calcularDeriva, cargaValida, euclidiana, dia,
+  indicadores, espelho, gestorDeveMarcar
 } from '../../js/regras.js';
 
 const CFG = { limiarAceite: 0.45, limiarCinza: 0.58 };
@@ -119,4 +120,93 @@ test('euclidiana', () => {
 
 test('dia extrai a data do ISO', () => {
   assert.equal(dia('2026-08-14T09:03:11.000Z'), '2026-08-14');
+});
+
+
+/* --------------------------------------------------- painel do RH */
+
+const PESSOAS = [
+  { pessoa_id: 'p1', equipe_id: 'e1', ativo: true, tem_biometria: true },
+  { pessoa_id: 'p2', equipe_id: 'e1', ativo: true, tem_biometria: false },
+  { pessoa_id: 'p3', equipe_id: 'e2', ativo: true, tem_biometria: true },
+  { pessoa_id: 'p4', equipe_id: 'e2', ativo: false, tem_biometria: true }
+];
+const EQUIPES = [{ equipe_id: 'e1', nome: 'Um' }, { equipe_id: 'e2', nome: 'Dois' }];
+const MARCS = [
+  { equipe_id: 'e1', pessoa_id: 'p1', origem: 'biometria', veredito: 'aceito', pendente: false, marcado_dia: '2026-08-14', marcado_em: '2026-08-14T09:00:00.000Z' },
+  { equipe_id: 'e1', pessoa_id: 'p1', origem: 'manual', veredito: 'manual', pendente: true, marcado_dia: '2026-08-14', marcado_em: '2026-08-14T18:00:00.000Z' },
+  { equipe_id: 'e2', pessoa_id: 'p3', origem: 'biometria', veredito: 'revisar', pendente: true, marcado_dia: '2026-08-13', marcado_em: '2026-08-13T08:00:00.000Z' }
+];
+
+test('indicadores somam total, manuais, cinzentas e pendentes', () => {
+  const i = indicadores(MARCS, PESSOAS, EQUIPES);
+  assert.equal(i.total, 3);
+  assert.equal(i.manuais, 1);
+  assert.equal(i.cinzentas, 1);
+  assert.equal(i.pendentes, 2);
+  assert.equal(i.semBiometria, 1);          // p4 esta inativo e nao conta
+  assert.equal(i.taxaManual, 33.3);
+});
+
+test('indicadores ranqueiam a equipe com mais registro manual primeiro', () => {
+  const i = indicadores(MARCS, PESSOAS, EQUIPES);
+  assert.equal(i.equipes[0].equipe_id, 'e1');
+  assert.equal(i.equipes[0].taxa_manual, 50);
+  assert.equal(i.equipes[0].pessoas, 2);
+  assert.equal(i.equipes[1].taxa_manual, 0);
+});
+
+test('indicadores ignoram marcacao de equipe desconhecida sem quebrar', () => {
+  const i = indicadores([{ equipe_id: 'fantasma', origem: 'manual' }], PESSOAS, EQUIPES);
+  assert.equal(i.total, 1);
+  assert.equal(i.equipes.every(e => e.marcacoes === 0), true);
+});
+
+test('indicadores com tudo vazio nao dividem por zero', () => {
+  const i = indicadores([], [], []);
+  assert.equal(i.taxaManual, 0);
+  assert.deepEqual(i.equipes, []);
+});
+
+test('espelho agrupa por dia, mais recente primeiro, e ordena dentro do dia', () => {
+  const e = espelho(MARCS, 'p1');
+  assert.equal(e.length, 1);
+  assert.equal(e[0].dia, '2026-08-14');
+  assert.equal(e[0].marcacoes.length, 2);
+  assert.equal(e[0].marcacoes[0].marcado_em, '2026-08-14T09:00:00.000Z');
+});
+
+test('espelho so traz a pessoa pedida', () => {
+  assert.equal(espelho(MARCS, 'p3').length, 1);
+  assert.deepEqual(espelho(MARCS, 'ninguem'), []);
+  assert.deepEqual(espelho(null, 'p1'), []);
+});
+
+test('gestorDeveMarcar: primeira abertura do dia sempre marca', () => {
+  assert.equal(gestorDeveMarcar([], Date.now(), 90000), true);
+  assert.equal(gestorDeveMarcar(null, Date.now(), 90000), true);
+});
+
+test('gestorDeveMarcar: reabrir dentro do cooldown nao remarca', () => {
+  const agora = Date.parse('2026-08-14T09:00:30.000Z');
+  const ms = [{ marcado_em: '2026-08-14T09:00:00.000Z' }];
+  assert.equal(gestorDeveMarcar(ms, agora, 90000), false);
+});
+
+test('gestorDeveMarcar: passado o cooldown a saida do gestor e registrada', () => {
+  const agora = Date.parse('2026-08-14T18:00:00.000Z');
+  const ms = [
+    { marcado_em: '2026-08-14T09:00:00.000Z' },
+    { marcado_em: '2026-08-14T12:00:00.000Z' }
+  ];
+  assert.equal(gestorDeveMarcar(ms, agora, 90000), true);
+});
+
+test('gestorDeveMarcar olha a marcacao mais recente, nao a primeira da lista', () => {
+  const agora = Date.parse('2026-08-14T12:00:10.000Z');
+  const ms = [
+    { marcado_em: '2026-08-14T12:00:00.000Z' },
+    { marcado_em: '2026-08-14T09:00:00.000Z' }
+  ];
+  assert.equal(gestorDeveMarcar(ms, agora, 90000), false);
 });

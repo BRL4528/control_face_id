@@ -1,6 +1,6 @@
-# Efrat — Fluxo operacional do ponto facial · v2
+# Efrat — Fluxo operacional do ponto facial · v3
 
-Substitui a v1. Incorpora: equipes de 12–20, RH cadastra, carga por unidade, duas marcações por dia, e sincronismo silencioso.
+Substitui a v2. O que mudou: **gestor e RH deixaram de dividir tela**. O aparelho de campo abre numa porta com dois botões, e cada um leva a um app diferente — o gestor nunca vê opção de administração, e o RH nunca precisa do aparelho da equipe.
 
 ---
 
@@ -17,6 +17,29 @@ Empresa
 
 O colaborador não tem login, não instala nada, não opera nada.
 Equipes podem estar em lugares distintos — por isso a equipe tem local esperado, e a geolocalização passa a ser **conferível** contra ele, não só guardada.
+
+---
+
+## Momento 0 — A porta
+
+A tela inicial tem **dois botões e nada mais**:
+
+```
+┌─────────────────────────────┐
+│                             │
+│     REGISTRAR PONTO         │   ← câmera. Não pede login.
+│                             │
+│        Acessar              │   ← usuário e senha. Só o RH tem.
+└─────────────────────────────┘
+```
+
+**REGISTRAR PONTO** abre a câmera e a primeira coisa que ela faz é descobrir *quem está segurando o aparelho*. O rosto do gestor é procurado na carga; achou, o sistema **já registra o ponto dele** e abre a fila com a equipe e o local dele carregados. Zero digitação, zero escolha — o gestor chega, olha para o aparelho e a fila está aberta.
+
+Reabrir a fila no mesmo intervalo **não** remarca o gestor: o cooldown vale para ele igual a todo mundo.
+
+**Acessar** pede usuário e senha, e leva ao painel do RH: cadastro de colaboradores, equipes, pendências, espelho de ponto e indicadores. Nada disso existe na tela do gestor.
+
+Por que separar: o gestor com 20 pessoas na fila e o RH fechando a folha têm pressa de coisas opostas. Uma tela que serve aos dois atrapalha os dois — e "cadastrar colaborador" ao lado de "marcar ponto" é um botão errado a um toque de distância.
 
 ---
 
@@ -65,7 +88,7 @@ Carregar a unidade e filtrar pela equipe resolve remanejamento sem inflar a gale
 Uma tela, uma ação:
 
 ```
-1. Gestor toca em MARCAR
+1. Gestor abre a fila (e já marcou o próprio ponto ao ser reconhecido)
 2. Colaborador olha
 3. Captura automática quando a qualidade passa
 4. Sistema propõe o nome → gestor confirma → registrado
@@ -161,17 +184,25 @@ A carga é a mesma máquina, na direção contrária: entra equipe, sai marcaç�
 
 ---
 
-## O que eu mudo no PWA em seguida
+## Estado da implementação
 
-1. Captura automática — sem botão
-2. Modo fila — registra e volta para a próxima pessoa
-3. Nome proposto + confirmação com um toque
-4. Painel da equipe ao vivo — marcaram / faltam / pendentes de envio
-5. Entrada ou saída deduzido do dia
-6. Registro manual com motivo, após 3 falhas
-7. Fila de envio local com identificador único e armazenamento persistente
-8. Carga da unidade com galeria filtrada por equipe
-9. Comprovante ao colaborador
-10. Geolocalização no instante da marcação, nunca em segundo plano
+| | Item | Onde |
+|---|---|---|
+| ✅ | Porta com dois botões, sem menu | `js/app.js` |
+| ✅ | Gestor identificado pela face ao abrir a fila, com o próprio ponto registrado | `js/fila.js` |
+| ✅ | Captura automática — sem botão de disparo | `js/face.js` |
+| ✅ | Nome proposto + confirmação com um toque | `js/fila.js` |
+| ✅ | Entrada ou saída deduzido do dia | `regras.tipoDaVez` |
+| ✅ | Registro manual com motivo, após 3 falhas | `js/fila.js` |
+| ✅ | Fila de envio local, id único e armazenamento persistente | `js/store.js`, `js/api.js` |
+| ✅ | Envio único em voo (cadeado da deduplicação) | `Api.sincronizar` |
+| ✅ | Carga da unidade com galeria filtrada por equipe | `js/api.js` |
+| ✅ | Comprovante ao colaborador | `js/fila.js` |
+| ✅ | Geolocalização no instante da marcação, nunca em segundo plano | `js/fila.js` |
+| ✅ | Painel do RH: pendências, pessoas, equipes, registros e indicadores | `js/rh.js` |
+| ✅ | Recadastro pelo gestor entrando como pendência | `js/fila.js` |
+| ⬜ | Exportação AFD / AEJ | — |
+| ⬜ | Prova de vida certificada (ISO/IEC 30107-3 Level 2) | — |
+| ⬜ | Reconferência do embedding no servidor | — |
 
-Do 1 ao 6 e o 9 não dependem de backend — dá para levar a campo já. O 7 e o 8 funcionam contra uma API simulada até a API real existir.
+Os três em aberto são justamente os que dependem de sair do piloto: os dois últimos exigem servidor fazendo o trabalho pesado, e o primeiro exige o registro do REP-P no INPI (Portaria MTP 671/2021, art. 91).

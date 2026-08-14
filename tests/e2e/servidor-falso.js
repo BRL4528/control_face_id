@@ -30,9 +30,19 @@ export function criarServidor(opts = {}) {
     marcacoes: new Map(),      // id_cliente -> marcação
     inativos: new Set(opts.inativos || []),
     fora: false,               // simula servidor inacessível
-    chamadas: { carga: 0, marcacoes: 0, cadastro: 0 },
+    chamadas: { carga: 0, marcacoes: 0, cadastro: 0, rh: 0 },
+    recadastros: [],
+    equipesCriadas: [],
+    colaboradoresCriados: [],
+    decisoes: [],
     lotesSimultaneos: 0,
     maxLotesSimultaneos: 0
+  };
+
+  const rhUsuario = opts.rhUsuario || {
+    usuario: 'rh', nome: 'RH Teste',
+    sal: '00112233445566778899aabbccddeeff',
+    chave: 'CHAVE-DE-TESTE', iteracoes: 1, ativo: true
   };
 
   const pessoas = (opts.pessoas || [
@@ -72,8 +82,12 @@ export function criarServidor(opts = {}) {
       let body = {};
       try { body = corpo ? JSON.parse(corpo) : {}; } catch (e) { /* body vazio */ }
 
-      const token = body.token || url.searchParams.get('token');
-      if (token !== estado.token) return responder(401, { ok: false, erro: 'token invalido' });
+      // As rotas do RH nao usam token de aparelho: autenticam por usuario + chave.
+      const ehRh = url.pathname.startsWith('/webhook/efrat/rh/');
+      if (!ehRh) {
+        const token = body.token || url.searchParams.get('token');
+        if (token !== estado.token) return responder(401, { ok: false, erro: 'token invalido' });
+      }
 
       if (url.pathname === '/webhook/efrat/carga') {
         estado.chamadas.carga++;
@@ -94,7 +108,16 @@ export function criarServidor(opts = {}) {
           } else if (estado.inativos.has(m.pessoa_id) || !pessoas.some(p => p.pessoa_id === m.pessoa_id)) {
             resultados.push({ id_cliente: m.id_cliente, status: 'rejeitado', motivo: 'colaborador inativo ou inexistente' });
           } else {
-            estado.marcacoes.set(m.id_cliente, m);
+            // Mesma regra do workflow real: gestor, manual, veredito diferente
+            // de aceito ou relogio fora de 2 min vao para a mesa do RH.
+            const p = pessoas.find(x => x.pessoa_id === m.pessoa_id);
+            const deriva = m.deriva_relogio_ms == null ? 0 : Number(m.deriva_relogio_ms);
+            const revisar = m.veredito !== 'aceito' || m.origem === 'manual'
+              || (p && p.papel === 'gestor') || Math.abs(deriva) > 120000;
+            estado.marcacoes.set(m.id_cliente, Object.assign({}, m, {
+              requer_revisao: !!revisar,
+              foto_auditoria: revisar ? (m.foto_auditoria || '') : ''
+            }));
             resultados.push({ id_cliente: m.id_cliente, status: 'aceito', motivo: null });
           }
         }
@@ -105,6 +128,64 @@ export function criarServidor(opts = {}) {
           resumo: { aceitas: conta('aceito'), duplicadas: conta('duplicado'), rejeitadas: conta('rejeitado') },
           resultados
         });
+      }
+
+      if (url.pathname === '/webhook/efrat/rh/sal') {
+        return responder(200, { ok: true, sal: rhUsuario.sal, iteracoes: rhUsuario.iteracoes });
+      }
+
+      if (url.pathname.startsWith('/webhook/efrat/rh/')) {
+        if (body.usuario !== rhUsuario.usuario || body.chave !== rhUsuario.chave) {
+          return responder(401, { ok: false, erro: 'usuario ou senha invalidos' });
+        }
+        estado.chamadas.rh = (estado.chamadas.rh || 0) + 1;
+
+        if (url.pathname.endsWith('/dados')) {
+          const marcs = [...estado.marcacoes.values()].map(m => Object.assign({}, m, {
+            pendente: !!m.requer_revisao,
+            requer_revisao: !!m.requer_revisao,
+            marcado_dia: String(m.marcado_em).slice(0, 10)
+          }));
+          return responder(200, {
+            ok: true, usuario: { usuario: rhUsuario.usuario, nome: rhUsuario.nome },
+            periodo_dias: body.dias || 30,
+            equipes: [
+              { equipe_id: 'eq-1', nome: 'Equipe Um', unidade: 'Unidade A', lat: 0, lng: 0, raio_m: 500, ativo: true },
+              { equipe_id: 'eq-2', nome: 'Equipe Dois', unidade: 'Unidade A', lat: 0, lng: 0, raio_m: 500, ativo: true }
+            ],
+            pessoas: pessoas.map(p => ({
+              pessoa_id: p.pessoa_id, matricula: p.matricula, nome: p.nome,
+              equipe_id: p.equipe_id, papel: p.papel, ativo: !estado.inativos.has(p.pessoa_id),
+              equipes_geridas: '', tem_biometria: true, miniatura: null
+            })),
+            marcacoes: marcs, recadastros: estado.recadastros,
+            servidor_hora: new Date().toISOString()
+          });
+        }
+        if (url.pathname.endsWith('/equipe')) {
+          if (!String(body.nome || '').trim()) return responder(422, { ok: false, erro: 'nome da equipe e obrigatorio' });
+          estado.equipesCriadas.push(body.nome);
+          return responder(200, { ok: true, equipe_id: 'eq-nova', nome: body.nome });
+        }
+        if (url.pathname.endsWith('/colaborador')) {
+          if (!String(body.nome || '').trim() || !String(body.matricula || '').trim()) {
+            return responder(422, { ok: false, erro: 'nome e matricula sao obrigatorios' });
+          }
+          estado.colaboradoresCriados.push(body.nome);
+          return responder(200, { ok: true, pessoa_id: body.pessoa_id || 'ps-novo', nome: body.nome });
+        }
+        if (url.pathname.endsWith('/decidir')) {
+          if (!body.id) return responder(422, { ok: false, erro: 'id obrigatorio' });
+          estado.decisoes.push({ tipo: body.tipo, id: body.id, acao: body.acao });
+          if (body.tipo === 'template') {
+            estado.recadastros = estado.recadastros.filter(t => t.template_id !== body.id);
+          } else {
+            const m = estado.marcacoes.get(body.id);
+            if (m) { m.veredito = 'aceito'; m.origem = 'biometria'; m.requer_revisao = false; }
+          }
+          return responder(200, { ok: true, alvo_tipo: body.tipo, alvo_id: body.id, acao: body.acao });
+        }
+        return responder(404, { ok: false, erro: 'rota rh desconhecida' });
       }
 
       if (url.pathname === '/webhook/efrat/cadastro') {

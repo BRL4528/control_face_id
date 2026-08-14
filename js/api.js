@@ -3,6 +3,9 @@ import { itensParaRemover, calcularDeriva } from './regras.js';
 
 const cfg = () => window.EFRAT_CFG;
 
+// Nunca lanca. Queda de rede vira { ok:false, status:0 } — sem isso, um
+// aparelho sem sinal derruba a tela com excecao nao tratada em vez de mostrar
+// "sem rede".
 async function post(rota, corpo, timeoutMs = 30000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -17,10 +20,28 @@ async function post(rota, corpo, timeoutMs = 30000) {
     let json = null;
     try { json = txt ? JSON.parse(txt) : null; } catch (e) { /* servidor devolveu não-JSON */ }
     return { ok: r.ok, status: r.status, json, texto: txt };
+  } catch (e) {
+    return { ok: false, status: 0, json: null, texto: String(e && e.message), rede: true };
   } finally {
     clearTimeout(t);
   }
 }
+
+async function postRh(rota, corpo) {
+  const r = await post(rota, corpo);
+  if (!r.ok || !r.json || !r.json.ok) {
+    return { ok: false, status: r.status, erro: (r.json && r.json.erro) || ('HTTP ' + r.status) };
+  }
+  return { ok: true, dados: r.json };
+}
+
+export const ApiRh = {
+  sal(usuario) { return postRh('/efrat/rh/sal', { usuario }); },
+  dados(cred, dias) { return postRh('/efrat/rh/dados', Object.assign({ dias: dias || 30 }, cred)); },
+  equipe(cred, dados) { return postRh('/efrat/rh/equipe', Object.assign({}, cred, dados)); },
+  colaborador(cred, dados) { return postRh('/efrat/rh/colaborador', Object.assign({}, cred, dados)); },
+  decidir(cred, dados) { return postRh('/efrat/rh/decidir', Object.assign({}, cred, dados)); }
+};
 
 export const Api = {
   /**
@@ -33,7 +54,8 @@ export const Api = {
     const r = await post('/efrat/carga', { token });
     const t1 = Date.now();
     if (!r.ok || !r.json || !r.json.ok) {
-      return { ok: false, status: r.status, erro: (r.json && r.json.erro) || 'falha ao carregar' };
+      return { ok: false, status: r.status, rede: r.rede === true,
+               erro: (r.json && r.json.erro) || (r.rede ? 'sem conexao' : 'falha ao carregar') };
     }
     const deriva = calcularDeriva(t0, t1, r.json.servidor_hora);
     return { ok: true, carga: r.json, deriva };
@@ -56,16 +78,25 @@ export const Api = {
    * 2. Só sai da fila o que o servidor confirmou (aceito ou duplicado).
    * 3. Rejeitado fica retido e visível — é problema que precisa de gente.
    */
-  _emVoo: false,
+  _emVoo: null,
 
-  async sincronizar(token) {
-    if (this._emVoo) return { ok: true, pulado: true };
-    if (!navigator.onLine) return { ok: false, offline: true };
+  // Nao e async de proposito: o cadeado precisa ser fechado no mesmo tique em
+  // que a chamada entra. Se a checagem ficasse antes de um await, tres chamadas
+  // seguidas passariam as tres pelo `if` antes de qualquer uma marcar o voo.
+  // Quem chega no meio recebe a MESMA promessa em vez de abrir um segundo lote.
+  sincronizar(token) {
+    if (this._emVoo) return this._emVoo;
+    if (!navigator.onLine) return Promise.resolve({ ok: false, offline: true });
+    const p = this._enviarLote(token);
+    this._emVoo = p;
+    p.then(() => { this._emVoo = null; }, () => { this._emVoo = null; });
+    return p;
+  },
 
+  async _enviarLote(token) {
     const pendentes = await Store.fila();
     if (!pendentes.length) return { ok: true, nada: true };
 
-    this._emVoo = true;
     try {
       const lote = pendentes
         .filter(m => !m._erroPermanente)
@@ -100,8 +131,6 @@ export const Api = {
     } catch (e) {
       await Store.registrar('sync_erro', { msg: String(e && e.message) });
       return { ok: false, erro: String(e && e.message) };
-    } finally {
-      this._emVoo = false;
     }
   }
 };

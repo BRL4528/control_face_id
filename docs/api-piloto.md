@@ -1,7 +1,15 @@
 # Efrat · Ponto — API do piloto (n8n + Data Tables)
 
 Base: `https://n8n.samasc.com.br/webhook/`
-Autenticação: token do dispositivo no corpo (`token`) ou na query (`?token=`).
+
+Duas autenticações, de propósito separadas:
+
+| Rotas | Quem usa | Como autentica |
+|---|---|---|
+| `/efrat/carga`, `/efrat/marcacoes`, `/efrat/cadastro` | aparelho do gestor | token do dispositivo no corpo (`token`) |
+| `/efrat/rh/*` | painel do RH | `usuario` + `chave` (PBKDF2 derivada no navegador) |
+
+O aparelho **nunca** recebe credencial de RH, e o RH **nunca** precisa do token de um aparelho.
 
 Sem banco externo. Tudo vive em Data Tables do próprio n8n.
 
@@ -9,7 +17,7 @@ Sem banco externo. Tudo vive em Data Tables do próprio n8n.
 
 ## Para ligar
 
-1. Ative os 4 workflows.
+1. Ative os 7 workflows.
 2. No **Monitor Diário**, preencha o e-mail do RH e ligue a credencial do Gmail.
 3. Na tabela `efrat_dispositivo`, troque `TROQUE-ESTE-TOKEN` por um token real.
 
@@ -25,6 +33,7 @@ O seed mínimo já está criado: equipe `eq-piloto`, gestor `ps-gestor`, disposi
 | `efrat_template` | biometria versionada — `ativo`, `pendente`, `reprovado`, `substituido` |
 | `efrat_marcacao` | livro de marcações; **nunca alterado** |
 | `efrat_correcao` | decisões do RH; o estado atual é derivado daqui |
+| `efrat_usuario_rh` | usuários do painel: `sal`, `iteracoes` e a `chave` derivada |
 
 Para dar a um gestor acesso a mais de uma equipe (gestor substituto), basta pôr os ids em `equipes_ids`: `eq-piloto,eq-norte`.
 
@@ -142,6 +151,45 @@ A decisão sempre vira uma linha em `efrat_correcao`. **A marcação original nu
 
 ---
 
+## Painel do RH — `/efrat/rh/*`
+
+A senha **não trafega**. O navegador pede o sal, deriva PBKDF2-SHA256 (150 000 iterações, 256 bits) e manda só a chave resultante em toda chamada.
+
+### POST /efrat/rh/sal
+
+```json
+{ "usuario": "rh" }              →  { "ok": true, "sal": "0d9f…", "iteracoes": 150000 }
+```
+
+Usuário inexistente recebe um **sal falso determinístico** em vez de erro. Sem isso, essa rota vira um oráculo de quais usuários existem.
+
+### POST /efrat/rh/dados
+
+```json
+{ "usuario": "rh", "chave": "…", "dias": 30 }
+```
+
+Uma chamada devolve o painel inteiro: `equipes`, `pessoas`, `marcacoes` do período (com `pendente` e `requer_revisao`), `recadastros` aguardando decisão e `servidor_hora`. Os indicadores e o espelho de ponto são calculados **no cliente**, por `js/regras.js` — as mesmas funções que os testes de unidade cobrem.
+
+### POST /efrat/rh/equipe · POST /efrat/rh/colaborador
+
+Criam ou atualizam. **São rotas separadas de propósito:** o `upsert` da Data Table *insere* quando o filtro não casa, então uma rota única gravaria lixo na tabela errada a cada chamada que não encontrasse a linha.
+
+```json
+{ "usuario": "rh", "chave": "…", "nome": "Equipe Norte", "unidade": "…", "lat": 0, "lng": 0, "raio_m": 500 }
+{ "usuario": "rh", "chave": "…", "nome": "Ana Souza", "matricula": "001", "equipe_id": "eq-1", "papel": "colaborador" }
+```
+
+### POST /efrat/rh/decidir
+
+Mesma semântica de `/efrat/decisao`, autenticada pelo RH: grava em `efrat_correcao` e **nunca altera a marcação original**.
+
+```json
+{ "usuario": "rh", "chave": "…", "tipo": "marcacao", "id": "…", "acao": "aprovar", "motivo": "" }
+```
+
+---
+
 ## Monitor diário
 
 19h. Só manda e-mail quando há algo fora do normal: taxa de registro manual ≥ 20% numa equipe, equipe sem marcação, gente faltando marcar, marcações que chegaram com mais de 24h de atraso e o tamanho da fila do RH.
@@ -157,5 +205,6 @@ Ajuste em `LIMITE_MANUAL`, no nó **Avaliar Alarmes**.
 - **Não reconfere a biometria no servidor.** A decisão é a que veio do aparelho. Com o gestor como adversário, é uma fragilidade conhecida — resolve quando a extração do embedding migrar para o servidor.
 - **Uma empresa só.** Sem isolamento por tenant.
 - **Token sem expiração.** Suficiente para aparelho corporativo em piloto; não é modelo de autenticação de produção.
+- **A chave derivada do RH é o credencial.** Quem capturar a chave em trânsito entra sem saber a senha — ela vale como um bearer token. PBKDF2 no cliente protege a senha original, não a sessão. Para produção: sessão com expiração emitida pelo servidor.
 
 Nada disso é acidente: o piloto existe para medir FNMR, FTA, latência e taxa de manual em campo. Os nomes de tabela e campo já são os que a API própria vai herdar.
