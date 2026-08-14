@@ -1,4 +1,7 @@
 node_modules/
+test-results/
+playwright-report/
+tests/fixtures/*.y4m
 .DS_Store
 *.log
 .env

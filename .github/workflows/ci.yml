@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unidade:
+    name: Testes de regra
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Regras puras (sem navegador)
+        run: node --test tests/unit/*.test.js
+
+  fluxo:
+    name: Fluxo ponta a ponta
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Instalar o Chromium do Playwright
+        run: npx playwright install --with-deps chromium
+      - name: Fluxo com câmera falsa e API simulada
+        run: npx playwright test
+        env:
+          CI: 'true'
+      - name: Guardar o relatório quando falhar
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
+
+  higiene:
+    name: Higiene do repositório
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Sintaxe de todos os módulos
+        run: for f in js/*.js tests/e2e/*.js; do node --check "$f" || exit 1; done
+
+      - name: Nenhum segredo aparente no código versionado
+        run: |
+          if grep -rniE "(secret|api[_-]?key|bearer [a-z0-9]{16,}|ghp_[a-zA-Z0-9]{20,})" \
+               --include="*.js" --include="*.html" --include="*.json" \
+               js/ index.html manifest.json vercel.json; then
+            echo "::error::possível segredo commitado"
+            exit 1
+          fi
+          echo "nada encontrado"
+
+      - name: O token do aparelho não pode estar no código
+        run: |
+          if grep -rn "TROQUE-ESTE-TOKEN\|TOKEN-TESTE" js/ index.html; then
+            echo "::error::token de exemplo vazou para o código do app"
+            exit 1
+          fi
+          echo "ok"
+
+      - name: A versão do cache do service worker subiu junto com o app
+        run: |
+          v=$(grep -o "efrat-ponto-v[0-9]*" sw.js | head -1)
+          echo "cache atual: $v"
+          test -n "$v" || { echo "::error::sw.js sem versão de cache"; exit 1; }

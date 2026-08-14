@@ -2,55 +2,95 @@
 
 PWA de marcação de ponto por reconhecimento facial, operado no **celular do gestor da equipe** (aparelho da empresa). O colaborador não instala nada, não tem login: só mostra o rosto.
 
-Backend do piloto roda em n8n + Data Tables. Contrato em [`docs/api-piloto.md`](docs/api-piloto.md).
+Backend do piloto em n8n + Data Tables — contrato em [`docs/api-piloto.md`](docs/api-piloto.md). Fluxo operacional em [`docs/fluxo-operacional.md`](docs/fluxo-operacional.md).
+
+[![CI](https://github.com/BRL4528/control_face_id/actions/workflows/ci.yml/badge.svg)](https://github.com/BRL4528/control_face_id/actions/workflows/ci.yml)
 
 ---
 
-## Estado atual
+## Como funciona um turno
 
-Esta versão é o **PoC de validação biométrica**, já testado em campo:
+```
+1. Gestor entra com o token do aparelho     → baixa a carga da unidade
+2. Toca em INICIAR FILA                     → câmera liga, captura é automática
+3. Colaborador olha                         → sistema propõe o nome
+4. Gestor confirma                          → comprovante, e já vai para o próximo
+```
 
-- cadastro com 3 capturas e gate de qualidade (tamanho, nitidez, luz, pose)
-- verificação 1:1 e identificação 1:N lado a lado
-- limiares ajustáveis, histograma das distâncias, exportação CSV
-- tudo local no aparelho (IndexedDB), sem servidor
+Sem digitar, sem rolar lista, sem escolher entrada ou saída — o sistema deduz do que a pessoa já tem no dia.
 
-**Ainda não implementado** (fluxo v2, em andamento): captura automática, modo fila, nome proposto com confirmação, painel da equipe ao vivo, registro manual após 3 falhas, fila de envio local e integração com a API.
+**Nenhuma operação de campo espera pela internet.** A marcação é gravada no aparelho e confirmada na tela na hora; um processo de fundo esvazia a fila quando houver rede. O único sinal visível é o contador "Na fila".
 
 ## Rodando
 
 Precisa de HTTPS — a câmera não funciona em `file://`.
 
 ```bash
-npx serve -l 8080
-# abra http://localhost:8080 (localhost conta como contexto seguro)
+npm install
+npm run serve      # sobe o app + uma API simulada, sem depender do n8n
+# abre a URL impressa; token: TOKEN-TESTE
 ```
 
-Para abrir no celular, publique em qualquer host estático. Se ativar o **GitHub Pages** deste repositório (Settings → Pages → branch `main`, pasta raiz), a URL sai pronta em HTTPS e o PWA fica instalável na tela de início.
+Para produção, publique como site estático (sem build). Na Vercel: Framework Preset **Other**, sem build command, output na raiz. **Nenhuma variável de ambiente** — a URL da API fica em `js/config.js` e o token do aparelho nunca entra no bundle.
 
-Primeira abertura baixa ~7 MB de modelos; depois funciona offline.
+## Testes
+
+```bash
+npm run test:unit   # 24 testes das regras, em Node puro
+npm run test:e2e    # 14 testes de fluxo, navegador com câmera falsa
+```
+
+O E2E roda com o **motor de reconhecimento fingido**, de propósito: o que está sob teste é o fluxo que escrevemos, não a biblioteca de terceiros. Assim o CI é determinístico e não depende do rosto de ninguém.
+
+O motor real tem verificação própria em [`tests/e2e/biometria-manual.cjs`](tests/e2e/biometria-manual.cjs), que exige um vídeo com rosto de verdade e por isso fica fora do CI.
+
+O que o E2E cobre, e por que cada um está lá:
+
+| Cenário | Protege contra |
+|---|---|
+| Primeira marcação é entrada, segunda é saída | tipo errado na folha |
+| Cooldown bloqueia repetição | fila registrando a mesma pessoa duas vezes |
+| Offline enfileira e sobe depois | perder marcação sem rede |
+| Reenvio do mesmo `id_cliente` não duplica | ponto dobrado por retentativa |
+| Nunca há dois lotes simultâneos | a deduplicação depende disso |
+| Colaborador inativo é rejeitado e retido | demitido marcando com carga velha |
+| Ponto do gestor sempre vai para revisão | a única marcação sem conferente |
+| Marcação aceita não carrega foto | encher o armazenamento de base64 |
+| Remanejado aparece ao trocar o escopo | virar registro manual à toa |
+| Sessão sobrevive ao recarregar | gestor preso na tela de login no meio da fila |
 
 ## Estrutura
 
 ```
-index.html          aplicação inteira (UI + lógica)
-vendor/             face-api.js 1.7.15 (@vladmandic) com TFJS embutido
-models/             tiny_face_detector, face_landmark_68, face_recognition
-manifest.json sw.js PWA e cache offline
-docs/               fluxo operacional, contrato da API e as análises técnicas
+index.html              telas e estilos
+js/config.js            configuração de runtime (editável sem rebuild)
+js/regras.js            regras puras — é o que os testes de unidade cobrem
+js/store.js             IndexedDB: sessão, fila de envio, histórico do dia
+js/api.js               chamadas e sincronismo da fila
+js/face.js              motor: modelos, rastreamento, qualidade, captura
+js/app.js               orquestração das telas
+vendor/ models/         face-api.js 1.7.15 (@vladmandic) e pesos
+tests/                  unidade, fluxo e o servidor falso
+docs/                   fluxo operacional, API e as análises técnicas
 ```
 
 ## Decisões que valem saber antes de mexer
 
-**Verificação é 1:1, não 1:N.** O gestor seleciona (ou confirma) quem é, e o rosto prova que é a pessoa. `FPIR ≈ N × FMR` — 1:N puro em galeria grande é onde o erro explode. A galeria fica restrita à equipe (12 a 20 pessoas); a unidade inteira é baixada só para resolver remanejamento.
+**Verificação é 1:1 com confirmação, não 1:N cego.** O sistema propõe e o gestor confirma. `FPIR ≈ N × FMR` — a galeria fica restrita à equipe (12 a 20 pessoas); a unidade inteira é baixada só para resolver remanejamento, atrás de um seletor.
 
-**O detector completo roda só quando não há rosto rastreado.** Mesmo padrão do MediaPipe Face Mesh: enquanto há rosto, a inferência acontece num recorte pequeno. Medido: 1188 ms → 488 ms por ciclo em ambiente lento.
+**O detector completo só roda quando não há rosto rastreado.** Mesmo padrão do MediaPipe Face Mesh. Medido: 1188 ms → 488 ms por ciclo em ambiente lento.
 
-**O gate de qualidade avalia o frame que o usuário viu aprovado**, não um novo. O último frame bom fica em buffer; sem isso, o rosto se move entre o "qualidade OK" e o toque, e a captura é reprovada injustamente.
+**O gate de qualidade avalia o quadro que o usuário viu aprovado**, não um novo. Sem esse buffer, o rosto se move entre o "pronto" e a captura, e reprova injustamente.
 
-**A nitidez é medida sobre o rosto reamostrado para 160×160.** Sem essa normalização, o mesmo limiar se comportaria diferente em cada câmera. Referência medida: nítido ≈ 48, desfoque forte ≈ 6.
+**A nitidez é medida sobre o rosto reamostrado para 160×160.** Sem normalizar, o mesmo limiar se comporta diferente em cada câmera. Referência: nítido ≈ 48, desfoque forte ≈ 6.
 
-**Não há prova de vida (liveness).** É intencional e está documentado na aba Ajustes: foto na tela passa. Serve para justificar a contratação de liveness certificado ISO/IEC 30107-3 Level 2 no sistema real.
+**A deriva do relógio desconta metade da ida e volta.** Sem isso, latência de rede vira "relógio errado" e enche a fila do RH à toa. Acima de 2 minutos de desvio, a marcação vai para revisão.
+
+**Só sai da fila local o que o servidor confirmou.** `aceito` e `duplicado` somem; `rejeitado` fica retido e visível em Ajustes.
+
+**A foto de auditoria só acompanha marcação que vai para revisão.** Nas aceitas ela não agrega e encheria o armazenamento.
+
+**Não há prova de vida (liveness).** É intencional: foto na tela passa. Serve para justificar liveness certificado ISO/IEC 30107-3 Level 2 no sistema real, onde o adversário é o próprio gestor.
 
 ## Referências medidas
 
@@ -70,6 +110,14 @@ Adornos, contra o template limpo da mesma foto:
 Adorno na parte de cima da cabeça não atrapalha. Oclusão de olhos e boca derruba a **detecção** — o sistema falha para o lado seguro, pedindo nova tentativa, em vez de aceitar a pessoa errada.
 
 Detalhes em [`docs/oclusao-e-roteiro.md`](docs/oclusao-e-roteiro.md) e [`docs/validacao-biometrica.md`](docs/validacao-biometrica.md).
+
+## Limites conhecidos
+
+- A deduplicação depende de **envio único em voo** no cliente, porque a Data Table do n8n não tem índice único. Há teste cobrindo isso.
+- O servidor **não reconfere a biometria** — a decisão é a que veio do aparelho. Fragilidade conhecida enquanto o adversário for o gestor; resolve quando a extração do embedding migrar para o servidor.
+- Uma empresa só, sem isolamento por tenant. Token sem expiração.
+
+Nada disso é acidente: o piloto existe para medir FNMR, FTA, latência e taxa de registro manual em campo.
 
 ## Licença dos modelos
 

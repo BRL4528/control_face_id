@@ -1,6 +1,19 @@
-const CACHE = 'efrat-ponto-v1';
+// Cache dos estáticos. As chamadas de API nunca passam por aqui: resposta de
+// marcação em cache seria mentira sobre o que o servidor recebeu.
+const CACHE = 'efrat-ponto-v2';
 const ASSETS = [
-  './index.html','./manifest.json','./vendor/face-api.js',
+  './',
+  './index.html',
+  './manifest.json',
+  './vendor/face-api.js',
+  './js/config.js',
+  './js/app.js',
+  './js/api.js',
+  './js/face.js',
+  './js/regras.js',
+  './js/store.js',
+  './icon-192.png',
+  './icon-512.png',
   './models/tiny_face_detector_model-weights_manifest.json',
   './models/tiny_face_detector_model.bin',
   './models/face_landmark_68_model-weights_manifest.json',
@@ -8,19 +21,31 @@ const ASSETS = [
   './models/face_recognition_model-weights_manifest.json',
   './models/face_recognition_model.bin'
 ];
+
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(c => Promise.all(ASSETS.map(a => c.add(a).catch(() => null))))
+      .then(() => self.skipWaiting())
+  );
 });
+
 self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(ks =>
-    Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(
+    caches.keys()
+      .then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
+  );
 });
+
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
-  e.respondWith(caches.match(e.request).then(r => r || fetch(e.request).then(resp => {
-    if (resp.ok && new URL(e.request.url).origin === location.origin) {
-      const cp = resp.clone(); caches.open(CACHE).then(c => c.put(e.request, cp));
-    }
-    return resp;
-  }).catch(() => caches.match('./index.html'))));
+  const url = new URL(e.request.url);
+  if (url.origin !== location.origin) return;   // API e CDNs passam direto
+  e.respondWith(
+    caches.match(e.request).then(hit => hit || fetch(e.request).then(resp => {
+      if (resp.ok) { const cp = resp.clone(); caches.open(CACHE).then(c => c.put(e.request, cp)); }
+      return resp;
+    }).catch(() => caches.match('./index.html')))
+  );
 });

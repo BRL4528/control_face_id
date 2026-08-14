@@ -7,881 +7,200 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Efrat · Teste de Ponto Facial</title>
+<title>Ponto Facial · Efrat</title>
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <style>
-  :root{
-    --bg:#0f1720; --surface:#182430; --surface2:#213141; --line:#2c3e50;
-    --txt:#e8eef4; --muted:#8fa3b5;
-    --ok:#3fb984; --warn:#e0a740; --bad:#e05a5a; --accent:#4a9de0;
-  }
+  :root{--bg:#0f1720;--surface:#182430;--surface2:#213141;--line:#2c3e50;
+    --txt:#e8eef4;--muted:#8fa3b5;--ok:#3fb984;--warn:#e0a740;--bad:#e05a5a;--accent:#4a9de0}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-  html,body{margin:0;padding:0;background:var(--bg);color:var(--txt);
-    font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-    overscroll-behavior:none}
-  body{padding-bottom:env(safe-area-inset-bottom)}
+  html,body{margin:0;background:var(--bg);color:var(--txt);
+    font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overscroll-behavior:none}
   .wrap{max-width:520px;margin:0 auto;padding:0 14px 40px}
   header{padding:14px 0 10px;display:flex;align-items:center;gap:10px}
-  header h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.2px}
+  header h1{font-size:16px;margin:0;font-weight:600}
   header .sub{font-size:11px;color:var(--muted);margin-top:2px}
-  .pill{margin-left:auto;font-size:11px;padding:4px 9px;border-radius:20px;
-    background:var(--surface2);color:var(--muted);white-space:nowrap}
+  .pill{margin-left:auto;font-size:11px;padding:4px 9px;border-radius:20px;background:var(--surface2);color:var(--muted);white-space:nowrap}
   .pill.ok{color:var(--ok)} .pill.bad{color:var(--bad)}
-
   nav{display:flex;gap:4px;background:var(--surface);padding:4px;border-radius:11px;margin-bottom:14px}
-  nav button{flex:1;border:0;background:transparent;color:var(--muted);padding:9px 4px;
-    border-radius:8px;font-size:13px;font-weight:500;cursor:pointer}
+  nav button{flex:1;border:0;background:transparent;color:var(--muted);padding:9px 4px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer}
   nav button.on{background:var(--surface2);color:var(--txt)}
-
-  .card{background:var(--surface);border:1px solid var(--line);border-radius:13px;
-    padding:14px;margin-bottom:12px}
-  .card h2{font-size:13px;margin:0 0 10px;font-weight:600;color:var(--txt)}
-  .card h2 .n{color:var(--muted);font-weight:400}
-
-  .camwrap{position:relative;width:100%;aspect-ratio:3/4;background:#000;
-    border-radius:12px;overflow:hidden;margin-bottom:10px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:13px;margin:0 0 10px;font-weight:600}
+  .camwrap{position:relative;width:100%;aspect-ratio:3/4;background:#000;border-radius:12px;overflow:hidden;margin-bottom:10px}
   video,canvas.ov{position:absolute;inset:0;width:100%;height:100%}
   video{object-fit:cover;transform:scaleX(-1)}
   canvas.ov{transform:scaleX(-1);pointer-events:none}
-  .camhint{position:absolute;left:0;right:0;bottom:0;padding:8px 10px;
-    background:linear-gradient(transparent,rgba(0,0,0,.75));font-size:12px}
-  .camoff{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-    color:var(--muted);font-size:13px;text-align:center;padding:20px}
-
-  .q{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px}
-  .q div{background:var(--surface2);border-radius:8px;padding:7px 4px;text-align:center}
-  .q .lab{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
-  .q .val{font-size:13px;font-weight:600;margin-top:2px}
-  .q .val.ok{color:var(--ok)} .q .val.bad{color:var(--bad)}
-
-  button.act{width:100%;border:0;border-radius:11px;padding:14px;font-size:15px;
-    font-weight:600;background:var(--accent);color:#fff;cursor:pointer}
+  .dica{position:absolute;left:0;right:0;bottom:0;padding:8px 10px;background:linear-gradient(transparent,rgba(0,0,0,.75));font-size:12px}
+  .camoff{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;text-align:center;padding:20px}
+  button.act{width:100%;border:0;border-radius:11px;padding:14px;font-size:15px;font-weight:600;background:var(--accent);color:#fff;cursor:pointer;margin-top:8px}
   button.act:disabled{background:var(--surface2);color:var(--muted)}
   button.act.big{padding:18px;font-size:17px}
-  button.ghost{background:var(--surface2);color:var(--txt)}
-  button.danger{background:transparent;color:var(--bad);border:1px solid var(--bad)}
-
-  input[type=text],select{width:100%;background:var(--surface2);border:1px solid var(--line);
-    color:var(--txt);border-radius:9px;padding:11px;font-size:15px;margin-bottom:10px}
-  label.lb{display:block;font-size:11px;color:var(--muted);margin-bottom:5px;
-    text-transform:uppercase;letter-spacing:.5px}
-
+  button.act.grande{padding:20px;font-size:18px}
+  button.act.ghost{background:var(--surface2);color:var(--txt)}
+  button.act.danger{background:transparent;color:var(--bad);border:1px solid var(--bad)}
+  input,select{width:100%;background:var(--surface2);border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:12px;font-size:16px;margin-bottom:10px}
+  label.lb{display:block;font-size:11px;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px}
+  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:10px}
+  .kpis div{background:var(--surface2);border-radius:9px;padding:9px 6px;text-align:center}
+  .kpis .lab{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+  .kpis .val{font-size:19px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+  .cartao{border-radius:12px;padding:14px;border:1px solid var(--line);background:var(--surface);margin-top:10px}
+  .cartao.ok{background:rgba(63,185,132,.11);border-color:var(--ok)}
+  .cartao.warn{background:rgba(224,167,64,.11);border-color:var(--warn)}
+  .cartao .tit{font-size:17px;font-weight:700}
+  .cartao .sub{font-size:12px;color:var(--muted);margin-top:4px;line-height:1.5}
+  .cartao .linha{display:flex;gap:12px;align-items:center;margin-bottom:6px}
+  .face{width:64px;height:64px;border-radius:12px;object-fit:cover;background:var(--surface2);transform:scaleX(-1);flex:none}
+  .lista{max-height:300px;overflow-y:auto;margin:8px 0}
+  .lista button{width:100%;text-align:left;background:var(--surface2);border:0;color:var(--txt);padding:13px;border-radius:9px;margin-bottom:5px;font-size:15px;cursor:pointer}
+  .tag{font-size:10px;background:var(--line);color:var(--muted);padding:2px 6px;border-radius:5px}
+  .pessoa{display:flex;gap:10px;align-items:center;padding:9px 0;border-top:1px solid var(--line)}
+  .pessoa .nm{font-size:14px} .pessoa .mt{font-size:11px;color:var(--muted)}
+  .ponto{width:9px;height:9px;border-radius:50%;flex:none}
+  .ponto.ok{background:var(--ok)} .ponto.bad{background:var(--bad)} .ponto.muted{background:var(--muted)}
   .shots{display:flex;gap:7px;margin-bottom:10px}
-  .shots div{flex:1;aspect-ratio:1;border-radius:9px;background:var(--surface2);
-    border:1px dashed var(--line);overflow:hidden;display:flex;align-items:center;
-    justify-content:center;color:var(--muted);font-size:11px}
+  .shots div{flex:1;aspect-ratio:1;border-radius:9px;background:var(--surface2);border:1px dashed var(--line);overflow:hidden;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px}
   .shots img{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
-
-  .person{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line)}
-  .person img{width:38px;height:38px;border-radius:9px;object-fit:cover;transform:scaleX(-1)}
-  .person .nm{font-size:14px;font-weight:500}
-  .person .mt{font-size:11px;color:var(--muted)}
-  .person button{margin-left:auto;background:transparent;border:0;color:var(--bad);
-    font-size:12px;cursor:pointer;padding:6px}
-
-  .result{border-radius:12px;padding:14px;margin-bottom:12px;border:1px solid}
-  .result.ok{background:rgba(63,185,132,.11);border-color:var(--ok)}
-  .result.warn{background:rgba(224,167,64,.11);border-color:var(--warn)}
-  .result.bad{background:rgba(224,90,90,.11);border-color:var(--bad)}
-  .result .verdict{font-size:17px;font-weight:700;margin-bottom:3px}
-  .result.ok .verdict{color:var(--ok)}
-  .result.warn .verdict{color:var(--warn)}
-  .result.bad .verdict{color:var(--bad)}
-  .result .who{font-size:14px;margin-bottom:8px}
-  .result .meta{font-size:11px;color:var(--muted);line-height:1.6;font-variant-numeric:tabular-nums}
-
-  .seg{display:flex;gap:4px;background:var(--surface2);padding:3px;border-radius:9px;margin-bottom:10px}
-  .seg button{flex:1;border:0;background:transparent;color:var(--muted);padding:8px 4px;
-    border-radius:7px;font-size:12px;cursor:pointer}
-  .seg button.on{background:var(--surface);color:var(--txt);font-weight:600}
-
-  table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
-  th{text-align:left;color:var(--muted);font-weight:500;font-size:10px;
-    text-transform:uppercase;letter-spacing:.5px;padding:5px 4px;border-bottom:1px solid var(--line)}
-  td{padding:7px 4px;border-bottom:1px solid var(--line)}
-  td.d{font-weight:600}
-  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px}
-
-  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:12px}
-  .stats div{background:var(--surface2);border-radius:9px;padding:9px 6px;text-align:center}
-  .stats .lab{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
-  .stats .val{font-size:17px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
-
-  .slider{margin-bottom:14px}
-  .slider .row{display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px}
-  .slider .row b{font-variant-numeric:tabular-nums}
-  input[type=range]{width:100%;accent-color:var(--accent)}
-
-  .note{font-size:11.5px;color:var(--muted);line-height:1.55}
-  .note b{color:var(--txt)}
-  .warnbox{background:rgba(224,167,64,.1);border:1px solid rgba(224,167,64,.4);
-    border-radius:11px;padding:12px;font-size:11.5px;line-height:1.55;color:#f0d5a8;margin-bottom:12px}
-  .warnbox b{color:var(--warn)}
-  .hist{display:flex;align-items:flex-end;gap:2px;height:56px;margin:10px 0 4px}
-  .hist div{flex:1;background:var(--accent);border-radius:2px 2px 0 0;min-height:1px;opacity:.75}
-  .histax{display:flex;justify-content:space-between;font-size:9px;color:var(--muted)}
+  .nota{font-size:11.5px;color:var(--muted);line-height:1.55}
+  .warnfg{color:var(--warn)}
+  .diag{display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:1px solid var(--line)}
+  .diag span:first-child{color:var(--muted)}
+  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:22px;background:var(--surface2);
+    border:1px solid var(--line);color:var(--txt);padding:12px 18px;border-radius:11px;font-size:13px;z-index:50;max-width:90%}
+  .toast.ok{border-color:var(--ok)} .toast.warn{border-color:var(--warn)} .toast.bad{border-color:var(--bad)}
+  .banner{background:rgba(224,167,64,.14);border:1px solid var(--warn);color:#f0d5a8;
+    border-radius:9px;padding:8px 11px;font-size:12px;margin-bottom:10px}
   .hide{display:none!important}
-  .row2{display:flex;gap:8px}
-  .row2>*{flex:1}
+  .center{max-width:380px;margin:12vh auto 0;padding:0 18px}
 </style>
 </head>
 <body>
-<div class="wrap">
+
+<!-- ============ LOGIN ============ -->
+<div id="login" class="center hide">
+  <h1 style="font-size:20px;margin:0 0 4px">Ponto Facial</h1>
+  <p class="nota" style="margin:0 0 22px">Entre com o token deste aparelho. Ele fica guardado só aqui.</p>
+  <label class="lb">Token do aparelho</label>
+  <input type="text" id="token" placeholder="cole o token" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <button class="act big" id="btnEntrar">Entrar</button>
+  <p class="nota" style="margin-top:16px">Sem internet, o app entra com a carga de hoje se ela já tiver sido baixada.</p>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app" class="wrap hide">
 
 <header>
   <div>
-    <h1>Ponto Facial · Teste</h1>
-    <div class="sub">Efrat — PoC de validação biométrica</div>
+    <h1 id="gestorNome">—</h1>
+    <div class="sub" id="equipeNome">—</div>
   </div>
-  <div class="pill" id="status">carregando…</div>
+  <div class="pill" id="statusModelos">carregando…</div>
 </header>
 
 <nav>
-  <button data-tab="enroll" class="on">Cadastro</button>
-  <button data-tab="punch">Ponto</button>
-  <button data-tab="log">Log</button>
-  <button data-tab="cfg">Ajustes</button>
+  <button data-aba="fila" class="on">Fila</button>
+  <button data-aba="equipe">Equipe</button>
+  <button data-aba="cadastro">Cadastro</button>
+  <button data-aba="ajustes">Ajustes</button>
 </nav>
 
-<!-- ============ CADASTRO ============ -->
-<section id="tab-enroll">
-  <div class="card">
-    <h2>1. Cadastrar rosto <span class="n">— 3 capturas</span></h2>
-    <label class="lb">Nome do colaborador</label>
-    <input type="text" id="name" placeholder="ex.: Bruno" autocomplete="off">
+<div class="banner hide" id="offline">Sem internet — as marcações ficam na fila e sobem sozinhas.</div>
 
-    <div class="camwrap" id="camE">
-      <video id="vidE" playsinline muted autoplay></video>
-      <canvas class="ov" id="ovE"></canvas>
-      <div class="camoff" id="offE">Toque em "Ligar câmera"</div>
-      <div class="camhint hide" id="hintE"></div>
-    </div>
-
-    <div class="q" id="qE">
-      <div><div class="lab">Rosto</div><div class="val" id="qE0">—</div></div>
-      <div><div class="lab">Tamanho</div><div class="val" id="qE1">—</div></div>
-      <div><div class="lab">Nitidez</div><div class="val" id="qE2">—</div></div>
-      <div><div class="lab">Luz</div><div class="val" id="qE3">—</div></div>
-    </div>
-
-    <div class="shots" id="shots">
-      <div>1</div><div>2</div><div>3</div>
-    </div>
-
-    <div class="row2" style="margin-bottom:10px">
-      <button class="act ghost" id="camBtnE">Ligar câmera</button>
-      <button class="act" id="capBtn" disabled>Capturar</button>
-    </div>
-    <button class="act" id="saveBtn" disabled>Salvar cadastro</button>
-    <p class="note" style="margin:10px 0 0">O sistema só libera a captura quando a qualidade passa. Mova um pouco a cabeça entre as 3 capturas (frontal, leve giro à esquerda, leve giro à direita).</p>
+<!-- ---- FILA ---- -->
+<section id="aba-fila">
+  <div class="kpis">
+    <div><div class="lab">Marcaram</div><div class="val" id="kpiMarcaram">0/0</div></div>
+    <div><div class="lab">Faltam</div><div class="val" id="kpiFaltam">0</div></div>
+    <div><div class="lab">Na fila</div><div class="val" id="kpiFila">0</div></div>
   </div>
 
-  <div class="card">
-    <h2>Cadastrados <span class="n" id="pcount"></span></h2>
-    <div id="plist"><p class="note">Ninguém cadastrado ainda.</p></div>
-  </div>
-</section>
-
-<!-- ============ PONTO ============ -->
-<section id="tab-punch" class="hide">
-  <div class="card">
-    <h2>2. Marcar ponto</h2>
-
-    <div class="seg" id="modeSeg">
-      <button data-mode="1n1" class="on">1:1 — verificar</button>
-      <button data-mode="1n">1:N — identificar</button>
-    </div>
-
-    <div id="selWrap">
-      <label class="lb">Quem está marcando</label>
-      <select id="who"></select>
-    </div>
-
-    <div class="camwrap" id="camP">
-      <video id="vidP" playsinline muted autoplay></video>
-      <canvas class="ov" id="ovP"></canvas>
-      <div class="camoff" id="offP">Toque em "Ligar câmera"</div>
-      <div class="camhint hide" id="hintP"></div>
-    </div>
-
-    <div class="row2" style="margin-bottom:10px">
-      <button class="act ghost" id="camBtnP">Ligar câmera</button>
-    </div>
-    <button class="act big" id="punchBtn" disabled>MARCAR PONTO</button>
+  <div class="camwrap">
+    <video id="video" playsinline muted autoplay></video>
+    <canvas class="ov" id="overlay"></canvas>
+    <div class="camoff" id="camOff">Toque em INICIAR FILA</div>
+    <div class="dica" id="dica"></div>
   </div>
 
-  <div id="resultBox"></div>
-</section>
+  <button class="act big" id="btnFila">INICIAR FILA</button>
 
-<!-- ============ LOG ============ -->
-<section id="tab-log" class="hide">
-  <div class="card">
-    <h2>Métricas das tentativas</h2>
-    <div class="stats">
-      <div><div class="lab">Tentativas</div><div class="val" id="sN">0</div></div>
-      <div><div class="lab">Aceitas</div><div class="val" id="sA">0</div></div>
-      <div><div class="lab">Rejeit. / FTA</div><div class="val" id="sR">0 / 0</div></div>
-    </div>
-    <div class="stats">
-      <div><div class="lab">Dist. mín</div><div class="val" id="sMin">—</div></div>
-      <div><div class="lab">Dist. média</div><div class="val" id="sAvg">—</div></div>
-      <div><div class="lab">Dist. máx</div><div class="val" id="sMax">—</div></div>
-    </div>
-    <div class="hist" id="hist"></div>
-    <div class="histax"><span>0.0</span><span>0.4</span><span>0.8</span><span>1.2</span></div>
-    <p class="note" style="margin-top:8px">Distribuição das distâncias. Suas tentativas legítimas devem se concentrar bem à esquerda. Se houver sobreposição com o limiar, o limiar está errado — ou o cadastro foi ruim.</p>
-  </div>
-
-  <div class="card">
-    <h2>Registros</h2>
-    <div style="overflow-x:auto">
-      <table>
-        <thead><tr><th>Hora</th><th>Pessoa</th><th>Modo</th><th>Dist</th><th>ms</th></tr></thead>
-        <tbody id="logBody"></tbody>
-      </table>
-    </div>
-    <div class="row2" style="margin-top:12px">
-      <button class="act ghost" id="csvBtn">Exportar CSV</button>
-      <button class="act danger" id="clearLog">Limpar log</button>
-    </div>
-  </div>
-</section>
-
-<!-- ============ AJUSTES ============ -->
-<section id="tab-cfg" class="hide">
-  <div class="warnbox">
-    <b>Este teste NÃO tem prova de vida (liveness).</b><br>
-    Isso é intencional. Tente furá-lo: mostre uma foto sua na tela de outro celular, ou um vídeo seu. Ele vai aceitar — e é exatamente esse resultado que justifica contratar liveness certificado (ISO/IEC 30107-3 Level 2) no sistema real. O que este teste valida é o reconhecimento em si: cadastro, qualidade, limiar e a diferença entre 1:1 e 1:N.
-  </div>
-
-  <div class="card">
-    <h2>Limiares de decisão</h2>
-    <div class="slider">
-      <div class="row"><span>Aceita automaticamente até</span><b id="tAv">0.45</b></div>
-      <input type="range" id="tA" min="0.20" max="0.80" step="0.01" value="0.45">
-    </div>
-    <div class="slider">
-      <div class="row"><span>Zona cinzenta até</span><b id="tGv">0.58</b></div>
-      <input type="range" id="tG" min="0.20" max="0.90" step="0.01" value="0.58">
-    </div>
-    <p class="note">Distância euclidiana entre descritores de 128 dimensões. A referência clássica desta rede é <b>0.6</b> como corte genérico. Para ponto, começamos mais rígido: abaixo de 0.45 aceita, entre 0.45 e 0.58 marca mas sinaliza para o RH revisar, acima disso rejeita e cai no fallback. Calibre com os seus dados reais, não com esses números.</p>
-  </div>
-
-  <div class="card">
-    <h2>Detecção</h2>
-    <label class="lb">Resolução do detector</label>
-    <select id="inputSize">
-      <option value="224">224 — mais rápido</option>
-      <option value="320">320</option>
-      <option value="416" selected>416 — equilibrado</option>
-      <option value="512">512 — mais preciso</option>
+  <div id="escopoWrap" style="margin-top:8px">
+    <label class="lb">Procurar em</label>
+    <select id="escopo">
+      <option value="equipe">Minha equipe</option>
+      <option value="unidade">Toda a unidade (remanejado)</option>
     </select>
-    <label class="lb">Tamanho mínimo do rosto (% da largura)</label>
-    <select id="minFace">
-      <option value="0.18">18%</option>
-      <option value="0.25" selected>25% — recomendado</option>
-      <option value="0.32">32% — rígido</option>
+  </div>
+
+  <div id="cartao"></div>
+</section>
+
+<!-- ---- EQUIPE ---- -->
+<section id="aba-equipe" class="hide">
+  <div class="card">
+    <h2>Equipe hoje</h2>
+    <div id="listaEquipe"></div>
+  </div>
+</section>
+
+<!-- ---- CADASTRO ---- -->
+<section id="aba-cadastro" class="hide">
+  <div class="card">
+    <h2>Cadastrar rosto</h2>
+    <label class="lb">Origem</label>
+    <select id="cadOrigem">
+      <option value="rh">RH — entra ativo</option>
+      <option value="gestor">Gestor — vai para aprovação</option>
     </select>
-    <div class="slider">
-      <div class="row"><span>Nitidez mínima do rosto</span><b id="mSv">20</b></div>
-      <input type="range" id="mS" min="4" max="120" step="1" value="20">
+    <label class="lb">Nome</label>
+    <input type="text" id="cadNome" autocomplete="off">
+    <label class="lb">Matrícula</label>
+    <input type="text" id="cadMat" autocomplete="off">
+    <label class="lb">Equipe</label>
+    <select id="cadEquipe"></select>
+
+    <div class="camwrap" style="aspect-ratio:1/1">
+      <video id="videoCad" playsinline muted autoplay></video>
+      <div class="camoff" id="camOffCad">A câmera liga na primeira captura</div>
     </div>
-    <p class="note" style="margin-bottom:12px">Variância do laplaciano sobre o rosto reamostrado para 160&times;160 — por isso o número é comparável entre aparelhos. Referência medida: imagem nítida ≈ 48, mesma imagem com desfoque forte ≈ 6. Olhe o valor ao vivo na aba Cadastro e suba o limiar até bloquear só o que realmente está tremido no <b>seu</b> aparelho.</p>
-    <p class="note" id="backendNote"></p>
+
+    <div class="shots" id="cadShots"></div>
+    <button class="act ghost" id="btnCapturarCad">Capturar 1/3</button>
+    <button class="act" id="btnSalvarCad" disabled>Salvar cadastro</button>
+    <p class="nota" style="margin-top:10px">Sem boné, óculos escuros ou máscara. Mova um pouco a cabeça entre as capturas.</p>
+  </div>
+</section>
+
+<!-- ---- AJUSTES ---- -->
+<section id="aba-ajustes" class="hide">
+  <div class="card">
+    <h2>Diagnóstico</h2>
+    <div class="diag"><span>Motor</span><span id="diagBackend">—</span></div>
+    <div class="diag"><span>Pessoas na carga</span><span id="diagCarga">—</span></div>
+    <div class="diag"><span>Desvio do relógio</span><span id="diagDeriva">—</span></div>
+    <div class="diag"><span>Armazenamento fixado</span><span id="diagPersist">—</span></div>
+    <div class="diag"><span>Marcações na fila</span><span id="diagFila">—</span></div>
+    <button class="act ghost" id="btnSync">Enviar fila agora</button>
   </div>
 
   <div class="card">
-    <h2>Dados</h2>
-    <p class="note" style="margin-bottom:10px">Tudo fica só neste aparelho (IndexedDB). Nada é enviado para nenhum servidor — não há servidor.</p>
-    <button class="act danger" id="wipe">Apagar tudo (cadastros + log)</button>
+    <h2>Fila de envio</h2>
+    <div id="listaFila"></div>
+    <p class="nota" style="margin-top:10px">Só sai da fila o que o servidor confirmar. Rejeitada fica aqui até alguém resolver.</p>
+  </div>
+
+  <div class="card">
+    <h2>Sessão</h2>
+    <button class="act danger" id="btnSair">Sair deste aparelho</button>
   </div>
 </section>
 
 </div>
 
+<div id="toast" class="toast hide"></div>
+
 <script src="./vendor/face-api.js"></script>
-<script>
-/* ============================================================
-   Efrat — PoC de ponto por reconhecimento facial
-   100% client-side. face-api.js (@vladmandic 1.7.15).
-   ============================================================ */
-
-const $ = id => document.getElementById(id);
-const S = {
-  ready:false, people:[], log:[], shots:[],
-  mode:'1n1', streamE:null, streamP:null, loopE:null, loopP:null,
-  cfg:{ tA:0.45, tG:0.58, inputSize:416, minFace:0.25, minSharp:20 },
-  lastQ:null, busy:false, lat:0, noFace:{E:0,P:0},
-  track:{ E:{box:null,miss:0}, P:{box:null,miss:0} }, mode2:{E:'full',P:'full'},
-  good:{ E:{cv:null, at:0}, P:{cv:null, at:0} }
-};
-
-/* ---------- IndexedDB mínimo ---------- */
-const DB = (()=> {
-  let db;
-  const open = () => new Promise((res,rej)=>{
-    if(db) return res(db);
-    const r = indexedDB.open('efrat-ponto', 1);
-    r.onupgradeneeded = e => {
-      const d = e.target.result;
-      if(!d.objectStoreNames.contains('kv')) d.createObjectStore('kv');
-    };
-    r.onsuccess = e => { db = e.target.result; res(db); };
-    r.onerror = e => rej(e);
-  });
-  return {
-    async get(k){ const d=await open(); return new Promise((res,rej)=>{
-      const t=d.transaction('kv','readonly').objectStore('kv').get(k);
-      t.onsuccess=()=>res(t.result); t.onerror=rej; }); },
-    async set(k,v){ const d=await open(); return new Promise((res,rej)=>{
-      const t=d.transaction('kv','readwrite').objectStore('kv').put(v,k);
-      t.onsuccess=()=>res(); t.onerror=rej; }); }
-  };
-})();
-
-async function saveState(){
-  await DB.set('people', S.people.map(p=>({
-    id:p.id, name:p.name, thumb:p.thumb, createdAt:p.createdAt,
-    templates: p.templates.map(t=>Array.from(t))
-  })));
-  await DB.set('log', S.log);
-  await DB.set('cfg', S.cfg);
-}
-async function loadState(){
-  const p = await DB.get('people');
-  if(p) S.people = p.map(x=>({...x, templates:x.templates.map(t=>new Float32Array(t))}));
-  const l = await DB.get('log'); if(l) S.log = l;
-  const c = await DB.get('cfg'); if(c) S.cfg = {...S.cfg, ...c};
-}
-
-/* ---------- Tabs ---------- */
-document.querySelectorAll('nav button').forEach(b=>{
-  b.onclick = ()=>{
-    document.querySelectorAll('nav button').forEach(x=>x.classList.remove('on'));
-    b.classList.add('on');
-    ['enroll','punch','log','cfg'].forEach(t=>
-      $('tab-'+t).classList.toggle('hide', t!==b.dataset.tab));
-    if(b.dataset.tab==='log') renderLog();
-  };
-});
-
-/* ---------- Carregar modelos ---------- */
-async function boot(){
-  await loadState();
-  applyCfgToUI();
-  renderPeople();
-  try{
-    const t0 = performance.now();
-    try { await faceapi.tf.setBackend('webgl'); await faceapi.tf.ready(); }
-    catch(e){ await faceapi.tf.setBackend('cpu'); await faceapi.tf.ready(); }
-    await faceapi.nets.tinyFaceDetector.loadFromUri('./models');
-    await faceapi.nets.faceLandmark68Net.loadFromUri('./models');
-    await faceapi.nets.faceRecognitionNet.loadFromUri('./models');
-    S.ready = true;
-    const ms = Math.round(performance.now()-t0);
-    $('status').textContent = 'pronto · ' + faceapi.tf.getBackend();
-    $('status').className = 'pill ok';
-    $('backendNote').innerHTML = 'Backend TensorFlow.js: <b>'+faceapi.tf.getBackend()+
-      '</b> · modelos carregados em '+ms+' ms. Se aparecer <b>cpu</b> em vez de <b>webgl</b>, o reconhecimento fica bem mais lento — é limitação do aparelho/navegador, não do código.';
-  }catch(e){
-    $('status').textContent = 'erro ao carregar';
-    $('status').className = 'pill bad';
-    alert('Falha ao carregar os modelos: '+e.message+
-      '\n\nVerifique se a pasta /models foi publicada junto com o index.html.');
-  }
-}
-
-/* ---------- Câmera ---------- */
-async function startCam(which){
-  const vid = which==='E' ? $('vidE') : $('vidP');
-  const off = which==='E' ? $('offE') : $('offP');
-  try{
-    const st = await navigator.mediaDevices.getUserMedia({
-      video:{ facingMode:'user', width:{ideal:720}, height:{ideal:960} }, audio:false });
-    vid.srcObject = st;
-    await vid.play();
-    off.classList.add('hide');
-    if(which==='E'){ S.streamE=st; startLoop('E'); $('camBtnE').textContent='Desligar'; }
-    else { S.streamP=st; startLoop('P'); $('camBtnP').textContent='Desligar';
-           $('punchBtn').disabled = false; }
-  }catch(e){
-    alert('Não consegui acessar a câmera.\n\n'+e.name+': '+e.message+
-      '\n\nA câmera só funciona em HTTPS (ou localhost). Se você abriu o arquivo direto do celular, publique num host HTTPS.');
-  }
-}
-function stopCam(which){
-  const st = which==='E' ? S.streamE : S.streamP;
-  if(st) st.getTracks().forEach(t=>t.stop());
-  S.track[which] = {box:null, miss:0};
-  if(which==='E'){ S.streamE=null; if(S.loopE) S.loopE.stop=true; S.loopE=null;
-    $('offE').classList.remove('hide');
-    $('camBtnE').textContent='Ligar câmera'; $('capBtn').disabled=true; }
-  else { S.streamP=null; if(S.loopP) S.loopP.stop=true; S.loopP=null;
-    $('offP').classList.remove('hide');
-    $('camBtnP').textContent='Ligar câmera'; $('punchBtn').disabled=true; }
-}
-$('camBtnE').onclick = ()=> S.streamE ? stopCam('E') : startCam('E');
-$('camBtnP').onclick = ()=> S.streamP ? stopCam('P') : startCam('P');
-
-/* ---------- Qualidade ---------- */
-const work = document.createElement('canvas');
-const wctx = work.getContext('2d', {willReadFrequently:true});
-
-function grabFrame(vid){
-  work.width = vid.videoWidth; work.height = vid.videoHeight;
-  wctx.drawImage(vid, 0, 0);
-  return work;
-}
-// O recorte do rosto é sempre reamostrado para 160x160 antes de medir.
-// Sem isso a "nitidez" dependeria da resolução da câmera e o mesmo limiar
-// se comportaria de forma diferente em cada aparelho.
-const NORM = 160;
-const sc = document.createElement('canvas'); sc.width = sc.height = NORM;
-const sctx = sc.getContext('2d', {willReadFrequently:true});
-
-function faceMetrics(canvas, box){
-  const x = Math.max(0, Math.round(box.x)), y = Math.max(0, Math.round(box.y));
-  const w = Math.min(canvas.width-x, Math.round(box.width));
-  const h = Math.min(canvas.height-y, Math.round(box.height));
-  if(w<10||h<10) return {sharp:0, bright:0};
-  sctx.drawImage(canvas, x, y, w, h, 0, 0, NORM, NORM);
-  const d = sctx.getImageData(0,0,NORM,NORM).data;
-  const g = new Float32Array(NORM*NORM);
-  let sum=0;
-  for(let i=0,j=0;i<d.length;i+=4,j++){
-    const v = 0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
-    g[j]=v; sum+=v;
-  }
-  const bright = sum/(NORM*NORM);
-  // variância do laplaciano = nitidez
-  let ls=0, ls2=0, n=0;
-  for(let yy=1;yy<NORM-1;yy++) for(let xx=1;xx<NORM-1;xx++){
-    const i=yy*NORM+xx;
-    const l = 4*g[i]-g[i-1]-g[i+1]-g[i-NORM]-g[i+NORM];
-    ls+=l; ls2+=l*l; n++;
-  }
-  const mean=ls/n;
-  return { sharp: ls2/n - mean*mean, bright };
-}
-function poseYaw(lm){
-  const p = lm.positions;
-  const le=p[36], re=p[45], nose=p[30];
-  const mid=(le.x+re.x)/2, span=Math.abs(re.x-le.x)||1;
-  return (nose.x-mid)/span; // ~0 frontal, ±0.35 = giro forte
-}
-// Medido no próprio modelo deste app: boné, capacete e capuz continuam sendo
-// reconhecidos (distância 0.15–0.30). Óculos escuros, máscara e balaclava
-// derrubam a DETECÇÃO — o rosto simplesmente não é achado. Por isso a dica
-// certa quando não há rosto é "tire o adorno", e não "melhore a luz".
-const DICA_ADORNO = 'Nenhum rosto detectado — tire óculos escuros, máscara ou touca';
-
-function judge(det, canvas, boxOverride){
-  if(!det) return {ok:false, face:false, msg:'Nenhum rosto detectado'};
-  const box = boxOverride || det.detection.box;
-  const rel = box.width / canvas.width;
-  const m = faceMetrics(canvas, box);
-  const yaw = Math.abs(poseYaw(det.landmarks));
-  const q = {
-    face:true, rel, sharp:m.sharp, bright:m.bright, yaw,
-    okSize: rel >= S.cfg.minFace,
-    okSharp: m.sharp >= S.cfg.minSharp,
-    okBright: m.bright >= 55 && m.bright <= 215,
-    okPose: yaw <= 0.30
-  };
-  q.ok = q.okSize && q.okSharp && q.okBright && q.okPose;
-  q.msg = !q.okSize  ? 'Aproxime o rosto'
-        : !q.okBright? (m.bright<55 ? 'Muito escuro' : 'Muito claro / contraluz')
-        : !q.okSharp ? 'Imagem tremida ou desfocada'
-        : !q.okPose  ? 'Olhe mais de frente'
-        : 'Qualidade OK';
-  return q;
-}
-
-/* ---------- Loop de preview ---------- */
-function opts(){ return new faceapi.TinyFaceDetectorOptions(
-  { inputSize: S.cfg.inputSize, scoreThreshold: 0.4 }); }
-
-function startLoop(which){
-  const vid = which==='E' ? $('vidE') : $('vidP');
-  const ov  = which==='E' ? $('ovE')  : $('ovP');
-  const hint= which==='E' ? $('hintE'): $('hintP');
-  const ctl = { stop:false };
-  if(which==='E') S.loopE = ctl; else S.loopP = ctl;
-
-  // Loop auto-agendado (NÃO setInterval): em aparelho lento a inferência pode
-  // demorar mais que o intervalo, e setInterval empilharia chamadas até travar.
-  (async function tick(){
-    while(!ctl.stop){
-      const t0 = performance.now();
-      await step();
-      const el = performance.now() - t0;
-      S.lat = Math.round(el);
-      await new Promise(r=> setTimeout(r, Math.max(120, 350 - el)));
-    }
-  })();
-
-  // Mesmo padrão do MediaPipe Face Mesh: o detector completo roda só quando não
-  // há rosto rastreado. Enquanto houver, recorta a região do rosto do quadro
-  // anterior e roda a inferência nesse recorte pequeno. Muito mais barato.
-  const roi = document.createElement('canvas');
-  const ROI_PX = 288;
-
-  async function step(){
-    if(!S.ready || S.busy || !vid.videoWidth) return;
-    const cv = grabFrame(vid);
-    const tr = S.track[which];
-    let det = null, boxFull = null;
-
-    if(tr.box){
-      // --- caminho rápido: inferência só no recorte do rosto ---
-      const b = tr.box, pad = b.width * 0.45;
-      const rx = Math.max(0, b.x - pad), ry = Math.max(0, b.y - pad);
-      const rw = Math.min(cv.width - rx,  b.width  + pad*2);
-      const rh = Math.min(cv.height - ry, b.height + pad*2);
-      if(rw > 20 && rh > 20){
-        roi.width = ROI_PX; roi.height = Math.round(ROI_PX * rh / rw);
-        roi.getContext('2d').drawImage(cv, rx, ry, rw, rh, 0, 0, roi.width, roi.height);
-        try {
-          det = await faceapi.detectSingleFace(roi,
-            new faceapi.TinyFaceDetectorOptions({inputSize:224, scoreThreshold:0.35}))
-            .withFaceLandmarks();
-        } catch(e){ det = null; }
-        if(det){
-          const k = rw / roi.width, d = det.detection.box;
-          boxFull = { x: rx + d.x*k, y: ry + d.y*k, width: d.width*k, height: d.height*k };
-          tr.box = boxFull; tr.miss = 0; S.mode2[which] = 'track';
-        } else if(++tr.miss >= 2){ tr.box = null; }
-      } else { tr.box = null; }
-    }
-
-    if(!det && !tr.box){
-      // --- caminho completo: relocaliza o rosto no quadro inteiro ---
-      try { det = await faceapi.detectSingleFace(cv, opts()).withFaceLandmarks(); }
-      catch(e){ return; }
-      S.mode2[which] = 'full';
-      if(det){ boxFull = det.detection.box; tr.box = boxFull; tr.miss = 0; }
-    }
-    if(ctl.stop) return;
-    const q = judge(det, cv, boxFull);
-    S.lastQ = q;
-    // Guarda o ÚLTIMO FRAME APROVADO. Sem isso, o usuário vê "qualidade OK",
-    // toca no botão, e até o toque chegar o rosto já se moveu — a captura era
-    // julgada num frame diferente do que ele viu aprovado.
-    if(q.ok){
-      const g = S.good[which];
-      if(!g.cv) g.cv = document.createElement('canvas');
-      if(g.cv.width!==cv.width || g.cv.height!==cv.height){
-        g.cv.width = cv.width; g.cv.height = cv.height;
-      }
-      g.cv.getContext('2d').drawImage(cv, 0, 0);
-      g.at = performance.now();
-    }
-    // overlay
-    ov.width = vid.videoWidth; ov.height = vid.videoHeight;
-    const c = ov.getContext('2d');
-    c.clearRect(0,0,ov.width,ov.height);
-    if(det && boxFull){
-      const b = boxFull;
-      c.strokeStyle = q.ok ? '#3fb984' : '#e0a740';
-      c.lineWidth = Math.max(3, ov.width/160);
-      c.strokeRect(b.x,b.y,b.width,b.height);
-    }
-    S.noFace[which] = det ? 0 : S.noFace[which] + 1;
-    hint.classList.remove('hide');
-    hint.textContent = (S.noFace[which] >= 5 ? DICA_ADORNO : q.msg)
-                     + (S.lat ? ' · ' + S.lat + ' ms' : '');
-    hint.style.color = q.ok ? '#3fb984' : '#e0a740';
-    if(which==='E'){
-      $('qE0').textContent = det ? 'sim' : 'não';
-      $('qE0').className = 'val ' + (det?'ok':'bad');
-      $('qE1').textContent = det ? Math.round(q.rel*100)+'%' : '—';
-      $('qE1').className = 'val ' + (q.okSize?'ok':'bad');
-      $('qE2').textContent = det ? Math.round(q.sharp) : '—';
-      $('qE2').className = 'val ' + (q.okSharp?'ok':'bad');
-      $('qE3').textContent = det ? Math.round(q.bright) : '—';
-      $('qE3').className = 'val ' + (q.okBright?'ok':'bad');
-      $('capBtn').disabled = !(q.ok && S.shots.length<3);
-    }
-  }
-}
-
-// Usa o frame aprovado se ele for recente; senão pega um novo do vídeo.
-function bestFrame(which, vid){
-  const g = S.good[which];
-  if(g.cv && performance.now() - g.at < 1200) return g.cv;
-  return grabFrame(vid);
-}
-// Tenta algumas vezes antes de desistir — cobre o caso de a pessoa ter se
-// mexido bem na hora do toque.
-async function captureGood(which, vid, tries=3){
-  for(let i=0;i<tries;i++){
-    const cv = bestFrame(which, vid);
-    const det = await faceapi.detectSingleFace(cv, opts())
-      .withFaceLandmarks().withFaceDescriptor();
-    if(det){
-      const q = judge(det, cv);
-      if(q.ok) return { cv, det, q };
-      if(i===tries-1) return { cv, det, q, failed:true };
-    } else if(i===tries-1) return { cv, det:null, q:null, failed:true };
-    await new Promise(r=>setTimeout(r, 300));
-  }
-}
-
-/* ---------- Cadastro ---------- */
-function thumbOf(canvas, box){
-  const t = document.createElement('canvas');
-  t.width = t.height = 128;
-  const pad = box.width*0.28;
-  t.getContext('2d').drawImage(canvas,
-    Math.max(0,box.x-pad), Math.max(0,box.y-pad),
-    box.width+pad*2, box.height+pad*2, 0,0,128,128);
-  return t.toDataURL('image/jpeg', 0.72);
-}
-
-$('capBtn').onclick = async ()=>{
-  if(S.busy) return; S.busy = true;
-  $('capBtn').disabled = true; $('capBtn').textContent = '…';
-  try{
-    const vid = $('vidE');
-    const r = await captureGood('E', vid);
-    if(r.failed){
-      alert(r.det ? 'Qualidade insuficiente: '+r.q.msg : DICA_ADORNO);
-      return;
-    }
-    S.shots.push({ desc: r.det.descriptor, thumb: thumbOf(r.cv, r.det.detection.box) });
-    renderShots();
-  } finally {
-    S.busy = false;
-    $('capBtn').textContent = 'Capturar ' + (S.shots.length<3 ? (S.shots.length+1)+'/3' : '');
-  }
-};
-function renderShots(){
-  const el = $('shots');
-  el.innerHTML = '';
-  for(let i=0;i<3;i++){
-    const d = document.createElement('div');
-    if(S.shots[i]){ const im=new Image(); im.src=S.shots[i].thumb; d.appendChild(im); }
-    else d.textContent = i+1;
-    el.appendChild(d);
-  }
-  $('saveBtn').disabled = S.shots.length<3 || !$('name').value.trim();
-  $('capBtn').textContent = S.shots.length<3 ? 'Capturar '+(S.shots.length+1)+'/3' : 'Completo';
-}
-$('name').oninput = ()=> renderShots();
-
-$('saveBtn').onclick = async ()=>{
-  const name = $('name').value.trim();
-  if(!name || S.shots.length<3) return;
-  // coerência interna do cadastro
-  const d = [
-    faceapi.euclideanDistance(S.shots[0].desc, S.shots[1].desc),
-    faceapi.euclideanDistance(S.shots[0].desc, S.shots[2].desc),
-    faceapi.euclideanDistance(S.shots[1].desc, S.shots[2].desc)
-  ];
-  const worst = Math.max(...d);
-  if(worst > 0.55 && !confirm(
-    'As 3 capturas estão pouco parecidas entre si (maior distância interna: '+worst.toFixed(3)+
-    ').\n\nIsso normalmente significa que uma delas pegou outra pessoa, ficou desfocada ou muito de lado — e vai gerar falso negativo depois.\n\nSalvar assim mesmo?')) return;
-
-  S.people.push({
-    id: 'p'+Date.now(), name,
-    templates: S.shots.map(s=>s.desc),
-    thumb: S.shots[0].thumb,
-    createdAt: new Date().toISOString(),
-    coherence: worst
-  });
-  S.shots = []; $('name').value = '';
-  renderShots(); renderPeople();
-  await saveState();
-  alert('Cadastro salvo. Coerência interna das capturas: '+worst.toFixed(3)+
-        ' (quanto menor, melhor — abaixo de 0.40 é ótimo).');
-};
-
-function renderPeople(){
-  const el = $('plist');
-  $('pcount').textContent = S.people.length ? '— '+S.people.length : '';
-  if(!S.people.length){ el.innerHTML = '<p class="note">Ninguém cadastrado ainda.</p>'; }
-  else {
-    el.innerHTML = '';
-    S.people.forEach(p=>{
-      const d = document.createElement('div'); d.className='person';
-      d.innerHTML = '<img src="'+p.thumb+'"><div><div class="nm"></div>'+
-        '<div class="mt">coerência '+(p.coherence??0).toFixed(3)+' · '+
-        new Date(p.createdAt).toLocaleDateString('pt-BR')+'</div></div>'+
-        '<button>remover</button>';
-      d.querySelector('.nm').textContent = p.name;
-      d.querySelector('button').onclick = async ()=>{
-        if(!confirm('Remover '+p.name+'?')) return;
-        S.people = S.people.filter(x=>x.id!==p.id);
-        renderPeople(); await saveState();
-      };
-      el.appendChild(d);
-    });
-  }
-  const sel = $('who');
-  sel.innerHTML = S.people.map(p=>'<option value="'+p.id+'"></option>').join('');
-  [...sel.options].forEach((o,i)=> o.textContent = S.people[i].name);
-}
-
-/* ---------- Marcação ---------- */
-document.querySelectorAll('#modeSeg button').forEach(b=>{
-  b.onclick = ()=>{
-    document.querySelectorAll('#modeSeg button').forEach(x=>x.classList.remove('on'));
-    b.classList.add('on'); S.mode = b.dataset.mode;
-    $('selWrap').classList.toggle('hide', S.mode!=='1n1');
-  };
-});
-
-function bestMatch(desc, pool){
-  return pool.map(p=>({
-    p, d: Math.min(...p.templates.map(t=>faceapi.euclideanDistance(desc,t)))
-  })).sort((a,b)=>a.d-b.d);
-}
-
-$('punchBtn').onclick = async ()=>{
-  if(!S.people.length){ alert('Cadastre alguém primeiro.'); return; }
-  if(S.busy) return; S.busy = true;
-  $('punchBtn').textContent = 'PROCESSANDO…';
-  const t0 = performance.now();
-  try{
-    const r = await captureGood('P', $('vidP'));
-    if(r.failed){
-      const msg = r.det ? 'Captura reprovada: '+r.q.msg : DICA_ADORNO;
-      S.log.unshift({ ts:new Date().toISOString(), name:'—', mode:S.mode,
-        dist:null, runner:null, verdict:'FTA', ms:Math.round(performance.now()-t0), msg });
-      await saveState();
-      showResult({verdict:'FTA', msg});
-      return;
-    }
-    const cv = r.cv, det = r.det;
-
-    let target, ranked=null;
-    if(S.mode==='1n1'){
-      target = S.people.find(p=>p.id===$('who').value) || S.people[0];
-      ranked = bestMatch(det.descriptor, [target]);
-    } else {
-      ranked = bestMatch(det.descriptor, S.people);
-      target = ranked[0].p;
-    }
-    const dist = ranked[0].d;
-    const runner = ranked[1] ? ranked[1].d : null;
-    const ms = Math.round(performance.now()-t0);
-    const verdict = dist <= S.cfg.tA ? 'ACEITO'
-                  : dist <= S.cfg.tG ? 'REVISAR' : 'REJEITADO';
-
-    S.log.unshift({
-      ts: new Date().toISOString(), name: target.name, mode: S.mode,
-      dist: +dist.toFixed(4), runner: runner!=null ? +runner.toFixed(4) : null,
-      verdict, ms, thumb: thumbOf(cv, det.detection.box)
-    });
-    if(S.log.length>200) S.log.length = 200;
-    await saveState();
-    showResult({verdict, name:target.name, dist, runner, ms, mode:S.mode,
-                thumb:S.log[0].thumb});
-  } finally {
-    S.busy = false;
-    $('punchBtn').textContent = 'MARCAR PONTO';
-  }
-};
-
-function showResult(r){
-  const box = $('resultBox');
-  if(r.verdict==='FTA'){
-    box.innerHTML = '<div class="result warn"><div class="verdict">CAPTURA FALHOU</div>'+
-      '<div class="who">'+r.msg+'</div>'+
-      '<div class="meta">Isso conta como FTA (Failure To Acquire) — atrito de uso, não erro biométrico. '+
-      'No sistema real, o colaborador tenta de novo ou cai no fallback. Nunca pode virar falta.</div></div>';
-    return;
-  }
-  const cls = r.verdict==='ACEITO' ? 'ok' : r.verdict==='REVISAR' ? 'warn' : 'bad';
-  const head = r.verdict==='ACEITO' ? 'PONTO REGISTRADO'
-             : r.verdict==='REVISAR' ? 'REGISTRADO — REVISAR'
-             : 'NÃO RECONHECIDO';
-  let meta = 'Distância: <b>'+r.dist.toFixed(4)+'</b> · limiar de aceite '+S.cfg.tA.toFixed(2)+
-             ' · zona cinzenta até '+S.cfg.tG.toFixed(2)+'<br>'+
-             'Processamento: '+r.ms+' ms · '+new Date().toLocaleTimeString('pt-BR');
-  if(r.mode==='1n' && r.runner!=null){
-    const margem = r.runner - r.dist;
-    meta += '<br>2º colocado: '+r.runner.toFixed(4)+' · <b>margem '+margem.toFixed(4)+'</b>'+
-      (margem < 0.10 ? ' ← margem baixa: em 1:N isso é falsa identificação esperando acontecer' : '');
-  }
-  if(r.verdict==='REVISAR')
-    meta += '<br>Zona cinzenta: o ponto é registrado, mas sinalizado ao RH. O ponto nunca é negado por falha técnica.';
-  if(r.verdict==='REJEITADO')
-    meta += '<br>No sistema real, aqui entra o fallback (PIN + validação do gestor).';
-
-  box.innerHTML = '<div class="result '+cls+'">'+
-    '<div class="verdict">'+head+'</div>'+
-    '<div class="who">'+ (r.verdict==='REJEITADO' ? 'mais próximo: ' : '') +
-      escapeHtml(r.name)+'</div><div class="meta">'+meta+'</div></div>';
-}
-function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
-
-/* ---------- Log ---------- */
-function renderLog(){
-  const b = $('logBody');
-  b.innerHTML = '';
-  S.log.slice(0,60).forEach(r=>{
-    const color = r.verdict==='ACEITO'?'#3fb984':r.verdict==='REVISAR'?'#e0a740':r.verdict==='FTA'?'#8fa3b5':'#e05a5a';
-    const tr = document.createElement('tr');
-    tr.innerHTML = '<td>'+new Date(r.ts).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})+
-      '</td><td><span class="dot" style="background:'+color+'"></span><span class="nmx"></span></td>'+
-      '<td>'+(r.mode==='1n'?'1:N':'1:1')+'</td><td class="d">'+r.dist.toFixed(3)+'</td><td>'+r.ms+'</td>';
-    tr.querySelector('.nmx').textContent = r.name;
-    b.appendChild(tr);
-  });
-  const ds = S.log.filter(r=>r.dist!=null).map(r=>r.dist);
-  const fta = S.log.filter(r=>r.verdict==='FTA').length;
-  $('sN').textContent = S.log.length;
-  $('sA').textContent = S.log.filter(r=>r.verdict==='ACEITO').length;
-  $('sR').textContent = S.log.filter(r=>r.verdict==='REJEITADO').length + ' / ' + fta;
-  $('sMin').textContent = ds.length ? Math.min(...ds).toFixed(3) : '—';
-  $('sMax').textContent = ds.length ? Math.max(...ds).toFixed(3) : '—';
-  $('sAvg').textContent = ds.length ? (ds.reduce((a,c)=>a+c,0)/ds.length).toFixed(3) : '—';
-  // histograma 0 → 1.2 em 24 baldes
-  const bins = new Array(24).fill(0);
-  ds.forEach(d=> bins[Math.min(23, Math.max(0, Math.floor(d/0.05)))]++);
-  const mx = Math.max(1, ...bins);
-  $('hist').innerHTML = bins.map(v=>'<div style="height:'+(v/mx*100)+'%"></div>').join('');
-}
-$('csvBtn').onclick = ()=>{
-  const rows = [['timestamp','pessoa','modo','distancia','segundo_colocado','veredito','ms']]
-    .concat(S.log.map(r=>[r.ts,r.name,r.mode,r.dist,r.runner??'',r.verdict,r.ms]));
-  const csv = rows.map(r=>r.map(x=>'"'+String(x).replace(/"/g,'""')+'"').join(',')).join('\n');
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-  a.download = 'efrat-ponto-teste.csv'; a.click();
-};
-$('clearLog').onclick = async ()=>{
-  if(!confirm('Limpar o log de tentativas?')) return;
-  S.log = []; await saveState(); renderLog();
-};
-
-/* ---------- Config ---------- */
-function applyCfgToUI(){
-  $('tA').value = S.cfg.tA; $('tAv').textContent = S.cfg.tA.toFixed(2);
-  $('tG').value = S.cfg.tG; $('tGv').textContent = S.cfg.tG.toFixed(2);
-  $('inputSize').value = S.cfg.inputSize;
-  $('minFace').value = S.cfg.minFace;
-  $('mS').value = S.cfg.minSharp; $('mSv').textContent = S.cfg.minSharp;
-}
-$('tA').oninput = async e=>{ S.cfg.tA = +e.target.value; $('tAv').textContent = S.cfg.tA.toFixed(2); await saveState(); };
-$('tG').oninput = async e=>{ S.cfg.tG = +e.target.value; $('tGv').textContent = S.cfg.tG.toFixed(2); await saveState(); };
-$('inputSize').onchange = async e=>{ S.cfg.inputSize = +e.target.value; await saveState(); };
-$('minFace').onchange = async e=>{ S.cfg.minFace = +e.target.value; await saveState(); };
-$('mS').oninput = async e=>{ S.cfg.minSharp = +e.target.value; $('mSv').textContent = S.cfg.minSharp; await saveState(); };
-$('wipe').onclick = async ()=>{
-  if(!confirm('Apagar TODOS os cadastros e o log deste aparelho?')) return;
-  S.people = []; S.log = []; S.shots = [];
-  await saveState(); renderPeople(); renderShots(); renderLog();
-};
-
-/* ---------- Service worker (offline) ---------- */
-if('serviceWorker' in navigator)
-  navigator.serviceWorker.register('./sw.js').catch(()=>{});
-
-boot();
-</script>
+<script src="./js/config.js"></script>
+<script type="module" src="./js/app.js"></script>
 </body>
 </html>
