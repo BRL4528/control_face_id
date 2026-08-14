@@ -29,5 +29,11 @@ window.EFRAT_CFG = Object.assign({
   cooldownMs: 60000,    // mesma pessoa não marca de novo dentro deste tempo
   geoTimeoutMs: 3000,   // fila não pode parar esperando GPS
   syncIntervalMs: 60000,
-  loteMax: 50
+  loteMax: 50,
+
+  // Painel do RH. Degraus de presença por equipe e limiar de alarme de
+  // registro manual (o mesmo do monitor diário em n8n).
+  limiarPresenca: { bom: 0.95, atencao: 0.85, serio: 0.70 },
+  alarmeManual: 20,     // taxa de registro manual (%) que acende o alerta
+  chartCdn: 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js'
 }, window.EFRAT_CFG || {});

@@ -149,3 +149,118 @@ export function gestorDeveMarcar(marcacoesDoGestorHoje, agoraMs, cooldownMs) {
   const ultima = ms.slice().sort((a, b) => String(b.marcado_em).localeCompare(String(a.marcado_em)))[0];
   return (agoraMs - Date.parse(ultima.marcado_em)) >= cooldownMs;
 }
+
+/* ---------------------------------------------- painel desktop do RH */
+
+// Limiares padrão de presença. Espelham window.EFRAT_CFG.limiarPresenca, mas
+// ficam aqui para a função pura rodar em Node sem depender do config do browser.
+export const LIMIAR_PRESENCA = { bom: 0.95, atencao: 0.85, serio: 0.70 };
+
+/**
+ * Presença de cada equipe HOJE. Presença é gente que apareceu, não horário:
+ * sem escala cadastrada, quem não marcou hoje conta como ausente.
+ *
+ *   esperados = pessoas ativas da equipe, gestor incluído
+ *   presentes = quantos desses têm ≥ 1 marcação com marcado_dia == hoje
+ *
+ * Equipe sem esperados não vira card (não há o que cobrar). Equipe com
+ * esperados e zero presentes é presenca 0 — o caso que o RH precisa ver.
+ * `hoje` entra como parâmetro ('YYYY-MM-DD') para a função ser testável.
+ */
+export function presencaPorEquipe(pessoas, marcacoes, equipes, hoje) {
+  const ativos = (pessoas || []).filter(p => p && p.ativo);
+  const presentesPorEquipe = {};
+  const nomesPresentes = {};
+  for (const m of (marcacoes || [])) {
+    if (!m || m.marcado_dia !== hoje) continue;
+    (nomesPresentes[m.equipe_id] = nomesPresentes[m.equipe_id] || new Set()).add(m.pessoa_id);
+  }
+  for (const k of Object.keys(nomesPresentes)) presentesPorEquipe[k] = nomesPresentes[k];
+
+  return (equipes || []).map(e => {
+    const doTime = ativos.filter(p => p.equipe_id === e.equipe_id);
+    const esperados = doTime.length;
+    const marcaram = presentesPorEquipe[e.equipe_id] || new Set();
+    const presentes = doTime.filter(p => marcaram.has(p.pessoa_id)).length;
+    const ausentes = doTime.filter(p => !marcaram.has(p.pessoa_id)).map(p => p.nome || p.pessoa_id);
+    const presenca = esperados === 0 ? null : presentes / esperados;
+    return {
+      equipe_id: e.equipe_id, nome: e.nome,
+      esperados, presentes, presenca,
+      ausentes,
+      status: presenca == null ? null : statusPresenca(presenca, LIMIAR_PRESENCA)
+    };
+  }).filter(c => c.esperados > 0)
+    .sort((a, b) => a.presenca - b.presenca);   // pior primeiro
+}
+
+/**
+ * Degrau de status a partir da taxa de presença. Quatro degraus fixos, nunca
+ * uma rampa contínua. Os limiares são inclusivos por baixo: exatamente 0,95 é
+ * `bom`, exatamente 0,85 é `atencao` — é a borda onde o >= costuma errar.
+ */
+export function statusPresenca(taxa, limiares) {
+  const L = limiares || LIMIAR_PRESENCA;
+  if (taxa >= L.bom) return 'bom';
+  if (taxa >= L.atencao) return 'atencao';
+  if (taxa >= L.serio) return 'serio';
+  return 'critico';
+}
+
+/**
+ * Série de contagens por dia, para o gráfico de linha. Preenche todo dia do
+ * período com zero, mesmo os sem marcação — senão a linha liga dois pontos
+ * distantes como se o intervalo fosse contínuo, e o gráfico mente.
+ *
+ * `hoje` ('YYYY-MM-DD') é o último dia; devolve `dias` posições terminando nele.
+ * Separa biometria de manual para quem quiser duas linhas; `total` serve à única.
+ */
+export function serieDiaria(marcacoes, dias, hoje) {
+  const n = Math.max(1, dias || 30);
+  const fim = Date.parse(hoje + 'T00:00:00Z');
+  const dia1 = 86400000;
+  const rotulos = [];
+  const indice = {};
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(fim - i * dia1).toISOString().slice(0, 10);
+    indice[d] = rotulos.length;
+    rotulos.push(d);
+  }
+  const total = rotulos.map(() => 0);
+  const biometria = rotulos.map(() => 0);
+  const manual = rotulos.map(() => 0);
+  for (const m of (marcacoes || [])) {
+    const i = indice[m && m.marcado_dia];
+    if (i == null) continue;
+    total[i]++;
+    if (m.origem === 'manual') manual[i]++; else biometria[i]++;
+  }
+  return { dias: rotulos, total, biometria, manual };
+}
+
+/**
+ * Pendências agrupadas por motivo, para as barras. Uma mesma marcação pode
+ * disparar mais de um motivo (manual E relógio fora): conta em cada um, então
+ * a soma das barras pode passar do número de pendências. É de propósito — cada
+ * barra responde "quantas pendências têm ESTE problema".
+ */
+export function pendenciasPorMotivo(marcacoes, recadastros, pessoas) {
+  const papel = {};
+  for (const p of (pessoas || [])) papel[p.pessoa_id] = p.papel;
+  const c = { cinza: 0, manual: 0, gestor: 0, relogio: 0, recadastro: 0 };
+  for (const m of (marcacoes || [])) {
+    if (!m || !m.pendente) continue;
+    if (m.veredito === 'revisar') c.cinza++;
+    if (m.origem === 'manual') c.manual++;
+    if (papel[m.pessoa_id] === 'gestor') c.gestor++;
+    if (Math.abs(Number(m.deriva_relogio_ms) || 0) > 120000) c.relogio++;
+  }
+  c.recadastro = (recadastros || []).length;
+  return [
+    { chave: 'cinza', rotulo: 'Zona cinzenta', total: c.cinza },
+    { chave: 'manual', rotulo: 'Registro manual', total: c.manual },
+    { chave: 'gestor', rotulo: 'Ponto do gestor', total: c.gestor },
+    { chave: 'relogio', rotulo: 'Relógio fora', total: c.relogio },
+    { chave: 'recadastro', rotulo: 'Recadastro', total: c.recadastro }
+  ].sort((a, b) => b.total - a.total);
+}

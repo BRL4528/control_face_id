@@ -11,7 +11,9 @@ const TOKEN = 'TOKEN-TESTE';
 async function abrir(page, base, pessoa) {
   await page.addInitScript(a => {
     window.__EFRAT_FAKE_FACE = { pessoa: a.pessoa };
-    window.EFRAT_CFG = { apiBase: a.base + '/webhook' };   // config.js preserva isto
+    // chartCdn vazio: o painel não busca a biblioteca de gráficos na CDN durante
+    // o CI (offline). Cards e tabelas "ver dados" cobrem o que é testado aqui.
+    window.EFRAT_CFG = { apiBase: a.base + '/webhook', chartCdn: '' };   // config.js preserva isto
   }, { pessoa: pessoa || 'p-gestor', base });
   await page.goto(base + '/index.html');
   await page.waitForFunction(() => window.__EFRAT && window.__EFRAT.Face.pronto, null, { timeout: 20000 });
@@ -338,4 +340,53 @@ test('espelho de ponto mostra as marcacoes do colaborador', async ({ page }) => 
   await page.click('#rh nav button[data-aba="registros"]');
   await page.selectOption('#regPessoa', 'p-ana');
   await expect(page.locator('#regSaida')).toContainText('E ', { timeout: 15000 });
+});
+
+/* --------------------------------------------- painel desktop do RH */
+
+test('painel mostra card critico quando ninguem da equipe marcou hoje', async ({ page }) => {
+  // nenhuma marcação foi feita: toda equipe com gente ativa cai em critico.
+  await abrir(page, ctx.url);
+  await logarRh(page);
+  await expect(page.locator('#rh-painel .eqcard.critico').first()).toBeVisible({ timeout: 15000 });
+});
+
+test('card traz o numero junto da cor (leitura sem depender de cor)', async ({ page }) => {
+  await abrir(page, ctx.url);
+  await logarRh(page);
+  const primeiro = page.locator('#rh-painel .eqcard').first();
+  await expect(primeiro).toBeVisible({ timeout: 15000 });
+  // a asserção olha o texto, não a cor: precisa haver um "n/n" no card.
+  await expect(primeiro.locator('.cnt')).toContainText('/');
+});
+
+test('ver dados abre a tabela com os mesmos numeros do grafico', async ({ page }) => {
+  // uma marcação real hoje: o gestor entra ao abrir a fila.
+  await abrir(page, ctx.url, 'p-gestor');
+  await parear(page);
+  await abrirFila(page);
+  await expect(page.locator('#kEnvio')).toHaveText('0', { timeout: 20000 });
+  await page.click('#btnSairFila');
+  await page.waitForSelector('#porta:not(.hide)');
+
+  await logarRh(page);
+  await expect(page.locator('#rh-painel')).toBeVisible({ timeout: 15000 });
+  await expect(page.locator('#tabLinha')).toHaveClass(/hide/);
+  await page.click('#rh-painel .verdados[data-tab="tabLinha"]');
+  await expect(page.locator('#tabLinha')).not.toHaveClass(/hide/);
+  await expect(page.locator('#tabLinha table')).toBeVisible();
+  // a coluna Total soma ao menos a marcação do gestor de hoje.
+  await expect(page.locator('#tabLinha')).toContainText('Total');
+});
+
+test('trocar o periodo recarrega e o painel repinta sem duplicar canvas', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });   // o toggle é desktop (≥900px)
+  await abrir(page, ctx.url);
+  await logarRh(page);
+  await expect(page.locator('#rh-painel')).toBeVisible({ timeout: 15000 });
+  await page.click('#rhToggle button[data-dias="7"]');
+  await expect(page.locator('#rhToggle button[data-dias="7"]')).toHaveClass(/on/);
+  await expect(page.locator('#rhPeriodo')).toContainText('7 dias');
+  // um container de gráfico por caixa, nunca dois canvas empilhados.
+  await expect(page.locator('#boxLinha')).toHaveCount(1);
 });

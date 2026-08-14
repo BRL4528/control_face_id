@@ -116,6 +116,71 @@
   .shots img{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
   .esp{display:flex;gap:8px;padding:9px 0;border-top:1px solid var(--line);font-size:13px}
   .esp .d{color:var(--muted);width:92px;flex:none;font-variant-numeric:tabular-nums}
+
+  /* ---------------- painel do RH (viz) ---------------- */
+  /* Paleta de dados. Escreva contra os papéis, nunca contra o hex.
+     Os quatro status são iguais nos dois modos; só surface/texto/série mudam. */
+  .viz{
+    --v-surface:#182430; --v-text:#e8eef4; --v-text2:#8fa3b5;
+    --serie-1:#3987e5; --serie-2:#d95926; --serie-3:#199e70;
+    --st-bom:#0ca30c; --st-atencao:#fab219; --st-serio:#ec835a; --st-critico:#d03b3b;
+    --v-grid:#2c3e50;
+  }
+  .periodo{display:none;gap:4px;background:var(--surface);padding:3px;border-radius:9px}
+  .periodo button{border:0;background:transparent;color:var(--muted);padding:7px 12px;
+    border-radius:7px;font-size:12px;font-weight:600;cursor:pointer}
+  .periodo button.on{background:var(--surface2);color:var(--txt)}
+
+  /* 4 stat tiles */
+  .tiles{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px}
+  .tile{background:var(--v-surface);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .tile .lab{font-size:10px;color:var(--v-text2);text-transform:uppercase;letter-spacing:.5px}
+  .tile .val{font-size:28px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums}
+  .tile .var{font-size:11px;color:var(--v-text2);margin-top:2px}  /* variação sempre cinza */
+
+  /* grid de cards de equipe (semáforo) */
+  .cards{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:16px}
+  .eqcard{position:relative;background:var(--v-surface);border:1px solid var(--line);
+    border-radius:12px;padding:12px 12px 12px 16px;overflow:hidden}
+  .eqcard .bar{position:absolute;left:0;top:0;bottom:0;width:4px}   /* cor entra na barra, não no fundo */
+  .eqcard.bom .bar{background:var(--st-bom)} .eqcard.atencao .bar{background:var(--st-atencao)}
+  .eqcard.serio .bar{background:var(--st-serio)} .eqcard.critico .bar{background:var(--st-critico)}
+  .eqcard .cnt{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;display:flex;align-items:baseline;gap:6px}
+  .eqcard .ic{font-size:16px}
+  .eqcard.bom .ic{color:var(--st-bom)} .eqcard.atencao .ic{color:var(--st-atencao)}
+  .eqcard.serio .ic{color:var(--st-serio)} .eqcard.critico .ic{color:var(--st-critico)}
+  .eqcard .eqn{font-size:13px;color:var(--v-text2);margin-top:3px}
+
+  .vizrow{display:grid;grid-template-columns:1fr;gap:12px}
+  .vizbox{background:var(--v-surface);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .vizbox h3{font-size:13px;margin:0 0 4px;font-weight:600}
+  .vizbox .cap{font-size:11px;color:var(--v-text2);margin:0 0 10px}
+  .vizbox .cv{position:relative;height:220px}
+  .vizbox canvas{max-width:100%}
+  .vazio-viz{height:220px;display:flex;align-items:center;justify-content:center;
+    color:var(--v-text2);font-size:12px;text-align:center}
+  .verdados{background:transparent;border:0;color:var(--accent);font-size:11px;
+    cursor:pointer;padding:0;margin-top:8px;text-decoration:underline}
+  .tabdados{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}
+  .tabdados th,.tabdados td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line)}
+  .tabdados th{color:var(--v-text2);font-weight:600}
+  .tabdados td{font-variant-numeric:tabular-nums}
+
+  @media (min-width:900px){
+    #rh.wrap{max-width:1280px}
+    #rh header{position:sticky;top:0;background:var(--bg);z-index:20;
+      border-bottom:1px solid var(--line);align-items:center}
+    #rh header .toolbar{margin-left:auto;display:flex;gap:10px;align-items:center}
+    .periodo{display:inline-flex}
+    nav button{flex:none;padding:10px 16px}
+    .tiles{grid-template-columns:repeat(4,1fr)}
+    .cards{grid-template-columns:repeat(4,1fr)}
+    .vizrow{grid-template-columns:1fr 1fr}
+  }
+  @media (prefers-color-scheme:light){
+    .viz{--v-surface:#fcfcfb;--v-text:#0b0b0b;--v-text2:#52514e;
+      --serie-1:#2a78d6;--serie-2:#eb6834;--serie-3:#1baf7a;--v-grid:#e3e3e0}
+  }
 </style>
 </head>
 <body>
@@ -163,7 +228,15 @@
       <div class="quem" id="rhNome">RH</div>
       <div class="eq" id="rhPeriodo">últimos 30 dias</div>
     </div>
-    <button id="btnSairRh">Sair</button>
+    <div class="toolbar">
+      <div class="periodo" id="rhToggle">
+        <button data-dias="7">7d</button>
+        <button data-dias="30" class="on">30d</button>
+        <button data-dias="90">90d</button>
+      </div>
+      <button id="btnAtualizarRh">Atualizar</button>
+      <button id="btnSairRh">Sair</button>
+    </div>
   </header>
 
   <nav>

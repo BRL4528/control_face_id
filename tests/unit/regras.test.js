@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {
   tipoDaVez, vereditoPorDistancia, ranquear, precisaRevisao, emCooldown,
   itensParaRemover, agoraCorrigido, calcularDeriva, cargaValida, euclidiana, dia,
-  indicadores, espelho, gestorDeveMarcar
+  indicadores, espelho, gestorDeveMarcar,
+  presencaPorEquipe, statusPresenca, serieDiaria, pendenciasPorMotivo, LIMIAR_PRESENCA
 } from '../../js/regras.js';
 
 const CFG = { limiarAceite: 0.45, limiarCinza: 0.58 };
@@ -209,4 +210,120 @@ test('gestorDeveMarcar olha a marcacao mais recente, nao a primeira da lista', (
     { marcado_em: '2026-08-14T09:00:00.000Z' }
   ];
   assert.equal(gestorDeveMarcar(ms, agora, 90000), false);
+});
+
+
+/* --------------------------------------- painel desktop do RH */
+
+const HOJE = '2026-08-14';
+// e1: 3 esperados (inclui gestor), e2: 1 esperado (p4 inativo nao conta),
+// e3: 2 esperados e ninguem marcou hoje -> critico.
+const PPESSOAS = [
+  { pessoa_id: 'g1', nome: 'Gestor Um', equipe_id: 'e1', papel: 'gestor', ativo: true },
+  { pessoa_id: 'a', nome: 'Ana', equipe_id: 'e1', papel: 'colaborador', ativo: true },
+  { pessoa_id: 'b', nome: 'Bruno', equipe_id: 'e1', papel: 'colaborador', ativo: true },
+  { pessoa_id: 'c', nome: 'Carla', equipe_id: 'e2', papel: 'colaborador', ativo: true },
+  { pessoa_id: 'd', nome: 'Dario', equipe_id: 'e2', papel: 'colaborador', ativo: false },
+  { pessoa_id: 'e', nome: 'Elza', equipe_id: 'e3', papel: 'colaborador', ativo: true },
+  { pessoa_id: 'f', nome: 'Fabio', equipe_id: 'e3', papel: 'colaborador', ativo: true }
+];
+const PEQUIPES = [
+  { equipe_id: 'e1', nome: 'Um' },
+  { equipe_id: 'e2', nome: 'Dois' },
+  { equipe_id: 'e3', nome: 'Tres' },
+  { equipe_id: 'e9', nome: 'Vazia' }   // sem pessoas -> sem card
+];
+const PMARCS = [
+  { pessoa_id: 'g1', equipe_id: 'e1', marcado_dia: HOJE },
+  { pessoa_id: 'a', equipe_id: 'e1', marcado_dia: HOJE },
+  { pessoa_id: 'a', equipe_id: 'e1', marcado_dia: HOJE },   // dois pontos, uma pessoa
+  { pessoa_id: 'c', equipe_id: 'e2', marcado_dia: HOJE },
+  { pessoa_id: 'b', equipe_id: 'e1', marcado_dia: '2026-08-13' }  // ontem nao conta
+];
+
+test('presencaPorEquipe conta pessoa unica, gestor incluso, ausente por nao marcar', () => {
+  const cards = presencaPorEquipe(PPESSOAS, PMARCS, PEQUIPES, HOJE);
+  const e1 = cards.find(c => c.equipe_id === 'e1');
+  assert.equal(e1.esperados, 3);              // gestor + Ana + Bruno
+  assert.equal(e1.presentes, 2);              // gestor e Ana; Bruno so marcou ontem
+  assert.deepEqual(e1.ausentes, ['Bruno']);
+});
+
+test('presencaPorEquipe: pessoa inativa fica fora da conta', () => {
+  const cards = presencaPorEquipe(PPESSOAS, PMARCS, PEQUIPES, HOJE);
+  const e2 = cards.find(c => c.equipe_id === 'e2');
+  assert.equal(e2.esperados, 1);              // Dario inativo nao entra
+  assert.equal(e2.presenca, 1);
+  assert.equal(e2.status, 'bom');
+});
+
+test('presencaPorEquipe: equipe sem marcacao hoje e critica, nao sem-dado', () => {
+  const cards = presencaPorEquipe(PPESSOAS, PMARCS, PEQUIPES, HOJE);
+  const e3 = cards.find(c => c.equipe_id === 'e3');
+  assert.equal(e3.presenca, 0);
+  assert.equal(e3.status, 'critico');
+});
+
+test('presencaPorEquipe: equipe sem esperados nao vira card', () => {
+  const cards = presencaPorEquipe(PPESSOAS, PMARCS, PEQUIPES, HOJE);
+  assert.equal(cards.some(c => c.equipe_id === 'e9'), false);
+});
+
+test('presencaPorEquipe ordena do pior para o melhor', () => {
+  const cards = presencaPorEquipe(PPESSOAS, PMARCS, PEQUIPES, HOJE);
+  assert.deepEqual(cards.map(c => c.equipe_id), ['e3', 'e1', 'e2']);
+});
+
+test('statusPresenca acerta exatamente nos limiares', () => {
+  assert.equal(statusPresenca(0.95, LIMIAR_PRESENCA), 'bom');
+  assert.equal(statusPresenca(0.9499, LIMIAR_PRESENCA), 'atencao');
+  assert.equal(statusPresenca(0.85, LIMIAR_PRESENCA), 'atencao');
+  assert.equal(statusPresenca(0.8499, LIMIAR_PRESENCA), 'serio');
+  assert.equal(statusPresenca(0.70, LIMIAR_PRESENCA), 'serio');
+  assert.equal(statusPresenca(0.6999, LIMIAR_PRESENCA), 'critico');
+  assert.equal(statusPresenca(1, LIMIAR_PRESENCA), 'bom');
+  assert.equal(statusPresenca(0, LIMIAR_PRESENCA), 'critico');
+});
+
+test('serieDiaria preenche dias sem marcacao com zero', () => {
+  const s = serieDiaria([
+    { marcado_dia: '2026-08-14', origem: 'biometria' },
+    { marcado_dia: '2026-08-14', origem: 'manual' },
+    { marcado_dia: '2026-08-12', origem: 'biometria' }
+  ], 3, HOJE);
+  assert.deepEqual(s.dias, ['2026-08-12', '2026-08-13', '2026-08-14']);
+  assert.deepEqual(s.total, [1, 0, 2]);        // 13 fica zero, nao some
+  assert.deepEqual(s.biometria, [1, 0, 1]);
+  assert.deepEqual(s.manual, [0, 0, 1]);
+});
+
+test('serieDiaria ignora marcacao fora do periodo', () => {
+  const s = serieDiaria([{ marcado_dia: '2026-07-01', origem: 'biometria' }], 3, HOJE);
+  assert.deepEqual(s.total, [0, 0, 0]);
+});
+
+test('pendenciasPorMotivo conta uma marcacao em dois motivos ao mesmo tempo', () => {
+  const pessoas = [{ pessoa_id: 'x', papel: 'colaborador' }];
+  const marcs = [
+    // manual E relogio fora: conta nas duas barras
+    { pessoa_id: 'x', pendente: true, origem: 'manual', veredito: 'manual', deriva_relogio_ms: 200000 }
+  ];
+  const r = pendenciasPorMotivo(marcs, [], pessoas);
+  const por = Object.fromEntries(r.map(x => [x.chave, x.total]));
+  assert.equal(por.manual, 1);
+  assert.equal(por.relogio, 1);
+  assert.equal(por.cinza, 0);
+});
+
+test('pendenciasPorMotivo soma recadastros e ignora nao-pendentes', () => {
+  const pessoas = [{ pessoa_id: 'g', papel: 'gestor' }];
+  const marcs = [
+    { pessoa_id: 'g', pendente: true, veredito: 'aceito', origem: 'biometria' },
+    { pessoa_id: 'g', pendente: false, veredito: 'revisar', origem: 'manual' }  // nao pendente: ignora
+  ];
+  const r = pendenciasPorMotivo(marcs, [{ template_id: 't1' }], pessoas);
+  const por = Object.fromEntries(r.map(x => [x.chave, x.total]));
+  assert.equal(por.gestor, 1);
+  assert.equal(por.manual, 0);
+  assert.equal(por.recadastro, 1);
 });
