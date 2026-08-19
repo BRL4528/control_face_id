@@ -128,8 +128,7 @@ Confirmação de recebimento entre agentes não se responde: queima contexto e n
 Reprovam, todos em `fluxo.spec.js`: 264 offline · 295 envio único · 313 inativo ·
 333/343/350/372 RH · 389 espelho · 405/412/421/440 painel.
 
-**9 dos 12 são uma causa raiz só.** Sobram 3 de causa própria (264, 295, 313) — no 264 o
-page snapshot volta **vazio**, o que não parece ser o mesmo problema.
+**9 dos 12 são uma causa raiz só.** Sobram 3 de causa própria (264, 295, 313) — **mesma causa raiz entre si**, ver abaixo.
 
 ## O achado principal: deadlock de bootstrap do painel do RH
 
@@ -186,3 +185,39 @@ DevOps), a mescla não aconteceu. **Peça o número, não a afirmação.**
 
 As **até 2** linhas pendentes em `efrat_dispositivo` de produção. Não verificadas, não
 apagadas: as ferramentas de n8n aqui não leem nem apagam linha. Decisão dele.
+
+## Os 3 vermelhos de causa própria — diagnosticados, e não são bug de produto
+
+264 (offline), 295 (envio único), 313 (inativo) falham **idênticos**: `abrirPonto()` estoura
+em `#fila:not(.hide)`. Uma causa só, e é fixture.
+
+Os três fazem `ctx.estado.fora = true` **antes** da primeira `abrirPonto()`. Isso derruba o
+servidor falso, mas `navigator.onLine` no navegador segue `true`, então o app entra no ramo
+online, `Api.carga()` falha, e cai em `else if (!carga) { toast(...); return; }` — nunca chama
+`Fila.abrir()`. E não há carga em cache porque, no fluxo v3, aprovar o dispositivo **não**
+baixa carga (no fluxo antigo ela vinha junto do pareamento).
+
+**Eu suspeitei de violação da regra inviolável 2** (nenhuma operação de campo espera pela
+internet) e fui ler o código para confirmar. Estava errado: `abrirFila()` (`js/app.js:206`)
+guarda as duas chamadas atrás de `if (navigator.onLine)`, com comentário explícito de que sem
+rede segue com a confiança do boot. Regra 2 respeitada. O comportamento é defensável e **não
+se deve mexer no código**: aparelho que nunca baixou a equipe não tem galeria para reconhecer
+ninguém — a regra 2 protege a marcação, e marcar pressupõe carga.
+
+Correção é no teste: semear a carga (ou um `abrirPonto` online) antes de derrubar a rede.
+O Revisor já aplicou no worktree dele um helper `primeCarga(page)` que chama
+`Api.carga()`+`Store.set` via `page.evaluate`, sem passar pela UI — de propósito, para não
+auto-marcar a `p-ana` da carga quente sem querer.
+
+**Sinal para distinguir os dois grupos de falha**, do Revisor: as do deadlock ficam presas em
+`#aguardando`; estas ficam em `#porta` com REGISTRAR PONTO visível.
+
+**Correção de duas coisas que eu registrei errado:**
+1. Escrevi que o snapshot do 264 vinha vazio. Não vem — mostra `#porta` com o título,
+   REGISTRAR PONTO e ACESSAR. Foi truncamento do meu próprio `head`, não do artefato.
+2. Anunciei o cartão do deadlock como `T-3E0BE9` numa mensagem à equipe. O id real é
+   **T-E3DBD4**.
+
+Vale como padrão: sugeri um teste próprio para "aparelho virgem sem rede não abre a fila" —
+hoje esse comportamento correto só existe como efeito colateral de três testes que mediam
+outra coisa.
