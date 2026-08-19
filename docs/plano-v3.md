@@ -216,3 +216,24 @@ fila ocupada, todo dia. Regras para quem implementa tela:
 
 Critérios de aceite destes itens são verificação no DOM, não inspeção visual — não há
 validação visual disponível nesta esteira.
+
+## Critérios de aceite da tela do colaborador (T-607E5A)
+
+Origem: Revisor, a partir de `docs/ameacas-v3.md` e `docs/privacidade-tela-compartilhada.md`.
+São de **segurança e privacidade**, não de estilo. Verificação no DOM e no devtools, não a olho.
+
+1. **Dado sensível não pode estar no DOM antes do toque.** Banco de horas e histórico não
+   entram na árvore nem escondidos por `display:none` — quem abre o inspetor lê. Só o
+   comprovante no primeiro estado.
+2. **Expirar tem de apagar, não sobrepor.** No fim do TTL (90 s inativo / 3 min absoluto) ou
+   após 30 s sem visibilidade, o dado sai da memória e do DOM. Se a tela só troca por cima e
+   o objeto continua vivo num estado JS, um F12 ou o "voltar" do navegador desenterra.
+3. **O código de aprovação do aparelho não pode existir em lugar consultável.** Sem
+   `console.log`, sem querystring, sem atributo DOM fora do elemento visível pretendido. Esta
+   é a tela onde ele nasce, então é aqui que ele vaza.
+4. **Sem resquício entre pessoas.** Aparelho compartilhado processa um após outro: nome, foto
+   ou dado da pessoa anterior não podem aparecer no instante da transição. É corrida entre o
+   reconhecimento novo e a limpeza do anterior.
+5. **Offline e pendente falham fechado.** Sem rede, ou com aparelho ainda pendente, não pode
+   existir caminho que caia numa carga antiga em cache e libere marcação sem checagem. O
+   critério não é "não trava" — é **"não abre por engano"**.
