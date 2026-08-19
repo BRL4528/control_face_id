@@ -146,6 +146,41 @@ aparelho se autenticou e sobrevive sem alteração.
 | — | `rosto fora da galeria oferece manual e busca na unidade` | Não diretamente, mas **o resultado da busca muda se R1 for adotado** | **Sobrevive, mas o fixture muda**: hoje a carga de teste já vem com a unidade inteira; se `/efrat/carga` passar a ser escopado por equipe (R1), este teste precisa simular a chamada explícita de busca, não mais um array já presente na carga |
 | 15–23 | login RH, painel, criar equipe/colaborador, pendência, espelho, cards, gráfico | Não — autenticação de RH é `usuario`+`chave`, nunca tocou o token do aparelho | **Sobrevivem** sem alteração |
 
+### Os 4 testes afetados, nome exato e o que passam a afirmar
+
+Referência para quem for mexer sem quebrar sem saber (fase 2 / T-38A7C1, ainda
+travada até o ADR fechar). Assertivas já refletem as correções desta rodada:
+código de pareamento gerado no servidor e nunca exposto por leitura do RH
+(Novo 2), `/efrat/identificar` com resposta mínima + rate limit (Novo 1).
+
+1. **`porta comeca bloqueada ate o aparelho ser pareado`**
+   (`tests/e2e/fluxo.spec.js:83`) — **morre**, sem substituto 1:1 porque não
+   existe mais campo de token. Vira teste novo (ver tabela abaixo):
+   *"porta continua bloqueada enquanto o dispositivo está pendente/negado"*.
+
+2. **`token invalido nao pareia`** (`tests/e2e/fluxo.spec.js:90`) — **morre**,
+   sem substituto 1:1 porque não existe mais "digitar algo e errar". O
+   equivalente de risco (aparelho tenta se passar por aprovado sem o RH ter
+   confirmado) já está coberto pelo teste novo do item 1.
+
+3. **`depois de pareado a porta libera o registro de ponto`**
+   (`tests/e2e/fluxo.spec.js:96`) — **modificado**, mesmo nome de intenção,
+   gatilho muda. Passa a afirmar: *dispositivo novo gera `dispositivo_id` e
+   registra → tela mostra o código gerado pelo servidor → RH digita, no
+   painel, o código que leu na tela do aparelho (não um valor que o painel já
+   sabia) → `ativo` vira `true` → próxima `/efrat/carga` desse
+   `dispositivo_id` libera `btnPonto`* — e o corpo da resposta passa a trazer
+   só as equipes vinculadas ao dispositivo, não a unidade inteira (R1).
+
+4. **`rosto fora da galeria oferece manual e busca na unidade`**
+   (`tests/e2e/fluxo.spec.js:175`) — **não morre, fixture muda**. Hoje a
+   "unidade inteira" já vem dentro da carga estática do teste. Passa a
+   afirmar: *rosto fora da galeria local → app chama `POST /efrat/identificar`
+   com o descritor → servidor-falso responde só `{nome, matricula, equipe_id}`
+   (nunca vetor/miniatura, conforme requisito travado no contrato) → oferece
+   "marcar remanejado"; sem rede ou sem match, cai em manual com foto, como já
+   fazia*.
+
 **Testes novos que a fase 2 precisa cobrir (não substituem 1:1 — são invariantes
 novos que não existiam porque o mecanismo não existia):**
 
@@ -227,6 +262,11 @@ custo de revisão do RH exatamente na fila que devia ficar mais confiável
 depois da mudança. Vale um limite de propostas pendentes por gestor/dia, mas
 isto é ajuste fino, não bloqueante — sinalizando para não virar prioridade
 acima de Novo 1 e Novo 2.
+
+**Critério de UI registrado (decisão do Orquestrador):** a fila de correções
+do painel do RH precisa mostrar quantas propostas vieram do mesmo gestor no
+mesmo dia — sem essa contagem visível, o RH não percebe inflação da fila
+mesmo que cada proposta individual pareça legítima.
 
 ## Dívida conhecida, fora desta rodada — chave PBKDF2 do RH como credencial permanente
 
