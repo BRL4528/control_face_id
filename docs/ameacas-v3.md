@@ -179,7 +179,8 @@ código de pareamento gerado no servidor e nunca exposto por leitura do RH
    com o descritor → servidor-falso responde só `{nome, matricula, equipe_id}`
    (nunca vetor/miniatura, conforme requisito travado no contrato) → oferece
    "marcar remanejado"; sem rede ou sem match, cai em manual com foto, como já
-   fazia*.
+   fazia*. **Correção:** este teste também usa `abrirFila` — está duplamente
+   afetado (autenticação **e** fluxo). Ver seção seguinte.
 
 **Testes novos que a fase 2 precisa cobrir (não substituem 1:1 — são invariantes
 novos que não existiam porque o mecanismo não existia):**
@@ -192,6 +193,85 @@ novos que não existiam porque o mecanismo não existia):**
 | Escopo por equipe no `/efrat/carga` (R1) | Cenário 3 — raio de exposição de aparelho comprometido | aparelho vinculado à equipe A não recebe descritores da equipe B; busca na unidade vira chamada auditada separada |
 | Sessão do gestor/colaborador expira e volta sozinha (R5) | Cenário 4 — vazamento de dado pessoal no aparelho compartilhado | após TTL ou detecção de rosto diferente, a tela volta para "porta"/ponto sem exigir ação |
 | Revogação (`ativo=false`) some da lista de aprovados imediatamente | Continuidade do controle que o RH já tem hoje (rotacionar token) | RH revoga um aparelho aprovado → próxima tentativa de `/efrat/carga` desse `dispositivo_id` volta a `pendente`/`negado` |
+
+## Correção de escopo — a mudança de FLUXO, não só de autenticação
+
+O Orquestrador apontou um furo real na análise acima: a tabela de 4 testes só
+mediu a troca de **autenticação** do aparelho. Existe uma segunda mudança,
+independente da primeira e que também está no plano — item 1+2 do objetivo do
+cliente: o colaborador passa a bater o ponto direto, e a fila do gestor deixa
+de ser o caminho de marcação de terceiros para virar painel de status. Isso
+tem raio próprio nos testes.
+
+`grep -c "abrirFila(page)" tests/e2e/fluxo.spec.js` → 16 (1 definição do
+helper, `fluxo.spec.js:36-40`, + 15 chamadas). O helper espera três coisas que
+só existem no modelo "gestor abre a fila para processar os outros":
+`#fila:not(.hide)`, `Fila.gestor !== null` e `Fila.estado === 'armado'`. Nenhuma
+das três sobrevive ao colaborador se auto-atender. **14 testes distintos**
+dependem do helper (um deles, `reabrir a fila...`, chama duas vezes).
+
+| Teste (linha) | Autenticação | Fluxo | Regra testada sobrevive? | O que muda de fato |
+|---|---|---|---|---|
+| `registrar ponto identifica o gestor e ja marca o ponto dele` (106) | não | **sim** | sim — reconhecimento marca o próprio ponto do gestor | Helper morre. `expect('#filaGestor')` também morre — não é só o helper, é a asserção, porque hoje ela verifica que a *fila* abriu; no fluxo novo o gestor é reconhecido pelo botão único e ganha um link "ver minha equipe" à parte. Seletor novo depende do contrato do ADR. |
+| `ponto do gestor sempre carrega foto e vai para revisao` (122) | não | **sim** | sim — `gestorDeveMarcar` em `js/regras.js`, intocada | Só o helper. Asserção (`foto_auditoria` presente, vai pra revisão) não olha pra `Fila`, sobrevive igual. |
+| `reabrir a fila no mesmo minuto nao marca o gestor de novo` (131) | não | **sim** | sim — cooldown/dedupe, regra pura | Helper (2x). `#btnSairFila` no corpo do teste pode não ter equivalente — se o retorno à porta for automático no fluxo novo, essa linha some, não só muda de seletor. |
+| `a fila marca entrada e depois saida do colaborador` (146) | não | **sim** | sim — `tipoDaVez` em `js/regras.js` | Helper morre (não há gestor pra "abrir" nada). O ciclo identificar→propor→confirmar (helper `marcar()`) **não** depende de `Fila.gestor`/`estado`, então esse helper específico deve sobreviver quase igual — é o forte candidato a única peça reaproveitável 1:1. |
+| `cooldown bloqueia a mesma pessoa em sequencia` (167) | não | **sim** | sim | Mesmo padrão do anterior. |
+| `rosto fora da galeria oferece manual e busca na unidade` (175) | **sim (R1)** | **sim** | parcial — fallback manual sobrevive, "buscar na unidade" via array pré-carregado morre | Duplo impacto — o mais delicado da lista. Helper de entrada muda (fluxo) *e* o corpo do teste muda (chamada a `/efrat/identificar` em vez de achar num array já carregado). |
+| `registro manual exige motivo e grava como manual` (187) | não | **sim** | sim — motivo obrigatório é regra pura | Helper de entrada muda; `#btnManual`/`#listaPessoas` provavelmente sobrevivem porque são do fallback de reconhecimento, não da fila em si. |
+| `offline enfileira e sobe quando a rede volta` (211) | não | **sim** (helper só de contexto) | sim — fila offline em `store.js`/`api.js` | Só o helper, pra chegar no estado "pronto pra marcar". |
+| `reenvio do mesmo id_cliente nao duplica` (225) | não | **sim** (idem) | sim — dedupe no servidor | Idem. |
+| `envio unico em voo: nunca ha dois lotes simultaneos` (241) | não | **sim** (idem) | sim — cadeado de sincronização | Idem; marca duas pessoas em sequência, reforça que o ciclo identificar/confirmar (não o gate do gestor) é a peça que sobrevive. |
+| `colaborador inativo e rejeitado e a marcacao fica retida` (259) | não | **sim** (idem) | sim — rejeição no servidor | Idem. |
+| `RH ve a pendencia do gestor e decide` (317) | não | **sim** (helper só gera dado) | sim, mas o teste não testa a fila | **Ver recomendação abaixo — trocar por seed.** |
+| `espelho de ponto mostra as marcacoes do colaborador` (334) | não | **sim** (idem) | sim, idem | **Idem.** |
+| `ver dados abre a tabela com os mesmos numeros do grafico` (367) | não | **sim** (idem) | sim, idem | **Idem.** |
+
+**Não afetados por nenhuma das duas dimensões (6):** `RH nao entra com senha
+errada` (279), `RH entra e ve o painel com indicadores` (289), `RH cria equipe
+e colaborador` (296), `painel mostra card critico...` (347), `card traz o
+numero junto da cor...` (354), `trocar o periodo recarrega...` (382). Nenhum
+usa `abrirFila` nem `parear`.
+
+### Respondendo direto às quatro perguntas
+
+1. **Duas colunas, um teste pode estar nas duas:** tabela acima. Só
+   `rosto fora da galeria...` (175) está nas duas.
+
+2. **Dos 14 que passam pelo helper: morrem, ou só o helper muda?** Sua leitura
+   está certa na essência: a **regra** (o que está em `js/regras.js`: cooldown,
+   dedupe por `id_cliente`, rejeição de inativo, lote único em voo, motivo
+   obrigatório) não muda em nenhum dos 14 — ninguém vai tocar em
+   `js/regras.js` nesta rodada, então o comportamento de negócio sob teste é
+   estável. Mas não é *só* trocar um helper e pronto: em pelo menos 2 dos 14
+   (`registrar ponto identifica o gestor...`, 106, e o já duplamente afetado
+   175) há **asserção no corpo do teste** que olha direto pra estrutura da
+   fila antiga (`#filaGestor`, array pré-carregado) e precisa mudar junto, não
+   só a função auxiliar que leva até lá. E `#btnSairFila` (usado em 4 testes:
+   131, 317, 334, 367) pode simplesmente não ter equivalente se o retorno à
+   porta virar automático. **Custo real: 1 helper novo (substituto de
+   `abrirFila`, provavelmente reaproveitando o ciclo `marcar()` quase intacto)
+   + ajuste pontual em ~5-6 testes, não reescrita de 14.** Isso é a notícia
+   boa que você queria confirmada — só com essa ressalva sobre os pontuais.
+
+3. **Os 3 do RH (317, 334, 367) — seed direto no servidor-falso?** **Sim.**
+   Motivo: nos três, a fila não é o SUT — é só o jeito hoje disponível de
+   colocar uma marcação no sistema antes de testar o painel do RH. Dirigir a
+   UI de marcação pra gerar dado de teste acopla três testes de RH a detalhes
+   de implementação de uma tela que vai mudar de forma nesta mesma rodada,
+   por um motivo que não tem nada a ver com o que eles verificam. O projeto já
+   usa esse princípio: `logarRh()` (`fluxo.spec.js:60-75`) já troca a derivação
+   PBKDF2 real por uma chave fixa pra não depender de criptografia no teste de
+   painel. Seed direto no `servidor-falso.js` é a mesma ideia aplicada à fila.
+
+4. **Nomes exatos dos que morrem de fato:** confirmo a sua conta, sem
+   correção — `porta comeca bloqueada ate o aparelho ser pareado` (83) e
+   `token invalido nao pareia` (90) morrem sem substituto 1:1;
+   `depois de pareado a porta libera o registro de ponto` (96) muda o gatilho
+   para aprovação do RH; `rosto fora da galeria oferece manual e busca na
+   unidade` (175) é afetado pelo R1 — e, como notado acima, também pelo fluxo,
+   o que não muda sua contagem de "4 que morrem/mudam por autenticação", só
+   soma uma segunda razão pro mesmo teste.
 
 ## Para quem for implementar (T-ARQ / fase 2)
 
