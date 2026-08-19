@@ -223,6 +223,40 @@ test('guarda 6: todo arquivo local referenciado no index.html deve estar no prec
   }
 });
 
+test('guarda 7: o conjunto de arquivos em vendor/fontes/ e exatamente o referenciado por css/fontes.css (bidirecional)', () => {
+  const pastaFontes = path.join(RAIZ, 'vendor/fontes');
+  assert.ok(fs.existsSync(pastaFontes), 'pasta vendor/fontes deve existir');
+  
+  const arquivosNoDisco = fs.readdirSync(pastaFontes).filter(f => !f.startsWith('.'));
+  const css = ler('css/fontes.css');
+  const fontesReferenciadasNoCss = [...css.matchAll(/url\(['"]?(\.\.\/vendor\/fontes\/[^'")]+)['"]?\)/g)]
+    .map(m => path.basename(m[1]));
+  
+  const setReferenciadas = new Set(fontesReferenciadasNoCss);
+  const orfaos = arquivosNoDisco.filter(f => !setReferenciadas.has(f));
+
+  assert.equal(
+    orfaos.length,
+    0,
+    `arquivos orfaos em vendor/fontes/: ${orfaos.join(', ')} — arquivo nao referenciado por nenhum @font-face — sobra de copia entre branches?`
+  );
+
+  // Validação complementar em vendor/ direto (ex: chart.umd.min.js, face-api.js)
+  const pastaVendor = path.join(RAIZ, 'vendor');
+  const arquivosVendorDiretos = fs.readdirSync(pastaVendor)
+    .filter(f => fs.statSync(path.join(pastaVendor, f)).isFile() && !f.startsWith('.'));
+  
+  const html = ler('index.html');
+  const sw = ler('sw.js');
+  const cfg = ler('js/config.js');
+  
+  for (const f of arquivosVendorDiretos) {
+    const ehReferenciado = html.includes(f) || sw.includes(f) || cfg.includes(f);
+    assert.ok(ehReferenciado, `arquivo vendor/${f} nao esta referenciado em index.html, sw.js ou js/config.js`);
+  }
+});
+
+
 
 
 
