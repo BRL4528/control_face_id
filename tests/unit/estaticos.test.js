@@ -131,4 +131,74 @@ test('a CSP do servidor de testes e2e e da Vercel sao identicas a do _headers', 
   assert.equal(cspVercel, cspHeader, 'a CSP do vercel.json deve ser identica a do _headers');
 });
 
+// Guardas de integração e integridade de ativos (T-5A062C)
+
+test('guarda 1: todo href ou src local no HTML aponta para arquivo existente', () => {
+  const html = ler('index.html');
+  const links = [...html.matchAll(/(?:href|src)=["']([^"']+)["']/g)].map(m => m[1]);
+  for (const l of links) {
+    if (l.startsWith('http://') || l.startsWith('https://') || l.startsWith('data:') || l.startsWith('#') || l.startsWith('mailto:')) {
+      continue;
+    }
+    const limpo = l.replace(/^\.\//, '');
+    assert.ok(fs.existsSync(path.join(RAIZ, limpo)), `index.html aponta para arquivo local inexistente em href/src: ${l}`);
+  }
+});
+
+test('guarda 2: toda url() em @font-face nos arquivos CSS resolve para arquivo existente', () => {
+  const pastaCss = path.join(RAIZ, 'css');
+  if (!fs.existsSync(pastaCss)) return;
+  const arquivosCss = fs.readdirSync(pastaCss).filter(f => f.endsWith('.css'));
+  for (const f of arquivosCss) {
+    const css = ler(path.join('css', f));
+    const urls = [...css.matchAll(/url\(['"]?([^'")]+)['"]?\)/g)].map(m => m[1]);
+    for (const u of urls) {
+      if (u.startsWith('data:') || u.startsWith('http://') || u.startsWith('https://')) continue;
+      const caminhoAbs = path.resolve(path.join(RAIZ, 'css'), u);
+      assert.ok(fs.existsSync(caminhoAbs), `css/${f} referencia url() inexistente: ${u}`);
+    }
+  }
+});
+
+test('guarda 3: todo arquivo CSS em css/ esta linkado em pelo menos um HTML', () => {
+  const pastaCss = path.join(RAIZ, 'css');
+  assert.ok(fs.existsSync(pastaCss), 'pasta css/ deve existir');
+  const arquivosCss = fs.readdirSync(pastaCss).filter(f => f.endsWith('.css'));
+  const html = ler('index.html');
+  for (const f of arquivosCss) {
+    const ehLinkado = html.includes(`css/${f}`) || html.includes(`./css/${f}`);
+    assert.ok(ehLinkado, `o arquivo css/${f} nao esta linkado em index.html`);
+  }
+});
+
+test('guarda 4: nenhum JS ou CSS carrega dominios externos fora do apiBase ou CDNs', () => {
+  const dominiosProibidos = ['cdn.jsdelivr.net', 'unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
+  const verificarTexto = (txt, local) => {
+    for (const d of dominiosProibidos) {
+      assert.ok(!txt.includes(d), `${local} contem referencia a CDN/dominio externo proibido: ${d}`);
+    }
+  };
+  verificarTexto(ler('js/config.js'), 'js/config.js');
+  verificarTexto(ler('sw.js'), 'sw.js');
+  if (fs.existsSync(path.join(RAIZ, 'css/fontes.css'))) {
+    verificarTexto(ler('css/fontes.css'), 'css/fontes.css');
+  }
+});
+
+test('guarda 5: nenhum token de verdade ou segredo foi commitado em js/, css/, sw.js ou index.html', () => {
+  const padraoSegredo = /(?:token|secret|password|bearer|api_key)\s*[:=]\s*['"][a-zA-Z0-9_\-]{16,}['"]/i;
+  const verificarSegredo = (caminhoRel) => {
+    const txt = ler(caminhoRel);
+    assert.ok(!padraoSegredo.test(txt), `${caminhoRel} contem padrao suspeito de token/segredo commitado`);
+  };
+
+  verificarSegredo('js/config.js');
+  verificarSegredo('sw.js');
+  verificarSegredo('index.html');
+  if (fs.existsSync(path.join(RAIZ, 'css/fontes.css'))) {
+    verificarSegredo('css/fontes.css');
+  }
+});
+
+
 
