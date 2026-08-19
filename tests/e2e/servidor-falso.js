@@ -10,6 +10,13 @@ import { fileURLToPath } from 'node:url';
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
+
+export function extrairCspDeHeaders() {
+  const conteudo = fs.readFileSync(path.join(RAIZ, '_headers'), 'utf8');
+  const match = conteudo.match(/Content-Security-Policy:\s*(.+)/);
+  return match ? match[1].trim() : '';
+}
+
 const TIPOS = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8', '.png': 'image/png',
@@ -541,7 +548,14 @@ export function criarServidor(opts = {}) {
     if (!arq.startsWith(RAIZ) || !fs.existsSync(arq) || fs.statSync(arq).isDirectory()) {
       res.writeHead(404); res.end('nao encontrado'); return;
     }
-    res.writeHead(200, { 'Content-Type': TIPOS[path.extname(arq)] || 'application/octet-stream' });
+    const csp = extrairCspDeHeaders();
+    const headers = { 'Content-Type': TIPOS[path.extname(arq)] || 'application/octet-stream' };
+    if (csp) headers['Content-Security-Policy'] = csp;
+    headers['Permissions-Policy'] = 'camera=(self)';
+    headers['X-Content-Type-Options'] = 'nosniff';
+    headers['Referrer-Policy'] = 'same-origin';
+    headers['X-Frame-Options'] = 'DENY';
+    res.writeHead(200, headers);
     fs.createReadStream(arq).pipe(res);
   });
 
