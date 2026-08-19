@@ -61,14 +61,10 @@ label.lb{display:block;font-size:10.5px;color:var(--muted);margin-bottom:5px;
 #fila header{display:flex;align-items:center;gap:10px;padding:12px 0}
 #fila header .quem{font-size:15px;font-weight:700;color:var(--ink)}
 #fila header .eq{font-size:11px;color:var(--muted)}
-#fila header button{margin-left:auto;background:var(--surface);border:1px solid var(--linha);color:var(--muted);
+#fila header .quem{flex:1;text-align:center;font-size:13.5px}
+#fila header button{background:var(--surface);border:1px solid var(--linha);color:var(--muted);
   border-radius:20px;padding:9px 15px;font-size:11px;cursor:pointer;width:auto}
 
-/* .kpi (alias de .tile) — numero grande + rotulo; usar so pra dado que qualquer um pode ler (ver privacidade) */
-.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}
-.kpis div{background:var(--surface);border:1px solid var(--linha);border-radius:14px;padding:11px 6px;text-align:center}
-.kpis .lab{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-weight:700}
-.kpis .val{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:21px;font-weight:600;margin-top:3px;color:var(--ink)}
 .camwrap{position:relative;width:100%;aspect-ratio:3/4;background:var(--escuro-2);border-radius:18px;
   overflow:hidden;margin-bottom:10px}
 video,canvas.ov{position:absolute;inset:0;width:100%;height:100%}

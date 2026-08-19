@@ -22,25 +22,23 @@
   <div class="sub" id="portaSub">Efrat</div>
   <button class="act big" id="btnPonto">REGISTRAR PONTO</button>
   <button class="act ghost" id="btnAcessar">ACESSAR</button>
-  <button class="parear" id="btnParear">Parear este aparelho</button>
   <p class="nota" id="portaStatus" style="margin-top:20px"></p>
 </div>
 
-<!-- ===================== FILA (gestor) ===================== -->
+<!-- ===================== AGUARDANDO LIBERAÇÃO (v3, sem token) ===================== -->
+<div id="aguardando" class="hide" style="max-width:380px;margin:0 auto;padding:14vh 22px 40px;text-align:center">
+  <h1 style="font-size:22px;margin:0 0 10px">Aguardando liberação do RH</h1>
+  <p class="nota" id="aguardandoTexto" style="margin:0 0 22px">Mostre este código para o RH liberar o aparelho.</p>
+  <div class="mono" id="aguardandoCodigo" style="font-size:38px;font-weight:600;letter-spacing:.06em"></div>
+  <p class="nota" style="margin-top:26px">A tela atualiza sozinha assim que o RH aprovar.</p>
+</div>
+
+<!-- ===================== FILA (câmera de ponto) ===================== -->
 <div id="fila" class="wrap hide">
   <header>
-    <div>
-      <div class="quem" id="filaGestor">—</div>
-      <div class="eq" id="filaEquipe">—</div>
-    </div>
-    <button id="btnSairFila">Encerrar</button>
+    <button id="btnSairFila">Cancelar</button>
+    <div class="quem">Registrar ponto</div>
   </header>
-
-  <div class="kpis">
-    <div><div class="lab">Marcaram</div><div class="val" id="kMarcaram">0/0</div></div>
-    <div><div class="lab">Faltam</div><div class="val" id="kFaltam">0</div></div>
-    <div><div class="lab">Na fila</div><div class="val" id="kEnvio">0</div></div>
-  </div>
 
   <div class="camwrap">
     <video id="video" playsinline muted autoplay></video>
@@ -100,16 +98,6 @@
   <input type="password" id="rhSenha" autocomplete="current-password">
   <button class="act big" id="btnEntrarRh">Entrar</button>
   <button class="act ghost" id="btnVoltarPorta">Voltar</button>
-</div>
-
-<!-- ===================== PAREAMENTO ===================== -->
-<div id="pareamento" class="hide" style="max-width:380px;margin:0 auto;padding:12vh 22px 40px">
-  <h1 style="font-size:22px;margin:0 0 4px">Parear aparelho</h1>
-  <p class="nota" style="margin:0 0 26px">Só uma vez. Depois disso o gestor nunca mais digita nada.</p>
-  <label class="lb">Token do aparelho</label>
-  <input type="text" id="tokenAparelho" autocomplete="off" autocapitalize="off" spellcheck="false">
-  <button class="act big" id="btnParearOk">Parear</button>
-  <button class="act ghost" id="btnParearVoltar">Voltar</button>
 </div>
 
 <div id="toast" class="toast hide"></div>

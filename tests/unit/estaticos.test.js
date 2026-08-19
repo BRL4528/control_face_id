@@ -72,8 +72,17 @@ test('todo modulo de js/ esta no cache do service worker', () => {
 
 test('as cinco telas do fluxo existem no index', () => {
   const html = ler('index.html');
-  for (const id of ['porta', 'fila', 'rh', 'loginRh', 'pareamento']) {
+  for (const id of ['porta', 'aguardando', 'fila', 'rh', 'loginRh']) {
     assert.match(html, new RegExp('id="' + id + '"'), 'falta a secao #' + id);
+  }
+});
+
+test('o codigo de aprovacao pendente nao vaza fora do elemento visivel', () => {
+  // Critério de aceite da tela do colaborador (docs/plano-v3.md, item 3):
+  // sem console.log, sem querystring, sem atributo fora do elemento visível.
+  for (const f of ['js/app.js']) {
+    const src = ler(f);
+    assert.ok(!/console\.\w+\([^)]*codigo/i.test(src), f + ' loga o codigo curto — nao pode');
   }
 });
 

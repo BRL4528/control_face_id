@@ -1,17 +1,40 @@
 // Porta de entrada e roteamento.
 //
-// Duas portas separadas de propósito: o gestor com 20 pessoas na fila nunca vê
-// as opções de administração, e o RH nunca precisa do aparelho do campo.
+// v3 (docs/adr-acesso-v3.md): o aparelho não pede token. No primeiro acesso
+// ele gera sua própria identidade (UUID + credencial de 256 bits) e pede
+// liberação ao RH; a credencial nunca aparece na tela. Duas portas separadas
+// continuam de propósito: quem bate ponto nunca vê administração, e o RH
+// nunca precisa do aparelho do campo.
 import { Store } from './store.js';
 import { Api, ApiRh } from './api.js';
 import { Face } from './face.js';
-import { cargaValida } from './regras.js';
 import { Fila } from './fila.js';
 import { Rh } from './rh.js';
 import { $, mostrar, toast } from './ui.js';
 
 const cfg = () => window.EFRAT_CFG;
-const S = { token: null, carga: null, deriva: 0, persistido: false };
+const S = { dispositivo: null, deriva: 0, persistido: false, pollTimer: null };
+
+/* --------------------------------------------- identidade do aparelho */
+
+// UUID + credencial de 256 bits, gerados uma vez e guardados no IndexedDB
+// (docs/adr-acesso-v3.md). A credencial é segredo de máquina — nunca aparece
+// na interface, só viaja como Authorization: Bearer. `hashCredencial` tem
+// que produzir exatamente o que `crypto.createHash('sha256').update(String(v))
+// .digest('base64url')` produz no Node, senão a comparação do servidor nunca bate.
+// Não fica em js/cripto.js de propósito: aquele arquivo é só a derivação de
+// senha do RH e ninguém mexe nele nesta rodada.
+function base64Url(bytes) {
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function gerarDispositivoId() { return crypto.randomUUID(); }
+function gerarCredencial() { return base64Url(crypto.getRandomValues(new Uint8Array(32))); }
+async function hashCredencial(credencial) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(credencial));
+  return base64Url(new Uint8Array(digest));
+}
 
 /* ------------------------------------------------------------- porta */
 
@@ -22,39 +45,184 @@ function statusPorta(txt, classe) {
 
 async function irParaPorta() {
   mostrar('porta');
-  S.token = await Store.get('token');
-  const pareado = !!S.token;
-  $('btnPonto').disabled = !pareado || !Face.pronto;
-  $('btnParear').textContent = pareado ? 'Trocar o pareamento deste aparelho' : 'Parear este aparelho';
+  limparCodigoAguardando();
+  $('btnPonto').disabled = !Face.pronto;
   const fila = await Store.fila();
-  if (!pareado) statusPorta('Aparelho ainda não pareado.', 'warnfg');
-  else if (!Face.pronto) statusPorta('Carregando o reconhecimento…');
+  if (!Face.pronto) statusPorta('Carregando o reconhecimento…');
   else if (fila.length) statusPorta(fila.length + ' marcação(ões) esperando envio.', 'warnfg');
   else statusPorta('');
-  if (pareado && navigator.onLine) sincronizarFundo();
+  if (navigator.onLine) sincronizarFundo();
 }
 
 async function sincronizarFundo() {
-  const t = await Store.get('token');
-  if (!t) return;
-  await Api.sincronizar(t);
+  if (!S.dispositivo) return;
+  await Api.sincronizar(S.dispositivo.dispositivo_id, S.dispositivo.credencial);
   const fila = await Store.fila();
   if (!$('porta').classList.contains('hide')) {
     statusPorta(fila.length ? fila.length + ' marcação(ões) esperando envio.' : '', fila.length ? 'warnfg' : '');
   }
 }
 
+/* --------------------------------------------------- identidade v3 */
+
+/**
+ * Garante que o aparelho tem UUID + credencial no IndexedDB, cadastrando no
+ * servidor se ainda não tiver. Migra um token legado (v2) uma única vez,
+ * conforme docs/adr-acesso-v3.md — sem perder marcação ainda não enviada se
+ * a migração falhar.
+ */
+async function assegurarIdentidade() {
+  const idExistente = await Store.get('dispositivo_id');
+  const credencialExistente = await Store.get('credencial');
+  if (idExistente && credencialExistente) {
+    return { dispositivo_id: idExistente, credencial: credencialExistente };
+  }
+
+  const dispositivoId = gerarDispositivoId();
+  const credencial = gerarCredencial();
+  const dados = {
+    dispositivo_id: dispositivoId,
+    credencial_publica: await hashCredencial(credencial),
+    apelido: 'Aparelho ' + dispositivoId.slice(0, 8),
+    ua: navigator.userAgent
+  };
+
+  const tokenLegado = await Store.get('token');
+  let r = await Api.registrarDispositivo(dados, tokenLegado || undefined);
+
+  const codigoErro = r.json && r.json.erro && r.json.erro.codigo;
+  const migracaoFalhou = tokenLegado &&
+    ['TOKEN_LEGADO_INVALIDO', 'TOKEN_LEGADO_CONSUMIDO', 'JANELA_MIGRACAO_ENCERRADA'].includes(codigoErro);
+  if (migracaoFalhou) {
+    if (codigoErro === 'TOKEN_LEGADO_CONSUMIDO') {
+      toast('Este token já foi migrado em outro aparelho. Aguardando nova liberação do RH.', 'warn');
+    }
+    await Store.set('token', null);
+    r = await Api.registrarDispositivo(dados, undefined);
+  }
+
+  if (!r.json || !r.json.ok) return null;   // sem rede ou falha — tenta de novo depois
+
+  await Store.set('dispositivo_id', dispositivoId);
+  await Store.set('credencial', credencial);
+
+  if (r.json.migrado) {
+    // só apaga o token legado depois de confirmar que a credencial nova
+    // já carrega de verdade — falha aqui e o próximo boot tenta migrar de novo.
+    const c = await Api.carga(dispositivoId, credencial);
+    if (c.ok) await Store.set('token', null);
+  }
+
+  return { dispositivo_id: dispositivoId, credencial };
+}
+
+// O código curto nasce nesta tela — critério de aceite do Revisor
+// (docs/plano-v3.md § Critérios de aceite da tela do colaborador, item 3):
+// só pode existir no textContent do elemento visível, nunca em log,
+// querystring ou atributo fora dele. Por isso ele é limpo do DOM em toda
+// transição de estado, mesmo quando a tela vira `.hide` — hide não apaga.
+function limparCodigoAguardando() {
+  $('aguardandoCodigo').textContent = '';
+  $('aguardandoCodigo').classList.add('hide');
+}
+
+function mostrarAguardando(codigo) {
+  mostrar('aguardando');
+  if (codigo) {
+    $('aguardandoCodigo').textContent = codigo;
+    $('aguardandoCodigo').classList.remove('hide');
+  } else {
+    limparCodigoAguardando();
+  }
+  $('aguardandoTexto').textContent = codigo
+    ? 'Mostre este código para o RH liberar o aparelho.'
+    : 'O RH ainda não liberou este aparelho.';
+}
+
+function mostrarBloqueado(msg) {
+  mostrar('aguardando');
+  limparCodigoAguardando();
+  $('aguardandoTexto').textContent = msg;
+}
+
+/**
+ * Máquina de estado do cadastro do aparelho. Faz polling de
+ * /efrat/dispositivo/estado no intervalo que o SERVIDOR manda
+ * (`consultar_apos_s`), nunca num intervalo fixo escolhido aqui. A porta
+ * fica bloqueada até o estado virar "ativo".
+ *
+ * Critério de aceite (item 5): offline e pendente falham FECHADO. Sem rede
+ * não vira sinônimo de aprovado — só reaproveita a carga em cache se este
+ * aparelho já tiver sido confirmado `ativo` alguma vez (persistido em
+ * `ultimo_estado`); sem esse registro, sem rede mantém bloqueado.
+ */
+async function verificarDispositivo() {
+  clearTimeout(S.pollTimer);
+
+  const ident = S.dispositivo || await assegurarIdentidade();
+  if (!ident) {
+    mostrarBloqueado('Sem conexão para cadastrar este aparelho.');
+    S.pollTimer = setTimeout(verificarDispositivo, 8000);
+    return;
+  }
+  S.dispositivo = ident;
+
+  const r = await Api.estadoDispositivo(ident.dispositivo_id, ident.credencial);
+  if (!r.ok || !r.json || !r.json.ok) {
+    const ultimoEstado = await Store.get('ultimo_estado');
+    if (ultimoEstado === 'ativo') {
+      S.dispositivo.info = await Store.get('dispositivo_info');
+      await irParaPorta();
+    } else {
+      mostrarBloqueado('Sem conexão para confirmar a liberação deste aparelho.');
+    }
+    S.pollTimer = setTimeout(verificarDispositivo, 15000);
+    return;
+  }
+
+  const info = r.json;
+  await Store.set('ultimo_estado', info.estado);
+
+  if (info.estado === 'ativo') {
+    await Store.set('dispositivo_info', info.dispositivo);
+    S.dispositivo.info = info.dispositivo;
+    await irParaPorta();
+    return;
+  }
+  if (info.estado === 'pendente') {
+    mostrarAguardando(info.codigo_curto);
+    S.pollTimer = setTimeout(verificarDispositivo, (info.consultar_apos_s || 15) * 1000);
+    return;
+  }
+  mostrarBloqueado(info.estado === 'revogado'
+    ? 'Este aparelho teve o acesso revogado. Fale com o RH.'
+    : 'O RH ainda não liberou este aparelho.');
+  S.pollTimer = setTimeout(verificarDispositivo, 30000);
+}
+
 /* ------------------------------------------------- registrar ponto */
 
 async function abrirFila() {
-  if (!S.token) { toast('Pareie o aparelho primeiro', 'warn'); return; }
+  if (!S.dispositivo) { toast('Aparelho ainda não liberado', 'warn'); return; }
   $('btnPonto').disabled = true;
   try {
+    // Checagem antes de liberar a câmera (critério de aceite item 5): havendo
+    // rede, reconfirma o estado agora — nunca abre com base só no que a
+    // sessão lembrava de antes. Sem rede, segue com a confiança já
+    // estabelecida no boot (offline-first é o requisito do produto).
+    if (navigator.onLine) {
+      const re = await Api.estadoDispositivo(S.dispositivo.dispositivo_id, S.dispositivo.credencial);
+      if (re.ok && re.json && re.json.ok && re.json.estado !== 'ativo') {
+        await verificarDispositivo();
+        return;
+      }
+    }
+
     let carga = await Store.get('carga');
     let deriva = (await Store.get('deriva')) || 0;
 
     if (navigator.onLine) {
-      const r = await Api.carga(S.token);
+      const r = await Api.carga(S.dispositivo.dispositivo_id, S.dispositivo.credencial);
       if (r.ok) {
         carga = r.carga; deriva = r.deriva;
         await Store.set('carga', carga);
@@ -63,24 +231,19 @@ async function abrirFila() {
         toast(r.erro || 'Não consegui carregar a equipe', 'bad');
         return;
       } else {
-        toast('Sem rede — usando a carga de hoje', 'warn');
+        toast('Sem rede — usando a carga salva', 'warn');
       }
     }
 
-    if (!carga || !cargaValida(carga)) {
-      toast('A carga de hoje ainda não foi baixada. Conecte à internet uma vez.', 'bad');
-      return;
-    }
-    if (!(carga.pessoas || []).some(p => p.papel === 'gestor')) {
-      toast('Nenhum gestor com biometria nesta unidade. O RH precisa cadastrar.', 'bad');
+    if (!carga || !(carga.pessoas || []).length) {
+      toast('Ninguém cadastrado ainda. Conecte à internet uma vez.', 'bad');
       return;
     }
     if (Math.abs(deriva) > 120000) {
       toast('Relógio do aparelho está ' + Math.round(deriva / 60000) + ' min fora', 'warn');
     }
 
-    S.carga = carga; S.deriva = deriva;
-    await Fila.abrir(S.token, carga, deriva, irParaPorta);
+    await Fila.abrir(S.dispositivo, carga, deriva, irParaPorta);
   } finally {
     $('btnPonto').disabled = false;
   }
@@ -103,32 +266,11 @@ async function entrarRh() {
   try {
     const r = await Rh.entrar(u, s);
     if (!r.ok) { toast(r.erro, 'bad'); return; }
-    Rh._tokenAparelho = S.token || (await Store.get('token'));
+    Rh._dispositivo = S.dispositivo;
     Rh.abrir(irParaPorta);
   } finally {
     $('btnEntrarRh').disabled = false;
     $('btnEntrarRh').textContent = 'Entrar';
-  }
-}
-
-/* ------------------------------------------------------- pareamento */
-
-async function parear() {
-  const t = $('tokenAparelho').value.trim();
-  if (!t) { toast('Informe o token', 'warn'); return; }
-  $('btnParearOk').disabled = true;
-  try {
-    const r = await Api.carga(t);
-    if (!r.ok) { toast(r.erro || 'Token inválido', 'bad'); return; }
-    await Store.set('token', t);
-    await Store.set('carga', r.carga);
-    await Store.set('deriva', r.deriva);
-    await Store.registrar('pareamento', { gestor: r.carga.gestor && r.carga.gestor.nome });
-    toast('Aparelho pareado', 'ok');
-    $('tokenAparelho').value = '';
-    await irParaPorta();
-  } finally {
-    $('btnParearOk').disabled = false;
   }
 }
 
@@ -139,33 +281,35 @@ async function boot() {
 
   $('btnPonto').onclick = abrirFila;
   $('btnAcessar').onclick = abrirLoginRh;
-  $('btnParear').onclick = () => { mostrar('pareamento'); setTimeout(() => $('tokenAparelho').focus(), 100); };
-  $('btnParearOk').onclick = parear;
-  $('btnParearVoltar').onclick = irParaPorta;
-  $('btnVoltarPorta').onclick = irParaPorta;
   $('btnEntrarRh').onclick = entrarRh;
   $('rhSenha').addEventListener('keydown', e => { if (e.key === 'Enter') entrarRh(); });
-  $('tokenAparelho').addEventListener('keydown', e => { if (e.key === 'Enter') parear(); });
+  $('btnVoltarPorta').onclick = irParaPorta;
   $('btnSairFila').onclick = () => Fila.sair();
 
-  window.addEventListener('online', sincronizarFundo);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) sincronizarFundo(); });
-  setInterval(sincronizarFundo, cfg().syncIntervalMs);
+  window.addEventListener('online', () => { S.dispositivo ? sincronizarFundo() : verificarDispositivo(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    S.dispositivo ? sincronizarFundo() : verificarDispositivo();
+  });
+  setInterval(() => sincronizarFundo(), cfg().syncIntervalMs);
 
-  await irParaPorta();
+  await verificarDispositivo();
 
   try {
     await Face.carregar('./models');
   } catch (e) {
     statusPorta('Falha ao carregar o reconhecimento.', 'badfg');
   }
-  await irParaPorta();
+  if (S.dispositivo && S.dispositivo.info) await irParaPorta();
 
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
 }
 
 // Superfície de teste: o E2E dirige o app por aqui em vez de depender de
 // tempo de câmera e de rosto real.
-window.__EFRAT = { S, Store, Api, ApiRh, Face, Fila, Rh, irParaPorta, abrirFila, sincronizarFundo };
+window.__EFRAT = {
+  S, Store, Api, ApiRh, Face, Fila, Rh,
+  irParaPorta, abrirFila, sincronizarFundo, verificarDispositivo
+};
 
 boot();

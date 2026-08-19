@@ -1,5 +1,5 @@
 // Painel do RH. Tudo que é administração vive aqui e em lugar nenhum mais.
-import { ApiRh } from './api.js';
+import { Api, ApiRh } from './api.js';
 import { Face } from './face.js';
 import { derivar } from './cripto.js';
 import {
@@ -514,16 +514,13 @@ export const Rh = {
       equipe_id: p.equipe_id, papel: p.papel
     });
     if (!r.ok) { toast(r.erro || 'Falha', 'bad'); $('btnSalvarBio').disabled = false; return; }
-    const bio = await fetch(window.EFRAT_CFG.apiBase + '/efrat/cadastro', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        token: this._tokenAparelho, origem: 'rh', pessoa_id: p.pessoa_id,
-        nome: p.nome, matricula: p.matricula, equipe_id: p.equipe_id,
-        vetores: c.map(x => x.descritor), miniatura: c[0].thumb, coerencia: Number(coer.toFixed(4))
-      })
-    }).then(x => x.json()).catch(() => null);
+    const bio = await Api.cadastrar(this._dispositivo.dispositivo_id, this._dispositivo.credencial, {
+      origem: 'rh', pessoa_id: p.pessoa_id, nome: p.nome, matricula: p.matricula,
+      equipe_id: p.equipe_id, vetores: c.map(x => x.descritor),
+      miniatura: c[0].thumb, coerencia: Number(coer.toFixed(4))
+    });
     $('btnSalvarBio').disabled = false;
-    if (!bio || !bio.ok) { toast((bio && bio.erro) || 'Falha ao gravar biometria', 'bad'); return; }
+    if (!bio.ok) { toast(bio.erro || 'Falha ao gravar biometria', 'bad'); return; }
     toast('Biometria salva (coerência ' + coer.toFixed(3) + ')', 'ok');
     this.pararCamCad();
     $('areaBio').innerHTML = '';

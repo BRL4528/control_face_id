@@ -1,64 +1,49 @@
-// Tela do gestor. Uma ação só: olhar para a câmera e confirmar o nome.
+// Tela de ponto. Uma ação só: olhar para a câmera e confirmar o nome.
 //
-// Tudo que é administração — cadastrar gente, criar equipe, ver indicador —
-// mora no painel do RH. Quem está com 20 pessoas na frente não deve ver
-// nenhuma dessas opções.
+// v3 (docs/adr-acesso-v3.md): não existe mais gestor abrindo fila — qualquer
+// rosto conhecido pelo aparelho marca o próprio ponto direto. Reconhecimento
+// de gestor não abre painel nenhum aqui: marca o ponto dele e mostra um link
+// discreto "ver minha equipe" (gancho da T-8FB792, exige toque).
 import { Store } from './store.js';
 import { Api } from './api.js';
 import { Face, DICA_ADORNO } from './face.js';
 import {
   tipoDaVez, vereditoPorDistancia, ranquear, emCooldown, agoraCorrigido,
-  euclidiana, dia, gestorDeveMarcar
+  euclidiana, dia
 } from './regras.js';
 import { $, esc, mostrar, toast, hora } from './ui.js';
 
 const cfg = () => window.EFRAT_CFG;
 
 export const Fila = {
-  token: null,
+  dispositivo: null,
   carga: null,
   deriva: 0,
-  gestor: null,
-  estado: 'parado',    // parado | identificando | armado | processando | confirmando | comprovante
+  estado: 'parado',    // parado | aguardando | processando | confirmando | comprovante
   falhas: 0,
   doDia: [],
   pendentes: 0,
   cam: null,
   candidato: null,
-  escopo: 'equipe',
   aoSair: null,
 
-  /* --------------------------------------------------------- galeria */
-
-  gestores() {
-    return (this.carga.pessoas || []).filter(p => p.papel === 'gestor');
-  },
-
-  equipesDoTurno() {
-    return new Set((this.carga.equipes || []).filter(e => e.minha).map(e => e.equipe_id));
-  },
-
   galeria() {
-    if (this.escopo === 'unidade') return this.carga.pessoas || [];
-    const meus = this.equipesDoTurno();
-    return (this.carga.pessoas || []).filter(p => meus.has(p.equipe_id));
+    return (this.carga.pessoas || []).concat(this.carga.sem_cadastro || []);
   },
 
   /* ----------------------------------------------------------- ciclo */
 
-  /** Abre a câmera já procurando pelo gestor, sem passar por login. */
-  async abrir(token, carga, deriva, aoSair) {
-    this.token = token; this.carga = carga; this.deriva = deriva || 0;
+  /** Abre a câmera já pronta para reconhecer qualquer rosto conhecido. */
+  async abrir(dispositivo, carga, deriva, aoSair) {
+    this.dispositivo = dispositivo; this.carga = carga; this.deriva = deriva || 0;
     this.aoSair = aoSair;
-    this.gestor = null; this.falhas = 0; this.escopo = 'equipe';
+    this.falhas = 0;
     mostrar('fila');
-    $('filaGestor').textContent = 'Identificando…';
-    $('filaEquipe').textContent = '';
     $('cartao').innerHTML = '';
     await this.recarregarDia();
     if (!(await this.ligarCamera())) { this.sair(); return; }
-    this.estado = 'identificando';
-    $('dica').textContent = 'Gestor, olhe para a câmera';
+    this.estado = 'aguardando';
+    $('dica').textContent = 'Olhe para a câmera';
   },
 
   async ligarCamera() {
@@ -74,12 +59,11 @@ export const Fila = {
       Face.iniciar(v, $('overlay'), {
         onQualidade: q => {
           if (this.estado === 'processando') return;
-          const base = !q.rosto ? DICA_ADORNO
-            : this.estado === 'identificando' ? 'Gestor, olhe para a câmera' : q.msg;
+          const base = !q.rosto ? DICA_ADORNO : q.msg;
           $('dica').textContent = base + (Face.latencia ? ' · ' + Face.latencia + ' ms' : '');
           $('dica').style.color = q.ok ? '#28a745' : '#e0a800';
         },
-        autoCaptura: () => this.estado === 'identificando' || this.estado === 'armado',
+        autoCaptura: () => this.estado === 'aguardando',
         onCaptura: c => this.aoCapturar(c)
       });
       return true;
@@ -92,6 +76,9 @@ export const Fila = {
   sair() {
     Face.parar();
     if (this.cam) { this.cam.getTracks().forEach(t => t.stop()); this.cam = null; }
+    clearTimeout(this._t);
+    $('cartao').innerHTML = '';
+    this.candidato = null;
     this.estado = 'parado';
     if (this.aoSair) this.aoSair();
   },
@@ -100,107 +87,55 @@ export const Fila = {
     const hoje = dia(agoraCorrigido(this.deriva).toISOString());
     this.doDia = await Store.doDia(hoje);
     this.pendentes = (await Store.fila()).length;
-    this.pintarKpis();
-  },
-
-  pintarKpis() {
-    const meus = this.equipesDoTurno();
-    const equipe = (this.carga.pessoas || []).filter(p => meus.has(p.equipe_id));
-    const semCad = (this.carga.sem_cadastro || []).filter(p => meus.has(p.equipe_id));
-    const marcaram = new Set(this.doDia.map(m => m.pessoa_id));
-    const total = equipe.length + semCad.length;
-    const feitos = equipe.concat(semCad).filter(p => marcaram.has(p.pessoa_id)).length;
-    $('kMarcaram').textContent = feitos + '/' + total;
-    $('kFaltam').textContent = Math.max(0, total - feitos);
-    $('kEnvio').textContent = this.pendentes;
-    $('kEnvio').className = 'val ' + (this.pendentes > 0 ? 'warnfg' : '');
   },
 
   /* -------------------------------------------------- identificação */
 
   async aoCapturar(cap) {
-    if (this.estado === 'identificando') return this.identificarGestor(cap);
-    if (this.estado !== 'armado') return;
+    if (this.estado !== 'aguardando') return;
     this.estado = 'processando';
     $('dica').textContent = 'Identificando…';
     try {
       if (!cap || !cap.descritor) return this.falhou('Não consegui ler o rosto');
       const r = ranquear(cap.descritor, this.galeria(), euclidiana);
-      if (!r.melhor) return this.falhou('Ninguém na galeria');
-      const veredito = vereditoPorDistancia(r.melhor.dist, cfg());
-      if (veredito === 'rejeitado') return this.falhou('Não reconhecido');
-      const p = r.melhor.pessoa;
-      if (emCooldown(p.pessoa_id, this.doDia, Date.now(), cfg().cooldownMs)) {
-        return this.falhou(p.nome.split(' ')[0] + ' já marcou agora há pouco');
-      }
-      this.falhas = 0;
-      this.candidato = { pessoa: p, dist: r.melhor.dist, margem: r.margem, veredito, cap };
-      this.estado = 'confirmando';
-      this.pintarConfirmacao();
+      const veredito = r.melhor ? vereditoPorDistancia(r.melhor.dist, cfg()) : 'rejeitado';
+      if (veredito !== 'rejeitado') return this.confirmarCandidato(r.melhor.pessoa, r.melhor.dist, veredito, cap, false);
+      await this.tentarIdentificarOnline(cap);
     } catch (e) {
       this.falhou('Erro ao identificar');
     }
   },
 
-  /**
-   * Quem abriu a fila? A galeria aqui são os gestores — 2 ou 3 pessoas — então
-   * a identificação é praticamente infalível, e o aparelho não precisa saber
-   * de antemão qual gestor está com ele.
-   */
-  async identificarGestor(cap) {
-    this.estado = 'processando';
-    $('dica').textContent = 'Identificando…';
-    if (!cap || !cap.descritor) { this.estado = 'identificando'; return; }
-    const r = ranquear(cap.descritor, this.gestores(), euclidiana);
-    if (!r.melhor || vereditoPorDistancia(r.melhor.dist, cfg()) === 'rejeitado') {
-      this.falhas++;
-      this.estado = 'identificando';
-      if (this.falhas >= cfg().falhasParaManual) {
-        $('cartao').innerHTML =
-          '<div class="cartao warn"><div class="tit">Não reconheci o gestor</div>' +
-          '<div class="sub">Confira a luz e tire boné ou óculos escuros. Se persistir, o RH precisa cadastrar ou recadastrar o seu rosto.</div></div>';
-      }
-      return;
-    }
-
-    this.gestor = r.melhor.pessoa;
-    this.falhas = 0;
-    $('filaGestor').textContent = this.gestor.nome;
-    $('filaEquipe').textContent = (this.carga.equipes || [])
-      .filter(e => e.minha).map(e => e.nome).join(' · ') || '—';
-
-    // O ponto do gestor sai de brinde — mas só quando faz sentido. Abrir o app
-    // três vezes no dia não pode virar três marcações.
-    const meusHoje = this.doDia.filter(m => m.pessoa_id === this.gestor.pessoa_id);
-    if (gestorDeveMarcar(meusHoje, Date.now(), cfg().cooldownMs)) {
-      await this.registrar(this.gestor, cap, r.melhor.dist <= cfg().limiarAceite ? 'aceito' : 'revisar',
-        r.melhor.dist, 'biometria', '', true);
-    } else {
-      this.estado = 'armado';
-      $('cartao').innerHTML = '';
-      toast('Fila aberta — ' + this.gestor.nome.split(' ')[0], 'ok');
-    }
+  /** Fallback 1:N on-line para quem não está na galeria offline do aparelho. */
+  async tentarIdentificarOnline(cap) {
+    if (!navigator.onLine) return this.falhou('Rosto não reconhecido', true);
+    const r = await Api.identificar(this.dispositivo.dispositivo_id, this.dispositivo.credencial,
+      cap.descritor, new Date().toISOString());
+    if (!r.ok || r.resultado.resultado !== 'reconhecido') return this.falhou('Rosto não reconhecido', true);
+    const p = r.resultado.pessoa;
+    this.confirmarCandidato(p, r.resultado.distancia, 'aceito', cap, true);
   },
 
-  falhou(msg) {
+  confirmarCandidato(pessoa, dist, veredito, cap, online) {
+    if (emCooldown(pessoa.pessoa_id, this.doDia, Date.now(), cfg().cooldownMs)) {
+      return this.falhou(pessoa.nome.split(' ')[0] + ' já marcou agora há pouco');
+    }
+    this.falhas = 0;
+    this.candidato = { pessoa, dist, veredito, cap, online };
+    this.estado = 'confirmando';
+    this.pintarConfirmacao();
+  },
+
+  falhou(msg, manualImediato) {
     this.falhas++;
-    this.estado = 'armado';
-    const podeManual = this.falhas >= cfg().falhasParaManual;
+    this.estado = 'aguardando';
+    const podeManual = manualImediato || this.falhas >= cfg().falhasParaManual;
     $('cartao').innerHTML =
       '<div class="cartao warn"><div class="tit">' + esc(msg) + '</div>' +
       '<div class="sub">Tentativa ' + this.falhas + '. O ponto nunca é negado — se não resolver, registre manualmente.</div>' +
-      (podeManual ? '<button class="act" id="btnManual">Registrar manualmente</button>' +
-                    '<button class="act ghost" id="btnUnidade">Procurar em toda a unidade</button>' : '') +
+      (podeManual ? '<button class="act" id="btnManual">Registrar manualmente</button>' : '') +
       '</div>';
-    if (podeManual) {
-      $('btnManual').onclick = () => this.abrirLista(true);
-      $('btnUnidade').onclick = () => {
-        this.escopo = 'unidade';
-        this.estado = 'armado';
-        $('cartao').innerHTML = '';
-        toast('Procurando em toda a unidade', 'warn');
-      };
-    }
+    if (podeManual) $('btnManual').onclick = () => this.abrirLista(true);
   },
 
   pintarConfirmacao() {
@@ -219,15 +154,13 @@ export const Fila = {
         '<button class="act big" id="btnConfirmar">CONFIRMAR ' + (tipo === 'entrada' ? 'ENTRADA' : 'SAÍDA') + '</button>' +
         '<button class="act ghost" id="btnOutro">Não é essa pessoa</button>' +
       '</div>';
-    $('btnConfirmar').onclick = () => this.registrar(c.pessoa, c.cap, c.veredito, c.dist, 'biometria');
+    $('btnConfirmar').onclick = () => this.registrar(c.pessoa, c.cap, c.veredito, c.dist, c.online ? 'biometria_online' : 'biometria');
     $('btnOutro').onclick = () => this.abrirLista(false);
   },
 
   abrirLista(manual) {
     this.estado = 'confirmando';
-    const gente = this.galeria().slice()
-      .concat((this.carga.sem_cadastro || []).map(p => Object.assign({ _sem: true }, p)))
-      .sort((a, b) => a.nome.localeCompare(b.nome));
+    const gente = this.galeria().slice().sort((a, b) => a.nome.localeCompare(b.nome));
     $('cartao').innerHTML =
       '<div class="cartao">' +
         '<div class="tit">' + (manual ? 'Registro manual' : 'Quem é?') + '</div>' +
@@ -241,10 +174,9 @@ export const Fila = {
       '</div>';
     $('listaPessoas').querySelectorAll('button').forEach(b => {
       b.onclick = () => {
-        const alvo = (this.carga.pessoas || []).concat(this.carga.sem_cadastro || [])
-          .find(x => x.pessoa_id === b.dataset.id);
+        const alvo = this.galeria().find(x => x.pessoa_id === b.dataset.id);
         if (!alvo) return;
-        const motivo = manual ? ($('motivoManual').value || '').trim() : 'confirmado pelo gestor';
+        const motivo = manual ? ($('motivoManual').value || '').trim() : 'confirmado no aparelho';
         if (manual && !motivo) { toast('Informe o motivo', 'warn'); return; }
         this.registrar(alvo, manual ? null : (this.candidato && this.candidato.cap),
           manual ? 'manual' : 'revisar',
@@ -253,7 +185,7 @@ export const Fila = {
       };
     });
     if (!manual && $('btnRecad')) $('btnRecad').onclick = () => this.recadastrar();
-    $('btnCancelar').onclick = () => { this.estado = 'armado'; $('cartao').innerHTML = ''; };
+    $('btnCancelar').onclick = () => { this.estado = 'aguardando'; $('cartao').innerHTML = ''; };
   },
 
   /** Recadastro em campo: entra como pendente e o RH decide. Nunca troca o rosto sozinho. */
@@ -271,7 +203,7 @@ export const Fila = {
     $('listaRecad').querySelectorAll('button').forEach(b => {
       b.onclick = () => this.capturarRecadastro(b.dataset.id);
     });
-    $('btnCancelar2').onclick = () => { this.estado = 'armado'; $('cartao').innerHTML = ''; };
+    $('btnCancelar2').onclick = () => { this.estado = 'aguardando'; $('cartao').innerHTML = ''; };
   },
 
   async capturarRecadastro(pessoaId) {
@@ -282,16 +214,16 @@ export const Fila = {
     const capturas = [];
     for (let i = 0; i < 3; i++) {
       const r = await Face.capturar($('video'));
-      if (!r || r.reprovado) { toast('Captura ' + (i + 1) + ' reprovada', 'warn'); this.estado = 'armado'; $('cartao').innerHTML = ''; return; }
+      if (!r || r.reprovado) { toast('Captura ' + (i + 1) + ' reprovada', 'warn'); this.estado = 'aguardando'; $('cartao').innerHTML = ''; return; }
       capturas.push(r);
       await new Promise(res => setTimeout(res, 600));
     }
-    const env = await Api.cadastrar(this.token, {
+    const env = await Api.cadastrar(this.dispositivo.dispositivo_id, this.dispositivo.credencial, {
       origem: 'gestor', pessoa_id: pessoaId, nome: alvo.nome, matricula: alvo.matricula,
       equipe_id: alvo.equipe_id, vetores: capturas.map(c => c.descritor),
       miniatura: capturas[0].thumb, coerencia: 0
     });
-    this.estado = 'armado';
+    this.estado = 'aguardando';
     $('cartao').innerHTML = '';
     toast(env.ok ? 'Enviado para aprovação do RH' : (env.erro || 'Falha ao enviar'), env.ok ? 'ok' : 'bad');
   },
@@ -310,7 +242,7 @@ export const Fila = {
     });
   },
 
-  async registrar(pessoa, cap, veredito, dist, origem, motivo, ehGestor) {
+  async registrar(pessoa, cap, veredito, dist, origem, motivo) {
     this.estado = 'processando';
     const quando = agoraCorrigido(this.deriva);
     const tipo = tipoDaVez(this.doDia.filter(m => m.pessoa_id === pessoa.pessoa_id));
@@ -324,7 +256,7 @@ export const Fila = {
         : 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2)),
       pessoa_id: pessoa.pessoa_id,
       equipe_id: pessoa.equipe_id || '',
-      tipo, origem, veredito,
+      tipo, origem: origem === 'biometria_online' ? 'biometria' : origem, veredito,
       score: dist == null ? null : Number(dist.toFixed(4)),
       motivo: motivo || '',
       marcado_em: quando.toISOString(),
@@ -340,29 +272,48 @@ export const Fila = {
     await Store.enfileirar(m);
     await Store.registrar('marcacao', { pessoa: pessoa.nome, tipo, veredito, origem });
     await this.recarregarDia();
-    this.comprovante(m, pessoa, ehGestor);
+    this.comprovante(m, pessoa);
     this.sincronizar();
   },
 
-  comprovante(m, pessoa, ehGestor) {
+  /**
+   * Comprovante. Regra de privacidade da tela compartilhada
+   * (docs/plano-v3.md): primeiro estado pós-reconhecimento mostra só nome,
+   * tipo e hora. Nada de saldo/histórico aqui. Gestor reconhecido ganha um
+   * link discreto, que exige toque — nunca abre painel sozinho.
+   */
+  comprovante(m, pessoa) {
     this.estado = 'comprovante';
+    const ehGestor = pessoa.papel === 'gestor';
     $('cartao').innerHTML =
       '<div class="cartao ok">' +
         '<div class="tit">✓ ' + (m.tipo === 'entrada' ? 'ENTRADA' : 'SAÍDA') + '</div>' +
         '<div class="horaGrande">' + hora(m.marcado_em) + '</div>' +
         '<div class="sub">' + esc(pessoa.nome) +
         ' · comprovante <b class="mono">' + m.id_cliente.slice(0, 8).toUpperCase() + '</b></div>' +
-        (ehGestor ? '<div class="sub okfg">Fila aberta. Pode chamar o primeiro.</div>' : '') +
+        (ehGestor ? '<a href="#" class="verdados" id="linkVerEquipe">Ver minha equipe</a>' : '') +
       '</div>';
+    if (ehGestor) {
+      $('linkVerEquipe').onclick = e => {
+        e.preventDefault();
+        toast('Painel do gestor chega na próxima etapa', 'warn');
+      };
+    }
+    // O candidato já virou marcação — nada mais precisa dele. Solta a
+    // referência agora, não só quando o comprovante some da tela.
+    this.candidato = null;
     clearTimeout(this._t);
+    // Critério de aceite (item 4): sem resquício entre pessoas. Apaga o DOM
+    // e SÓ DEPOIS reabre a captura — nessa ordem, nunca ao contrário, senão
+    // um rosto novo pode disparar antes do comprovante anterior sumir.
     this._t = setTimeout(() => {
-      this.estado = 'armado';
       $('cartao').innerHTML = '';
-    }, ehGestor ? 2000 : 3500);
+      this.estado = 'aguardando';
+    }, ehGestor ? 6000 : 3500);
   },
 
   async sincronizar() {
-    const r = await Api.sincronizar(this.token);
+    const r = await Api.sincronizar(this.dispositivo.dispositivo_id, this.dispositivo.credencial);
     if (r && r.resumo && r.resumo.rejeitadas > 0) {
       toast(r.resumo.rejeitadas + ' marcação(ões) rejeitada(s) pelo servidor', 'warn');
     }
