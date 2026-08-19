@@ -13,7 +13,7 @@ const dispositivos = node({
     matchType: 'allConditions',
     filters: { conditions: [{ keyName: 'dispositivo_id', condition: 'eq', keyValue: expr('{{ $("Webhook").first().json.body.dispositivo_id }}') }] },
     returnAll: true, options: {},
-  }, executeOnce: true },
+  }, executeOnce: true, alwaysOutputData: true },
 });
 
 const autenticar = node({
@@ -36,7 +36,7 @@ const pessoas = node({
     resource: 'row', operation: 'get',
     dataTableId: { __rl: true, mode: 'list', value: 'ZB53ZUrgAgv1u7Mg', cachedResultName: 'efrat_pessoa' },
     returnAll: true, options: {},
-    executeOnce: true,
+    executeOnce: true, alwaysOutputData: true,
   } },
 });
 
@@ -46,7 +46,7 @@ const templates = node({
     resource: 'row', operation: 'get',
     dataTableId: { __rl: true, mode: 'list', value: 'T33xTjG0vmcQlMem', cachedResultName: 'efrat_template' },
     returnAll: true, options: {},
-    executeOnce: true,
+    executeOnce: true, alwaysOutputData: true,
   } },
 });
 

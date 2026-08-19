@@ -16,7 +16,7 @@ const consultar = node({
       filters: { conditions: [{ keyName: 'dispositivo_id', condition: 'eq', keyValue: expr('{{ $("Webhook").first().json.body.dispositivo_id }}') }] },
       returnAll: true, options: {},
     },
-    executeOnce: true,
+    executeOnce: true, alwaysOutputData: true,
   },
 });
 

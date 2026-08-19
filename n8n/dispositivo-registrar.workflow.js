@@ -19,7 +19,7 @@ const consultarDispositivos = node({
       dataTableId: { __rl: true, mode: 'list', value: 'gFJaT1uUyeVpHC74', cachedResultName: 'efrat_dispositivo' },
       returnAll: true, options: {},
     },
-    executeOnce: true,
+    executeOnce: true, alwaysOutputData: true,
   },
 });
 
