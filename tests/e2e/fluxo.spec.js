@@ -3,10 +3,16 @@
 // O motor de reconhecimento roda em modo fingido — o que está sob teste é o
 // FLUXO, não o face-api. Assim o resultado é determinístico e o CI não depende
 // de foto de rosto real. O motor real tem verificação própria fora do CI.
+//
+// v3 (docs/adr-acesso-v3.md): não existe mais pareamento por token nem gestor
+// abrindo fila para os outros. O aparelho se cadastra sozinho e fica
+// "aguardando liberação do RH"; qualquer rosto conhecido bate o próprio ponto
+// direto. Os critérios do helper novo (docs/ameacas-v3.md § Critérios de
+// aceite para o helper novo) valem para todo este arquivo: esperar sinal
+// visível de tela, nunca `Fila.estado`/`Fila.gestor`, e continuar passando
+// offline.
 import { test, expect } from '@playwright/test';
 import { subir, semearMarcacao, semearPendencia } from './servidor-falso.js';
-
-const TOKEN = 'TOKEN-TESTE';
 
 async function abrir(page, base, pessoa) {
   await page.addInitScript(a => {
@@ -14,17 +20,26 @@ async function abrir(page, base, pessoa) {
     // chartCdn vazio: o painel não busca a biblioteca de gráficos na CDN durante
     // o CI (offline). Cards e tabelas "ver dados" cobrem o que é testado aqui.
     window.EFRAT_CFG = { apiBase: a.base + '/webhook', chartCdn: '' };   // config.js preserva isto
-  }, { pessoa: pessoa || 'p-gestor', base });
+  }, { pessoa: pessoa || 'p-ana', base });
   await page.goto(base + '/index.html');
   await page.waitForFunction(() => window.__EFRAT && window.__EFRAT.Face.pronto, null, { timeout: 20000 });
 }
 
-async function parear(page, token = TOKEN) {
-  await page.click('#btnParear');
-  await page.fill('#tokenAparelho', token);
-  await page.click('#btnParearOk');
-  // Sem esperar a porta voltar, o teste seguinte corre contra a carga ainda em voo.
-  if (token === TOKEN) await page.waitForSelector('#porta:not(.hide)', { timeout: 20000 });
+/**
+ * Aprova o aparelho "pelo RH": mexe direto no estado do servidor-falso (o
+ * jeito que o RH faria é digitar o código da tela — isso é coberto em
+ * tests/e2e/acesso.spec.js, critério 3; aqui não é o SUT) e força o app a
+ * reconsultar. Sinal de aceite é sempre de tela: `#btnPonto` habilitado.
+ */
+async function aprovarDispositivo(page, ctx, equipesIds = ['eq-1']) {
+  await page.waitForFunction(() => window.__EFRAT.S.dispositivo, null, { timeout: 20000 });
+  for (const d of ctx.estado.dispositivos.values()) {
+    d.estado = 'ativo';
+    d.equipes_ids = equipesIds;
+    d.configuracao_versao = (d.configuracao_versao || 0) + 1;
+  }
+  await page.evaluate(() => window.__EFRAT.verificarDispositivo());
+  await expect(page.locator('#btnPonto')).toBeEnabled({ timeout: 20000 });
 }
 
 /** Troca de identidade sem recarregar a página. */
@@ -32,15 +47,25 @@ async function vira(page, pessoa) {
   await page.evaluate(p => { window.__EFRAT_FAKE_FACE.pessoa = p; }, pessoa);
 }
 
-/** Abre a fila: identifica o gestor e espera a tela ficar pronta. */
-async function abrirFila(page) {
+/**
+ * Abre a tela de ponto. Substitui o antigo `abrirFila`, que esperava
+ * `Fila.gestor`/`Fila.estado === 'armado'` — sinais que só existiam no modelo
+ * "gestor abre a fila para os outros". Não existe mais: qualquer rosto
+ * conhecido marca o próprio ponto assim que a câmera liga, então o único
+ * sinal de tela que faz sentido esperar é a própria tela aparecer.
+ */
+async function abrirPonto(page) {
   await page.click('#btnPonto');
   await page.waitForSelector('#fila:not(.hide)', { timeout: 20000 });
-  await page.waitForFunction(() => window.__EFRAT.Fila.gestor !== null, null, { timeout: 25000 });
-  await page.waitForFunction(() => window.__EFRAT.Fila.estado === 'armado', null, { timeout: 25000 });
 }
 
-/** Uma passagem pela fila. */
+/**
+ * Uma passagem pela tela de ponto. O fim da espera não é mais
+ * `Fila.estado === 'armado'` (esse estado não existe mais) — é o comprovante
+ * SUMIR do DOM, porque `comprovante()` em js/fila.js já limpa `#cartao` e
+ * volta sozinho para `'aguardando'` via `setTimeout`. Sinal de tela, não
+ * estado interno de módulo.
+ */
 async function marcar(page, pessoa) {
   if (pessoa) await vira(page, pessoa);
   await page.waitForSelector('#btnConfirmar', { timeout: 25000 });
@@ -48,7 +73,7 @@ async function marcar(page, pessoa) {
   await page.click('#btnConfirmar');
   await page.waitForSelector('#cartao .cartao.ok', { timeout: 20000 });
   const recibo = await page.textContent('#cartao');
-  await page.waitForFunction(() => window.__EFRAT.Fila.estado === 'armado', null, { timeout: 25000 });
+  await page.waitForSelector('#cartao .cartao.ok', { state: 'detached', timeout: 20000 });
   return { nome, recibo };
 }
 
@@ -80,34 +105,39 @@ test.afterEach(async () => { ctx.servidor.close(); });
 
 /* ------------------------------------------------------------- porta */
 
-test('porta comeca bloqueada ate o aparelho ser pareado', async ({ page }) => {
+test('porta continua bloqueada enquanto o dispositivo esta pendente', async ({ page }) => {
   await abrir(page, ctx.url);
-  await expect(page.locator('#porta')).not.toHaveClass(/hide/);
-  await expect(page.locator('#btnPonto')).toBeDisabled();
-  await expect(page.locator('#portaStatus')).toContainText('não pareado');
+  await expect(page.locator('#aguardando')).not.toHaveClass(/hide/);
+  await expect(page.locator('#porta')).toHaveClass(/hide/);
+  const codigo = await page.textContent('#aguardandoCodigo');
+  expect(codigo).toMatch(/^[A-Z0-9]{6}$/);
 });
 
-test('token invalido nao pareia', async ({ page }) => {
+test('aparelho revogado depois de aprovado volta a ficar bloqueado', async ({ page }) => {
   await abrir(page, ctx.url);
-  await parear(page, 'ERRADO');
-  await expect(page.locator('#toast')).toContainText('token invalido', { timeout: 15000 });
+  await aprovarDispositivo(page, ctx);
+  for (const d of ctx.estado.dispositivos.values()) d.estado = 'revogado';
+  await page.evaluate(() => window.__EFRAT.verificarDispositivo());
+  await expect(page.locator('#aguardando')).not.toHaveClass(/hide/);
+  await expect(page.locator('#aguardandoTexto')).toContainText('revogado');
+  await expect(page.locator('#porta')).toHaveClass(/hide/);
 });
 
-test('depois de pareado a porta libera o registro de ponto', async ({ page }) => {
+test('depois de aprovado pelo rh a porta libera o registro de ponto', async ({ page }) => {
   await abrir(page, ctx.url);
-  await parear(page);
-  await page.waitForSelector('#porta:not(.hide)');
+  await aprovarDispositivo(page, ctx);
   await expect(page.locator('#btnPonto')).toBeEnabled();
-  await expect(page.locator('#btnParear')).toContainText('Trocar');
 });
 
-/* --------------------------------------------------- fila do gestor */
+/* --------------------------------------------- reconhecimento e marcação */
 
-test('registrar ponto identifica o gestor e ja marca o ponto dele', async ({ page }) => {
+test('reconhecer o gestor marca o ponto dele direto, sem abrir fila para ninguem', async ({ page }) => {
   await abrir(page, ctx.url, 'p-gestor');
-  await parear(page);
-  await abrirFila(page);
-  await expect(page.locator('#filaGestor')).toHaveText('Gestor Piloto');
+  await aprovarDispositivo(page, ctx);
+  await abrirPonto(page);
+  const r = await marcar(page);
+  expect(r.nome).toBe('Gestor Piloto');
+  expect(r.recibo).toContain('ENTRADA');
 
   const enviadas = await page.evaluate(async () => {
     const f = await window.__EFRAT.Store.fila();
@@ -121,20 +151,24 @@ test('registrar ponto identifica o gestor e ja marca o ponto dele', async ({ pag
 
 test('ponto do gestor sempre carrega foto e vai para revisao', async ({ page }) => {
   await abrir(page, ctx.url, 'p-gestor');
-  await parear(page);
-  await abrirFila(page);
+  await aprovarDispositivo(page, ctx);
+  await abrirPonto(page);
+  await marcar(page);
   const m = await page.evaluate(async () => (await window.__EFRAT.Store.enviadas())[0]);
   expect(m.pessoa_id).toBe('p-gestor');
   expect(m.foto_auditoria.length).toBeGreaterThan(0);
 });
 
-test('reabrir a fila no mesmo minuto nao marca o gestor de novo', async ({ page }) => {
+test('sair da tela e voltar no mesmo minuto nao marca a mesma pessoa de novo', async ({ page }) => {
   await abrir(page, ctx.url, 'p-gestor');
-  await parear(page);
-  await abrirFila(page);
+  await aprovarDispositivo(page, ctx);
+  await abrirPonto(page);
+  await marcar(page);
   await page.click('#btnSairFila');
-  await page.waitForSelector('#porta:not(.hide)');
-  await abrirFila(page);
+  await expect(page.locator('#porta')).not.toHaveClass(/hide/);
+
+  await abrirPonto(page);
+  await expect(page.locator('#cartao')).toContainText('já marcou', { timeout: 25000 });
   const total = await page.evaluate(async () => {
     const f = await window.__EFRAT.Store.fila();
     const e = await window.__EFRAT.Store.enviadas();
@@ -143,10 +177,10 @@ test('reabrir a fila no mesmo minuto nao marca o gestor de novo', async ({ page 
   expect(total).toBe(1);
 });
 
-test('a fila marca entrada e depois saida do colaborador', async ({ page }) => {
-  await abrir(page, ctx.url, 'p-gestor');
-  await parear(page);
-  await abrirFila(page);
+test('a tela marca entrada e depois saida do colaborador', async ({ page }) => {
+  await abrir(page, ctx.url, 'p-ana');
+  await aprovarDispositivo(page, ctx);
+  await abrirPonto(page);
 
   const um = await marcar(page, 'p-ana');
   expect(um.nome).toContain('Ana');
@@ -165,30 +199,43 @@ test('a fila marca entrada e depois saida do colaborador', async ({ page }) => {
 });
 
 test('cooldown bloqueia a mesma pessoa em sequencia', async ({ page }) => {
-  await abrir(page, ctx.url, 'p-gestor');
-  await parear(page);
-  await abrirFila(page);
+  await abrir(page, ctx.url, 'p-ana');
+  await aprovarDispositivo(page, ctx);
+  await abrirPonto(page);
   await marcar(page, 'p-ana');
   await expect(page.locator('#cartao')).toContainText('já marcou', { timeout: 25000 });
 });
 
-test('rosto fora da galeria oferece manual e busca na unidade', async ({ page }) => {
-  await abrir(page, ctx.url, 'p-gestor');
-  await parear(page);
-  await abrirFila(page);
-  await vira(page, 'p-carla');            // Carla e da eq-2, fora da equipe do turno
-  await expect(page.locator('#cartao')).toContainText('Não reconhecido', { timeout: 25000 });
-  await page.waitForSelector('#btnUnidade', { timeout: 30000 });
-  await page.click('#btnUnidade');
+// R1 (docs/plano-v3.md): /efrat/carga passa a ser escopado por equipe do
+// aparelho. Carla é da eq-2 — fora do escopo deste aparelho (aprovado só
+// para eq-1) — então ela nunca está na galeria offline. O fallback antigo de
+// "buscar na unidade" via array pré-carregado morreu; o substituto é
+// Api.identificar() em js/fila.js, 1:N no servidor, disparado automaticamente
+// (não tem mais botão) quando o reconhecimento offline rejeita o rosto.
+test('rosto fora do escopo offline do aparelho identifica online e marca (R1)', async ({ page }) => {
+  await abrir(page, ctx.url, 'p-carla');
+  await aprovarDispositivo(page, ctx, ['eq-1']);
+  await abrirPonto(page);
+
   await page.waitForSelector('#btnConfirmar', { timeout: 25000 });
   await expect(page.locator('#cartao .tit')).toContainText('Carla');
+  await page.click('#btnConfirmar');
+  await page.waitForSelector('#cartao .cartao.ok', { timeout: 20000 });
+
+  expect(ctx.estado.chamadas.identificar).toBeGreaterThan(0);
+  const m = await page.evaluate(async () => {
+    const f = await window.__EFRAT.Store.fila();
+    const e = await window.__EFRAT.Store.enviadas();
+    return f.concat(e).find(x => x.pessoa_id === 'p-carla');
+  });
+  expect(m).toBeTruthy();
+  expect(m.equipe_id).toBe('eq-2');
 });
 
-test('registro manual exige motivo e grava como manual', async ({ page }) => {
-  await abrir(page, ctx.url, 'p-gestor');
-  await parear(page);
-  await abrirFila(page);
-  await vira(page, 'p-carla');
+test('registro manual exige motivo quando ninguem reconhece o rosto', async ({ page }) => {
+  await abrir(page, ctx.url, 'p-desconhecido');
+  await aprovarDispositivo(page, ctx);
+  await abrirPonto(page);
   await page.waitForSelector('#btnManual', { timeout: 30000 });
   await page.click('#btnManual');
   await page.click('#listaPessoas button:first-child');
@@ -207,26 +254,33 @@ test('registro manual exige motivo e grava como manual', async ({ page }) => {
 });
 
 /* -------------------------------------------------------- sincronismo */
+//
+// Não existe mais `#kEnvio` na tela (o contador de pendências não é mais
+// exibido em #fila). O sinal de tela nas telas de porta/RH não muda estes
+// testes de comportamento de sincronização em si — quem SUT aqui é a fila
+// offline em store.js/api.js, então a espera é sobre o dado persistido
+// (Store), do mesmo jeito que "colaborador inativo" (abaixo) já fazia.
 
 test('offline enfileira e sobe quando a rede volta', async ({ page }) => {
-  await abrir(page, ctx.url, 'p-gestor');
-  await parear(page);
+  await abrir(page, ctx.url, 'p-ana');
+  await aprovarDispositivo(page, ctx);
   ctx.estado.fora = true;
-  await abrirFila(page);
+  await abrirPonto(page);
   await marcar(page, 'p-ana');
-  await expect(page.locator('#kEnvio')).not.toHaveText('0', { timeout: 15000 });
+  await page.waitForFunction(async () => (await window.__EFRAT.Store.fila()).length > 0, null, { timeout: 15000 });
 
   ctx.estado.fora = false;
   await page.evaluate(() => window.__EFRAT.Fila.sincronizar());
-  await expect(page.locator('#kEnvio')).toHaveText('0', { timeout: 20000 });
-  expect(ctx.estado.marcacoes.size).toBe(2);   // gestor + Ana
+  await page.waitForFunction(async () => (await window.__EFRAT.Store.fila()).length === 0, null, { timeout: 20000 });
+  expect(ctx.estado.marcacoes.size).toBe(1);
 });
 
 test('reenvio do mesmo id_cliente nao duplica', async ({ page }) => {
-  await abrir(page, ctx.url, 'p-gestor');
-  await parear(page);
-  await abrirFila(page);
-  await expect(page.locator('#kEnvio')).toHaveText('0', { timeout: 20000 });
+  await abrir(page, ctx.url, 'p-ana');
+  await aprovarDispositivo(page, ctx);
+  await abrirPonto(page);
+  await marcar(page, 'p-ana');
+  await page.waitForFunction(async () => (await window.__EFRAT.Store.fila()).length === 0, null, { timeout: 20000 });
   const antes = ctx.estado.marcacoes.size;
 
   await page.evaluate(async () => {
@@ -234,15 +288,15 @@ test('reenvio do mesmo id_cliente nao duplica', async ({ page }) => {
     await window.__EFRAT.Store.enfileirar(m);
   });
   await page.evaluate(() => window.__EFRAT.Fila.sincronizar());
-  await expect(page.locator('#kEnvio')).toHaveText('0', { timeout: 20000 });
+  await page.waitForFunction(async () => (await window.__EFRAT.Store.fila()).length === 0, null, { timeout: 20000 });
   expect(ctx.estado.marcacoes.size).toBe(antes);
 });
 
 test('envio unico em voo: nunca ha dois lotes simultaneos', async ({ page }) => {
-  await abrir(page, ctx.url, 'p-gestor');
-  await parear(page);
+  await abrir(page, ctx.url, 'p-ana');
+  await aprovarDispositivo(page, ctx);
   ctx.estado.fora = true;
-  await abrirFila(page);
+  await abrirPonto(page);
   await page.evaluate(() => { window.EFRAT_CFG.cooldownMs = 0; });
   await marcar(page, 'p-ana');
   await marcar(page, 'p-bruno');
@@ -252,15 +306,15 @@ test('envio unico em voo: nunca ha dois lotes simultaneos', async ({ page }) => 
     window.__EFRAT.Fila.sincronizar();
     window.__EFRAT.Fila.sincronizar();
   });
-  await expect(page.locator('#kEnvio')).toHaveText('0', { timeout: 25000 });
+  await page.waitForFunction(async () => (await window.__EFRAT.Store.fila()).length === 0, null, { timeout: 25000 });
   expect(ctx.estado.maxLotesSimultaneos).toBe(1);
 });
 
 test('colaborador inativo e rejeitado e a marcacao fica retida', async ({ page }) => {
-  await abrir(page, ctx.url, 'p-gestor');
-  await parear(page);
+  await abrir(page, ctx.url, 'p-ana');
+  await aprovarDispositivo(page, ctx);
   ctx.estado.fora = true;
-  await abrirFila(page);
+  await abrirPonto(page);
   await marcar(page, 'p-ana');
   ctx.estado.inativos.add('p-ana');
   ctx.estado.fora = false;
@@ -312,7 +366,7 @@ test('RH cria equipe e colaborador', async ({ page }) => {
 });
 
 // Estas duas semeiam a marcação direto no servidor-falso em vez de dirigir a
-// fila do gestor: a fila não é o SUT aqui, é só um jeito frágil de produzir
+// tela de ponto: a tela não é o SUT aqui, é só um jeito frágil de produzir
 // dado — acopla três testes de RH a uma tela que muda de forma nesta mesma
 // rodada. Mesmo precedente de logarRh() trocando PBKDF2 real por chave fixa.
 test('RH ve a pendencia do gestor e decide', async ({ page }) => {
@@ -365,7 +419,7 @@ test('card traz o numero junto da cor (leitura sem depender de cor)', async ({ p
 });
 
 test('ver dados abre a tabela com os mesmos numeros do grafico', async ({ page }) => {
-  // uma marcação real hoje, semeada direto — não precisa da fila pra existir.
+  // uma marcação real hoje, semeada direto — não precisa da tela de ponto pra existir.
   semearMarcacao(ctx.estado, {
     id_cliente: 'seed-marc-gestor', pessoa_id: 'p-gestor', equipe_id: 'eq-1',
     tipo: 'entrada', origem: 'biometria', veredito: 'aceito',
