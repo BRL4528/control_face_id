@@ -1,5 +1,5 @@
 // Painel do RH. Tudo que é administração vive aqui e em lugar nenhum mais.
-import { ApiRh } from './api.js';
+import { Api, ApiRh } from './api.js';
 import { Face } from './face.js';
 import { derivar } from './cripto.js';
 import {
@@ -186,8 +186,8 @@ export const Rh = {
   tabelaSerie(el, serie) {
     if (!el) return;
     const linhas = serie.dias.map((dd, i) =>
-      '<tr><td>' + data(dd) + '</td><td>' + serie.biometria[i] + '</td><td>' +
-      serie.manual[i] + '</td><td>' + serie.total[i] + '</td></tr>').join('');
+      '<tr><td class="num">' + data(dd) + '</td><td class="num">' + serie.biometria[i] + '</td><td class="num">' +
+      serie.manual[i] + '</td><td class="num">' + serie.total[i] + '</td></tr>').join('');
     el.innerHTML = '<table class="tabdados"><thead><tr><th>Dia</th><th>Biometria</th>' +
       '<th>Manual</th><th>Total</th></tr></thead><tbody>' + linhas + '</tbody></table>';
   },
@@ -195,7 +195,7 @@ export const Rh = {
   tabelaManual(el, equipes) {
     if (!el) return;
     const linhas = equipes.map(e =>
-      '<tr><td>' + esc(e.nome) + '</td><td>' + e.taxa_manual + '%</td><td>' +
+      '<tr><td>' + esc(e.nome) + '</td><td class="num">' + e.taxa_manual + '%</td><td class="num">' +
       e.marcacoes + '</td></tr>').join('');
     el.innerHTML = '<table class="tabdados"><thead><tr><th>Equipe</th>' +
       '<th>Taxa manual</th><th>Marcações</th></tr></thead><tbody>' + linhas + '</tbody></table>';
@@ -204,7 +204,7 @@ export const Rh = {
   tabelaMotivos(el, motivos) {
     if (!el) return;
     const linhas = motivos.map(m =>
-      '<tr><td>' + esc(m.rotulo) + '</td><td>' + m.total + '</td></tr>').join('');
+      '<tr><td>' + esc(m.rotulo) + '</td><td class="num">' + m.total + '</td></tr>').join('');
     el.innerHTML = '<table class="tabdados"><thead><tr><th>Motivo</th>' +
       '<th>Pendências</th></tr></thead><tbody>' + linhas + '</tbody></table>';
   },
@@ -236,10 +236,10 @@ export const Rh = {
     // se a aba já mudou enquanto a biblioteca carregava, não pinte nada
     if (!Chart || this.aba !== 'painel') return;
 
-    const s1 = this.css('--serie-1') || '#2a78d6';
-    const s2 = this.css('--serie-2') || '#eb6834';
-    const grid = this.css('--v-grid') || '#2c3e50';
-    const txt = this.css('--v-text2') || '#8fa3b5';
+    const s1 = this.css('--serie-1') || '#2d6cdf';
+    const s2 = this.css('--serie-2') || '#e0a800';
+    const grid = this.css('--v-grid') || '#e5e9f0';
+    const txt = this.css('--v-text2') || '#8390a6';
     const temMarcacao = serie.total.some(v => v > 0);
 
     const base = {
@@ -514,16 +514,13 @@ export const Rh = {
       equipe_id: p.equipe_id, papel: p.papel
     });
     if (!r.ok) { toast(r.erro || 'Falha', 'bad'); $('btnSalvarBio').disabled = false; return; }
-    const bio = await fetch(window.EFRAT_CFG.apiBase + '/efrat/cadastro', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        token: this._tokenAparelho, origem: 'rh', pessoa_id: p.pessoa_id,
-        nome: p.nome, matricula: p.matricula, equipe_id: p.equipe_id,
-        vetores: c.map(x => x.descritor), miniatura: c[0].thumb, coerencia: Number(coer.toFixed(4))
-      })
-    }).then(x => x.json()).catch(() => null);
+    const bio = await Api.cadastrar(this._dispositivo.dispositivo_id, this._dispositivo.credencial, {
+      origem: 'rh', pessoa_id: p.pessoa_id, nome: p.nome, matricula: p.matricula,
+      equipe_id: p.equipe_id, vetores: c.map(x => x.descritor),
+      miniatura: c[0].thumb, coerencia: Number(coer.toFixed(4))
+    });
     $('btnSalvarBio').disabled = false;
-    if (!bio || !bio.ok) { toast((bio && bio.erro) || 'Falha ao gravar biometria', 'bad'); return; }
+    if (!bio.ok) { toast(bio.erro || 'Falha ao gravar biometria', 'bad'); return; }
     toast('Biometria salva (coerência ' + coer.toFixed(3) + ')', 'ok');
     this.pararCamCad();
     $('areaBio').innerHTML = '';
@@ -573,7 +570,7 @@ export const Rh = {
       const linhas = espelho(this.dados.marcacoes, id);
       $('regSaida').innerHTML = linhas.length
         ? linhas.map(l => '<div class="esp"><span class="d">' + data(l.dia) + '</span><span>' +
-            l.marcacoes.map(m => (m.tipo === 'entrada' ? 'E ' : 'S ') + hora(m.marcado_em) +
+            l.marcacoes.map(m => (m.tipo === 'entrada' ? 'E ' : 'S ') + '<span class="mono">' + hora(m.marcado_em) + '</span>' +
               (m.origem === 'manual' ? ' <span class="tag">manual</span>' : '') +
               (m.pendente ? ' <span class="tag">pendente</span>' : '')).join(' · ') +
             '</span></div>').join('')
