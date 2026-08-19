@@ -24,13 +24,20 @@ Duas decisões que ELE tomou e não se discutem mais:
 |---|---|---|
 | `f9024bcab1` Orquestrador | `36b9ece` | `docs/plano-v3.md`, checkpoints, README, este arquivo |
 | `72b3e79015` Arquiteto | **`c71a1eb`** | ADR, 4 de 6 `n8n/*.workflow.js`, `servidor-falso.js` v3 |
-| `a7f15f0974` Revisor | **`908f212`** | 4 docs de análise, 3 e2e do RH com seed, **WIP: UI nova trazida, `fluxo.spec.js` intocado** |
+| `a7f15f0974` Revisor | **`6ca46b3`** | 4 docs de análise, 3 e2e do RH com seed, **WIP: UI nova trazida, `fluxo.spec.js` intocado** |
 | `41fa23ad22` DevOps | **`a0874c9`** | fontes, CSP, sw.js v6, 7 guardas, `offline.spec.js` |
 | `c9bb844c20` Full-Stack | **`3328bf7`** | tema, fluxo do colaborador, `acesso.spec.js`, T-8FB792 **não iniciada** |
 
 Handoffs individuais, um por branch, em `.central-agentes/handoffs/`:
 `2026-08-19-arquiteto-t-e1b1cb.md` · `2026-08-19-devops-v3.md` ·
-`2026-08-19-engenheiro-fullstack-c9bb844c20.md`. O do Revisor foi pedido na parada.
+`2026-08-19-engenheiro-fullstack-c9bb844c20.md` · `2026-08-19-revisor-t38a7c1.md`.
+
+**O handoff do Revisor é o mais importante dos quatro.** Ele contém o desenho concreto do
+helper novo que substitui `abrirFila()` — o seletor a esperar, o ajuste no helper `marcar()`
+(esperar o comprovante **sair** do DOM em vez de contar tempo, porque `comprovante()` em
+`js/fila.js` já limpa `#cartao` sozinho), e quais dos 23 testes não têm substituto 1:1 porque
+a tela virou `#aguardando`/`#aguardandoCodigo`. É o item 1 do caminho crítico, já resolvido no
+papel. **Leia antes de escrever qualquer teste** — sem isso a próxima sessão redescobre do zero.
 
 Nada ficou pela metade: a T-8FB792 do Full-Stack **não começou**, e o Revisor parou antes de
 tocar em `fluxo.spec.js`. Os 4 agentes commitaram e pararam sob ordem.
