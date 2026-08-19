@@ -191,3 +191,28 @@ cacheada no `sw.js`, com fallback de sistema. Vale para as duas famílias.
 - Commit pequeno, mensagem em português, no seu branch.
 - Terminou: `central-agentes task move <ID> review` e `central-agentes report` com o
   diff resumido. Dúvida que bloqueia: `central-agentes send --to Orquestrador`.
+
+## Requisito de conteúdo — privacidade da tela compartilhada
+
+Origem: `docs/ameacas-v3.md` e `docs/privacidade-tela-compartilhada.md` (Revisor, T-64668A).
+O TTL de sessão do ADR fecha a exposição **depois** que a pessoa se afasta. Não toca a
+exposição **durante** o uso legítimo, que é o caso de maior volume: toda marcação numa
+fila ocupada, todo dia. Regras para quem implementa tela:
+
+1. **Primeiro estado pós-reconhecimento só mostra comprovante.** Nome, tipo, hora e nada
+   mais. Saldo de banco de horas, histórico e espelho exigem toque explícito.
+2. **Tamanho de fonte é decisão de privacidade, não só de estética.** Mono e
+   `tabular-nums` valem para todo número — isso não muda. Corpo **grande** só para número
+   que qualquer um pode ler: hora da marcação, contador da fila, KPI agregado do painel do
+   RH. Saldo, histórico e nome completo em corpo pequeno. Legibilidade a distância é
+   exatamente o que não se quer no saldo do colega.
+3. **O painel do gestor não abre automático.** O reconhecimento do gestor marca o ponto
+   dele e mostra um link discreto "ver minha equipe", que exige toque.
+4. **Quando abre, abre agregado.** "Em jornada 8 · intervalo 2 · ausentes 1" primeiro.
+   Nome individual só num segundo toque, e a lista de **ausentes antes da de presentes** —
+   é o que o gestor precisa saber. Assim o uso comum não expõe o dia de ninguém ao grupo
+   reunido, e o caso que precisa de nome exige ação deliberada, que o gestor pode dar de
+   costas para a fila.
+
+Critérios de aceite destes itens são verificação no DOM, não inspeção visual — não há
+validação visual disponível nesta esteira.
