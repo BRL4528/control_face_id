@@ -32,3 +32,8 @@ foi alterada.
 - Nenhum workflow foi criado/publicado; Orquestrador ficou responsavel por validar/publicar via conector.
 - Faltam `identificar`, `gestor/equipe-hoje`, `gestor/ajustar` e rate limit persistente do registrar.
 - `210098d`: patch CSP do DevOps absorvido literalmente; 23/23 E2E passaram com CSP ativa.
+
+- `41ec956` + `ceed955` + `eafb391`: `n8n/identificar.workflow.js`; 1:N, limite, auditoria e sessao em `efrat_sessao_gestor` dedicada; SDK validate sem issues/warnings.
+- `89bdd89`: CORS literal do ativo e `executeOnce` nas leituras globais.
+- `7920cc9`: seeds do Revisor; confirmados em uso com 23/23 no branch dele.
+- Faltam somente `gestor/equipe-hoje`, `gestor/ajustar` e rate limit persistente do registrar.
