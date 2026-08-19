@@ -7,8 +7,8 @@
 - `4bd88b8`: rate limits, CORS e migracao de token legado.
 - `49c13de`: compatibilidade do erro textual v2.
 - Smoke direto de todas as rotas v3: OK.
-- Unitarios: 47/47. E2E inicial: 22/23 por erro textual v2, corrigido depois;
-  teste afetado reexecutado e passou. Falta reexecutar suite completa apos a correcao.
+- Unitarios: 47/47.
+- E2E apos a correcao de compatibilidade: 23/23 em 1,7 min.
 
 ## Bloqueio externo
 
@@ -23,4 +23,3 @@ foi alterada.
 - Duplicar/versionar workflows sem alterar os seis ativos.
 - Criar tabelas/colunas aditivas do ADR e workflows v3 nas copias.
 - Validar copias e informar ao Orquestrador exatamente quais IDs trocar.
-- Reexecutar os 23 E2E completos (esperado verde apos `49c13de`).
