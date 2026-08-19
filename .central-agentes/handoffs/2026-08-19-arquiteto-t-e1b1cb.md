@@ -37,3 +37,18 @@ foi alterada.
 - `89bdd89`: CORS literal do ativo e `executeOnce` nas leituras globais.
 - `7920cc9`: seeds do Revisor; confirmados em uso com 23/23 no branch dele.
 - Faltam somente `gestor/equipe-hoje`, `gestor/ajustar` e rate limit persistente do registrar.
+
+## Parada da rodada
+
+- Ultimo commit funcional: `c2a71c1`, criou `n8n/gestor-equipe-hoje.workflow.js`; SDK CLI valida sem issues.
+- Correcoes A1-A3 aplicadas em `bcfbfd2` e `d1e1119`: locators com IDs reais, `descricao` no storage/`apelido` na API, filtro de dispositivo nos nodes conhecidos e nota no ADR.
+- Identificacao usa `efrat_sessao_gestor` dedicada desde `ceed955`; `eafb391` eliminou todos os warnings do SDK.
+- Nenhum workflow foi publicado. Orquestrador publica/valida pelo conector.
+
+### Faltando exatamente
+
+1. Revisar `n8n/gestor-equipe-hoje.workflow.js`: hoje o fluxo e linear e tenta `Atualizar Atividade` mesmo quando `Validar Sessao e Montar Equipe` devolve erro sem `sessao_hash`. Primeira acao da retomada: inserir IF por `_status == 200`; sucesso atualiza `ultima_atividade`, erro vai direto a `Responder`.
+2. Criar `n8n/gestor-ajustar.workflow.js` (ainda nao existe), com escopo da sessao, idempotencia, correcao pendente e update de atividade.
+3. Ligar rate limit persistente do registrar a `efrat_limite_api`; o Code gera CSPRNG/migracao, mas o SDK ainda nao persiste limite por IP/janela.
+4. Pedir ao Orquestrador `validate_workflow`/publicacao dos seis SDKs depois das correcoes; nao publicar localmente.
+5. Ao retomar, ler primeiro o handoff mestre `2026-08-19-orquestrador-v3.md` no branch do Orquestrador. Os 23 E2E estao vermelhos intencionalmente pela retirada do pareamento; nao restaurar fluxo legado.
