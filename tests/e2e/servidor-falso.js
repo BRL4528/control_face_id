@@ -3,6 +3,7 @@
 // rejeição de colaborador inativo — para que o E2E valide o contrato, e não
 // uma versão otimista dele.
 import http from 'node:http';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,7 +31,14 @@ export function criarServidor(opts = {}) {
     marcacoes: new Map(),      // id_cliente -> marcação
     inativos: new Set(opts.inativos || []),
     fora: false,               // simula servidor inacessível
-    chamadas: { carga: 0, marcacoes: 0, cadastro: 0, rh: 0 },
+    chamadas: { carga: 0, marcacoes: 0, cadastro: 0, rh: 0, registrar: 0, estado: 0, identificar: 0 },
+    dispositivos: new Map(),
+    codigosPendentes: new Map(),
+    sessoesGestor: new Map(),
+    correcoes: [],
+    auditoriaIdentificacao: [],
+    limitesIdentificacao: new Map(),
+    idempotencia: new Map(),
     recadastros: [],
     equipesCriadas: [],
     colaboradoresCriados: [],
@@ -51,6 +59,36 @@ export function criarServidor(opts = {}) {
     { pessoa_id: 'p-carla', nome: 'Carla Dias', matricula: '003', equipe_id: 'eq-2', papel: 'colaborador' },
     { pessoa_id: 'p-gestor', nome: 'Gestor Piloto', matricula: 'G01', equipe_id: 'eq-1', papel: 'gestor' }
   ]).map(p => Object.assign({ versao: 1, vetores: [vetorDe(p.pessoa_id)], miniatura: '' }, p));
+
+  const alfabetoCodigo = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const requestId = () => crypto.randomUUID();
+  const erro = (codigo, mensagem, campo) => ({
+    ok: false, erro: Object.assign({ codigo, mensagem }, campo ? { campo } : {}),
+    request_id: requestId()
+  });
+  const bearer = req => {
+    const valor = String(req.headers.authorization || '');
+    return valor.startsWith('Bearer ') ? valor.slice(7) : '';
+  };
+  const hashCredencial = valor => crypto.createHash('sha256').update(String(valor)).digest('base64url');
+  const codigoAleatorio = () => {
+    let codigo = '';
+    for (let i = 0; i < 6; i++) codigo += alfabetoCodigo[crypto.randomInt(alfabetoCodigo.length)];
+    return codigo;
+  };
+  const novoCodigoUnico = () => {
+    for (let tentativa = 0; tentativa < 3; tentativa++) {
+      const codigo = codigoAleatorio();
+      if (!estado.codigosPendentes.has(codigo)) return codigo;
+    }
+    return null;
+  };
+  const dispositivoAutenticado = (req, dispositivoId) => {
+    const dispositivo = estado.dispositivos.get(dispositivoId);
+    const credencial = bearer(req);
+    if (!dispositivo || !credencial || dispositivo.credencial_hash !== hashCredencial(credencial)) return null;
+    return dispositivo;
+  };
 
   function carga() {
     const fim = new Date(); fim.setHours(23, 59, 59, 0);
@@ -82,11 +120,74 @@ export function criarServidor(opts = {}) {
       let body = {};
       try { body = corpo ? JSON.parse(corpo) : {}; } catch (e) { /* body vazio */ }
 
-      // As rotas do RH nao usam token de aparelho: autenticam por usuario + chave.
+      const rotaRegistrar = url.pathname === '/webhook/efrat/dispositivo/registrar';
+      const rotaEstado = url.pathname === '/webhook/efrat/dispositivo/estado';
+      const rotaV3Autenticada = rotaEstado
+        || url.pathname === '/webhook/efrat/identificar'
+        || url.pathname.startsWith('/webhook/efrat/gestor/');
+      // RH conserva usuario + chave nesta rodada. Rotas v3 usam bearer proprio.
       const ehRh = url.pathname.startsWith('/webhook/efrat/rh/');
-      if (!ehRh) {
+      if (!ehRh && !rotaRegistrar && !rotaV3Autenticada) {
         const token = body.token || url.searchParams.get('token');
-        if (token !== estado.token) return responder(401, { ok: false, erro: 'token invalido' });
+        const dispositivo = body.dispositivo_id && dispositivoAutenticado(req, body.dispositivo_id);
+        if (token !== estado.token && !dispositivo) {
+          return responder(401, erro('CREDENCIAL_INVALIDA', 'credencial invalida'));
+        }
+      }
+
+      if (rotaRegistrar) {
+        estado.chamadas.registrar++;
+        if (!body.dispositivo_id || !body.credencial_publica || !body.apelido || !body.ua) {
+          return responder(400, erro('CORPO_INVALIDO', 'campos obrigatorios ausentes'));
+        }
+        const existente = estado.dispositivos.get(body.dispositivo_id);
+        if (existente) {
+          if (existente.credencial_hash !== body.credencial_publica) {
+            return responder(409, erro('DISPOSITIVO_CONFLITO', 'dispositivo ja cadastrado'));
+          }
+          return responder(202, {
+            ok: true, estado: existente.estado, dispositivo_id: body.dispositivo_id,
+            codigo_curto: existente.codigo_curto, consultar_apos_s: 10, request_id: requestId()
+          });
+        }
+        const codigo = novoCodigoUnico();
+        if (!codigo) return responder(503, erro('CODIGO_INDISPONIVEL', 'nao foi possivel gerar codigo'));
+        const dispositivo = {
+          dispositivo_id: body.dispositivo_id, credencial_hash: body.credencial_publica,
+          estado: 'pendente', codigo_curto: codigo, apelido: body.apelido, ua: body.ua,
+          geo: body.geo || null, tentativas: 1, local_id: null, equipes_ids: [],
+          configuracao_versao: 0, aprovado_por: null, aprovado_em: null
+        };
+        estado.dispositivos.set(body.dispositivo_id, dispositivo);
+        estado.codigosPendentes.set(codigo, body.dispositivo_id);
+        return responder(202, {
+          ok: true, estado: 'pendente', dispositivo_id: body.dispositivo_id,
+          codigo_curto: codigo, consultar_apos_s: 10, request_id: requestId()
+        });
+      }
+
+      if (rotaEstado) {
+        estado.chamadas.estado++;
+        const dispositivo = dispositivoAutenticado(req, body.dispositivo_id);
+        if (!dispositivo) return responder(401, erro('CREDENCIAL_INVALIDA', 'credencial invalida'));
+        if (dispositivo.estado === 'pendente') {
+          return responder(200, {
+            ok: true, estado: 'pendente', codigo_curto: dispositivo.codigo_curto,
+            consultar_apos_s: 15, request_id: requestId()
+          });
+        }
+        if (dispositivo.estado !== 'ativo') {
+          return responder(200, { ok: true, estado: dispositivo.estado, request_id: requestId() });
+        }
+        return responder(200, {
+          ok: true, estado: 'ativo',
+          dispositivo: {
+            dispositivo_id: dispositivo.dispositivo_id, apelido: dispositivo.apelido,
+            equipes_ids: dispositivo.equipes_ids,
+            configuracao_versao: dispositivo.configuracao_versao
+          },
+          request_id: requestId()
+        });
       }
 
       if (url.pathname === '/webhook/efrat/carga') {
