@@ -1,5 +1,13 @@
 # Efrat · Ponto — API do piloto (n8n + Data Tables)
 
+> **Contrato legado (v2).** Este documento descreve o piloto atual. No v3, o token
+> digitado deixa de autenticar o aparelho, `/efrat/carga` passa a ser escopada no
+> servidor por `equipes_ids`, e entram os endpoints de dispositivo, identificacao e
+> gestor. O contrato normativo da migracao e das rotas v3 esta em
+> [`adr-acesso-v3.md`](adr-acesso-v3.md). As rotas de RH continuam no modelo atual
+> nesta rodada; substituir a chave PBKDF2 usada como bearer e divida estimada em
+> 2,5–3 dias.
+
 Base: `https://n8n.samasc.com.br/webhook/`
 
 Duas autenticações, de propósito separadas:

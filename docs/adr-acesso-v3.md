@@ -12,7 +12,9 @@ no IndexedDB. A credencial e segredo de maquina: nunca aparece na interface. O c
 fica pendente ate o RH localizar o pedido e digitar no painel o codigo curto mostrado
 no aparelho, escolhendo local e `equipes_ids`.
 
-O codigo curto serve somente para prova de posse e busca do pedido; nao autentica API.
+O servidor gera o codigo curto aleatoriamente e o devolve somente ao aparelho. Ele
+serve para prova de posse e busca do pedido; nao autentica API e nao pode ser derivado
+do UUID.
 `apelido`, `ua` e `geo` sao metadados autodeclarados. O backend guarda apenas o hash da
 credencial. Depois do cadastro, todos os endpoints do aparelho exigem
 `Authorization: Bearer <credencial_dispositivo>` e conferem se o
@@ -44,15 +46,16 @@ Nao exige `Authorization` no primeiro cadastro. Corpo:
   "credencial_publica": "base64url(sha256 da credencial)",
   "apelido": "Tablet obra norte",
   "ua": "user-agent",
-  "geo": { "lat": -20.46, "lng": -54.62, "precisao_m": 24 },
-  "codigo_curto": "ABC-123"
+  "geo": { "lat": -20.46, "lng": -54.62, "precisao_m": 24 }
 }
 ```
 
-`geo` e opcional; os demais campos sao obrigatorios. O codigo e derivado localmente
-do UUID, tem seis caracteres e e exibido ao RH. Repetir o mesmo cadastro e idempotente
-se a credencial coincidir; credencial diferente para UUID existente retorna conflito.
-O endpoint aplica limite por IP e por janela e incrementa um contador de tentativas
+`geo` e opcional; os demais campos sao obrigatorios. O servidor gera um codigo de seis
+caracteres com CSPRNG, usando alfabeto sem `0/O/1/I/L`, e o guarda com o pendente. Em
+colisao com outro pedido pendente, responde `409 CODIGO_COLISAO`; o aparelho gera novo
+pedido para receber outro codigo. Repetir o mesmo cadastro e idempotente se a
+credencial coincidir; credencial diferente para UUID existente retorna conflito. O
+endpoint aplica limite por IP e por janela e incrementa um contador de tentativas
 visivel no painel do RH.
 
 Resposta `202`:
@@ -68,9 +71,11 @@ Resposta `202`:
 }
 ```
 
-Erros especificos: `DISPOSITIVO_CONFLITO` (`409`), `CODIGO_INVALIDO` (`400`) e
-`LIMITE_CADASTRO` (`429`, com `Retry-After`). A aprovacao pelo RH deve conferir o
-codigo digitado, registrar autor/data, `equipes_ids` e local antes de ativar.
+Erros especificos: `DISPOSITIVO_CONFLITO` (`409`), `CODIGO_COLISAO` (`409`) e
+`LIMITE_CADASTRO` (`429`, com `Retry-After`). Nenhum endpoint de leitura do RH expoe
+`codigo_curto` (nem UUID + material que permita deriva-lo). Na aprovacao, o RH digita
+o codigo lido na tela fisica; o servidor resolve o unico pendente correspondente e so
+entao registra autor/data, `equipes_ids` e local antes de ativar.
 
 ## `POST /efrat/dispositivo/estado`
 
@@ -169,7 +174,10 @@ aparelho ativo. Corpo:
 
 O descritor deve ter exatamente 128 numeros finitos no intervalo aceito pelo motor.
 O servidor compara com a galeria da unidade associada ao local do aparelho, sem
-devolver essa galeria. Resposta reconhecida `200`:
+devolver essa galeria. O endpoint tem rate limit por `dispositivo_id` e por janela;
+quando excedido, responde `429 LIMITE_IDENTIFICACAO` e `Retry-After`. Toda tentativa e
+auditada com dispositivo, instante e resultado, nunca com o descritor. Resposta
+reconhecida `200`:
 
 ```json
 {
@@ -190,9 +198,13 @@ devolver essa galeria. Resposta reconhecida `200`:
 
 Sem correspondencia inequívoca responde `200` com
 `{ "ok": true, "resultado": "nao_reconhecido", "request_id": "..." }`.
+Reconhecida ou nao, a resposta nunca inclui vetor 128d, miniatura ou outro material
+biometrico; a identidade reconhecida se limita a `pessoa_id`, `nome`, `equipe_id` e
+`papel`.
 Somente distancia estritamente menor que `limiarAceite` (`0.45`) identifica gestor;
 zona cinzenta nunca cria sessao privilegiada. Erros: `DESCRITOR_INVALIDO` (`400`),
-`DISPOSITIVO_INATIVO` (`403`) e `SERVICO_RECONHECIMENTO_INDISPONIVEL` (`503`).
+`DISPOSITIVO_INATIVO` (`403`), `LIMITE_IDENTIFICACAO` (`429`) e
+`SERVICO_RECONHECIMENTO_INDISPONIVEL` (`503`).
 
 ## Sessao facial do gestor
 
@@ -283,6 +295,33 @@ somente acao explicita do usuario renova o prazo de inatividade.
 Essa sessao permite consultar apenas o proprio historico e propor ajuste proprio. Ela
 nao herda escopo de gestor, ainda que a pessoa tenha `papel: "gestor"`.
 
+## Persistencia e locais
+
+O v3 cria `efrat_local` (`local_id`, `nome`, `endereco`, `lat`, `lng`, `raio_m`,
+`ativo`) e adiciona `local_id` a `efrat_equipe`. Esta e a fonte unica dos locais que o
+RH administra; `efrat_equipe.unidade` fica apenas para compatibilidade durante a
+migracao. A tabela propria evita repetir endereco e geofence em cada equipe e permite
+associar varias equipes ao mesmo canteiro.
+
+Colunas novas por Data Table:
+
+- `efrat_dispositivo`: `dispositivo_id`, `credencial_hash`, `estado`, `codigo_curto`,
+  `apelido`, `ua`, `geo`, `tentativas`, `local_id`, `configuracao_versao`,
+  `aprovado_por`, `aprovado_em`;
+- `efrat_correcao`: `estado`, `marcacao_id`, `valor_anterior`, `valor_proposto`,
+  `sessao_evento`;
+- `efrat_equipe`: `local_id`;
+- `efrat_local`: todas as colunas descritas acima.
+
+n8n Data Tables nao oferece rate limit ou idempotencia automaticamente. Criam-se
+tambem `efrat_limite_api` (`chave`, `rota`, `janela_inicio`, `contador`, `expira_em`),
+onde `chave` e hash de IP ou `dispositivo_id`, `efrat_idempotencia` (`chave`, `rota`,
+`autor_id`, `hash_requisicao`, `status_http`, `resposta`, `criado_em`, `expira_em`)
+e `efrat_auditoria_identificacao` (`dispositivo_id`, `instante`, `resultado`,
+`pessoa_id` opcional, `request_id`). Esta ultima nunca guarda o descritor. As
+operacoes de incrementar/consultar limite e reservar Idempotency-Key devem ser
+atomicas; a resposta persistida nao pode conter biometria ou credenciais.
+
 ## Migracao de aparelhos com token antigo
 
 1. Na primeira execucao da v3, o app que encontrar `token` legado gera UUID e nova
@@ -298,6 +337,12 @@ nao herda escopo de gestor, ainda que a pessoa tenha `papel: "gestor"`.
    deploy**. Nao o aceita nos endpoints v3 nem em `/efrat/carga` novo. Ao migrar, marca
    o token como consumido imediatamente; depois da janela, aparelho nao migrado segue
    o fluxo normal de aprovacao do RH.
+
+Se dois aparelhos compartilhavam o mesmo token legado, somente o primeiro conclui a
+migracao silenciosa. O segundo recebe `409 TOKEN_LEGADO_CONSUMIDO` e mostra:
+"Este token ja foi migrado em outro aparelho. Solicite a liberacao deste aparelho ao
+RH." Em seguida entra no fluxo normal pendente, exibe seu novo codigo curto e preserva
+localmente qualquer marcacao ainda nao sincronizada; nada e descartado sem confirmacao.
 
 Erros especificos: `TOKEN_LEGADO_INVALIDO` (`401`), `TOKEN_LEGADO_CONSUMIDO` (`409`)
 e `JANELA_MIGRACAO_ENCERRADA` (`410`). A operacao registra dispositivo, IP, instante e
