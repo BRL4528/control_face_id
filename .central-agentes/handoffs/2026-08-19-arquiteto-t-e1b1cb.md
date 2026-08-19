@@ -23,3 +23,12 @@ foi alterada.
 - Duplicar/versionar workflows sem alterar os seis ativos.
 - Criar tabelas/colunas aditivas do ADR e workflows v3 nas copias.
 - Validar copias e informar ao Orquestrador exatamente quais IDs trocar.
+
+## SDK n8n sem deploy
+
+- `4a939e5` + `6e27733`: `n8n/dispositivo-registrar.workflow.js`, SDK validado sem issues; inclui cadastro pendente, codigo CSPRNG com 3 tentativas, idempotencia por dispositivo e migracao do token legado. Falta ligar rate limit persistente de cadastro.
+- `c8e261b` + `6e27733`: `n8n/dispositivo-estado.workflow.js`, SDK validado sem issues.
+- `43d0cf8`: `n8n/carga-escopada.workflow.js`, SDK validado sem issues; filtra pessoas/templates por `equipes_ids` do dispositivo. Path temporario `efrat/carga-v3` para coexistir com ativo; trocar para `efrat/carga` no corte.
+- Nenhum workflow foi criado/publicado; Orquestrador ficou responsavel por validar/publicar via conector.
+- Faltam `identificar`, `gestor/equipe-hoje`, `gestor/ajustar` e rate limit persistente do registrar.
+- `210098d`: patch CSP do DevOps absorvido literalmente; 23/23 E2E passaram com CSP ativa.
