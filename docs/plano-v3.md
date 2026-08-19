@@ -27,13 +27,13 @@ acessar e ajustar no que for necessário").
 | `js/fila.js` | fila do gestor: identifica, propõe, confirma, comprovante, recadastro, sync do lote | 370 |
 | `js/rh.js` | painel do RH: painel/pendências/pessoas/equipes/registros + Chart.js | 585 |
 | `js/face.js` | face-api.js: detecção, qualidade, descritor 128d, ROI rastreada | 285 |
-| `js/regras.js` | regras puras (tipo da marcação, cooldown, veredito, carga válida) — **coberto por 37 testes unitários** | 266 |
+| `js/regras.js` | regras puras (tipo da marcação, cooldown, veredito, carga válida) — **coberto pelos testes unitários** | 266 |
 | `js/store.js` | IndexedDB: `token`, `carga`, `deriva`, fila offline, eventos | 105 |
 | `js/api.js` | `Api` (aparelho, por token) e `ApiRh` (por chave derivada) | 136 |
 | `js/cripto.js` | PBKDF2-SHA256 150k iterações no navegador | 18 |
 | `js/ui.js` | `$`, `mostrar`, `toast` | 26 |
 
-Testes: `npm run test:unit` (37, Node puro) e `npm run test:e2e` (19, Playwright com
+Testes: `npm run test:unit` (**47**, Node puro) e `npm run test:e2e` (**23**, Playwright com
 motor de reconhecimento fingido e `tests/e2e/servidor-falso.js`). **CI verde é
 critério de aceite de toda task.**
 
@@ -59,6 +59,9 @@ Data Tables (projeto `iSQtz4jYvP9BS6nf`):
 
 Contrato detalhado: `docs/api-piloto.md`. Fluxo: `docs/fluxo-operacional.md`.
 
+> Os números 19 e 37 que o README anuncia estão desatualizados. O real é 23 e2e e 47
+> unitários (conferido por `grep -c '^test(' `). Quem mexer no README nesta rodada corrige.
+
 ## Direção arquitetural proposta (a validar na T-ARQ, não implementar antes)
 
 O token digitado é hoje a **única** autenticação de dispositivo. Tirar sem substituto
@@ -79,6 +82,39 @@ biométrico de todos os colaboradores. Isso não é opção. Substituto proposto
 Ganha-se: nenhum funcionário digita nada, descritor biométrico nunca sai por
 endpoint aberto, e o RH controla que aparelho vê que equipe — o que casa com
 "o RH define locais".
+
+### R1 — BLOQUEANTE, achado do Revisor em `docs/ameacas-v3.md`
+
+Trocar a autenticação do dispositivo **não reduz exposição nenhuma** enquanto
+`/efrat/carga` continuar entregando a unidade inteira. `docs/fluxo-operacional.md:65`
+é explícito: o aparelho baixa templates + miniatura + nomes de toda a unidade, e o
+filtro por equipe é client-side. Aparelho comprometido = 100% da biometria da unidade,
+antes e depois da mudança.
+
+**Decisão do Orquestrador, a detalhar na T-ARQ:** `/efrat/carga` passa a ser escopada
+**no servidor** pelas `equipes_ids` do dispositivo aprovado. Isso tem um custo real e
+consciente: mata o "buscar na unidade" offline do colaborador remanejado
+(`fluxo-operacional.md:69`), que existe para evitar registro manual. Substituto:
+`POST /efrat/identificar { dispositivo_id, descritor }` faz o **1:N no servidor** quando
+há rede — o descritor do desconhecido sobe, a galeria da unidade nunca desce. Sem rede,
+o remanejado cai em registro manual com foto para o RH decidir. Trocamos um caso de
+borda offline pela eliminação da cópia integral da biometria em cada celular de campo.
+
+### Decisões que fecham os outros achados do Revisor
+
+- **Prova de posse na aprovação (fadiga de aprovação, achados 1 e 2):** `apelido`, `ua`
+  e `geo` são autodeclarados pelo aparelho e não valem como identidade. A aprovação
+  exige o **RH digitar no painel o código curto exibido na tela do aparelho**. Quem
+  digita é o RH, no painel — o funcionário de campo continua sem digitar nada, que é o
+  que o cliente pediu. Mais: rate limit em `/efrat/dispositivo/registrar` por IP e por
+  janela, e a lista de pendentes ordenada por chegada com contador de tentativas visível.
+- **Face sem liveness autenticando privilégio (achado 3):** a face **nunca** dá acesso
+  admin. Ela dá **escopo de gestor** e nada mais: ver o dia da própria equipe e
+  **propor** ajuste. Todo ajuste do gestor entra em `efrat_correcao` como pendência que
+  o RH aprova — o mesmo caminho do recadastro. O painel do RH continua atrás de
+  usuário + senha. Assim um spoof de foto rende, no pior caso, ver o dia de uma equipe
+  e propor uma correção que alguém confere. Identificação de gestor exige score abaixo
+  de `limiarAceite` (0.45); zona cinzenta não abre painel, só registra ponto.
 
 **Papéis depois da mudança**
 - **Colaborador**: uma tela, um botão, câmera, comprovante. Sem login, sem fila do gestor.
