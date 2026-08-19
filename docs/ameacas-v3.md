@@ -392,3 +392,15 @@ já usado no resto do projeto, então é um trabalho conhecido, não exploratór
 
 **Total: ~2,5–3 dias de desenvolvimento**, risco técnico baixo. Cartão próprio,
 como já decidido — não bloqueia a T-ARQ nem a fase 2 dos testes desta rodada.
+
+## Nota pra quando eu escrever o helper novo (substituto de `abrirFila`)
+
+Restrição do Orquestrador, registrada aqui pra não se perder até a T-607E5A/
+T-8FB792 do Full-Stack destravarem a escrita: o helper novo não pode esperar
+em estado interno de módulo JS (o `abrirFila` atual espera
+`window.__EFRAT.Fila.gestor !== null` e `Fila.estado === 'armado'`) — isso
+acoplou 14 testes a uma implementação específica de fluxo, e é exatamente por
+isso que ela quebra inteira na próxima mudança de fluxo. O helper novo espera
+por **sinal visível na tela** (seletor de DOM que aparece, texto renderizado),
+não por propriedade de objeto JS interno — mais devagar de escrever agora,
+mais barato na próxima vez que o fluxo mudar de novo.

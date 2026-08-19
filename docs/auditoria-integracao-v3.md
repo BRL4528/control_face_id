@@ -7,7 +7,22 @@ mesmo tempo. Método: `git diff 269cd42 <branch>` para cada um dos 4 branches
 (base comum, `main`) e checagem cruzada de toda referência de um arquivo a outro
 que atravessa fronteira de dono.
 
-## Achado 1 — `css/fontes.css` nunca é linkado em `index.html` (aberto)
+## Achado 1 — `css/fontes.css` nunca é linkado em `index.html` (FECHADO, com ressalva)
+
+> **Atualização do Orquestrador:** Full-Stack linkou o `css/fontes.css`. Mas o
+> conserto trouxe `css/fontes.css` + os `.woff2` do branch do DevOps via
+> `git checkout` pegando a versão **antiga** — 18 arquivos com `latin-ext`, de
+> antes da poda de 224 KB → 103 KB que o DevOps tinha acabado de fazer. Um
+> `checkout` entre branches traz um snapshot congelado no tempo; se o branch
+> de origem evoluiu depois desse ponto, o `checkout` reverte silenciosamente
+> essa evolução, e como as duas versões são cada uma internamente consistentes
+> (fontes existem, CSS válido), nenhum teste acusa — é a mesma classe de bug
+> do Achado 2, não coincidência: cópia de arquivo entre branches por
+> referência a um commit específico envelhece assim que a origem segue andando.
+> Resolvido na integração (branch `integra/v3`): 8 arquivos, 103 KB, suite
+> verde. Registro original abaixo, para o histórico.
+
+Confirmado no HEAD atual dos dois branches (DevOps `20483a3`, Full-Stack `3ca8f61`).
 
 Confirmado no HEAD atual dos dois branches (DevOps `20483a3`, Full-Stack `3ca8f61`).
 `index.html` não tem nenhum `<link rel="stylesheet">` além de manifest/ícone — só
@@ -37,7 +52,15 @@ arquivo na hora — não é meu arquivo. Nota secundária, baixa prioridade:
 (só `/vendor/*` e `/models/*` são `immutable`) — só importa depois que o link
 existir.
 
-## Achado 2 — `tests/e2e/servidor-falso.js` editado em paralelo por dois donos, sem se verem (parece resolvido agora mesmo — merece confirmação)
+## Achado 2 — `tests/e2e/servidor-falso.js` editado em paralelo por dois donos, sem se verem (FECHADO, com prova)
+
+> **Atualização do Orquestrador:** fechado com prova, não com leitura de código
+> — branch `integra/v3` mesclando DevOps + Arquiteto, suite completa rodada:
+> 56 testes unitários passando, **incluindo o teste do DevOps que importa
+> `extrairCspDeHeaders` do `servidor-falso.js` do Arquiteto** (a dupla
+> função+teste rodou junta pela primeira vez em algum lugar), e 23/23 e2e com
+> a CSP real ativa. Confirma que estava certo em não dar como fechado só
+> porque os dois arquivos pareciam iguais — registro original abaixo.
 
 DevOps (`20483a3`, dentro de T-97088E/D2) e o Arquiteto (`47c8a54`…`49c13de`,
 T-E1B1CB) modificaram o mesmo arquivo a partir da mesma base, sem saber um do
@@ -74,6 +97,21 @@ manteve todos os campos legados (`marcacoes`, `inativos`, `fora`,
 ao lado dos novos, e até o texto de erro `"token invalido"` do v2 foi
 preservado de propósito (commit `49c13de`). Isso reduz bastante o risco de eu
 trazer esse arquivo pro meu branch para a T-38A7C1.
+
+## Lição que se repetiu duas vezes — cópia entre branches envelhece
+
+Os dois achados fechados vieram da mesma causa, em duas formas: `git checkout
+<branch> -- arquivo` (ou copiar conteúdo) traz um instantâneo preso ao commit
+de origem no momento da cópia. Se a origem segue evoluindo depois — o
+Arquiteto reescrevendo `servidor-falso.js` a partir de antes do D2 do DevOps,
+o Full-Stack puxando `css/fontes.css` de antes da poda de fontes — o destino
+fica com uma versão velha que é **internamente consistente**, então nenhum
+teste isolado acusa. Vale como regra geral pra fase 2: depois de qualquer
+`checkout`/cópia de arquivo de outro branch, rodar a suite do lado que cedeu
+o arquivo (ou, melhor, mesclar de verdade e rodar tudo junto) antes de dar
+como pronto — foi exatamente rodar os 23 e2e depois de trazer o
+`servidor-falso.js` (não só ler o diff) que baixou meu risco percebido nesta
+auditoria.
 
 ## Verificado e sem achado
 
