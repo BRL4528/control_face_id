@@ -115,3 +115,74 @@ Bônus: comentário obsoleto em `js/config.js` fala do token digitado pelo gesto
 Nenhum cartão fecha sem teste que alguém **viu reprovar** — foi o que fechou a T-607E5A e o
 que mantém a T-E1B1CB aberta. Nada tocou workflow de produção; nenhum foi publicado.
 Confirmação de recebimento entre agentes não se responde: queima contexto e não produz nada.
+
+---
+
+# ADENDO — medição concluída e o achado principal da rodada
+
+## Números finais (`integra/v3-r2`, rodada sozinha, `--retries=0`)
+
+**35 testes · 23 passam · 12 reprovam.** `acesso` 6/6, `gestor` 5/5, `offline` 1/1,
+`fluxo` **11/23**.
+
+Reprovam, todos em `fluxo.spec.js`: 264 offline · 295 envio único · 313 inativo ·
+333/343/350/372 RH · 389 espelho · 405/412/421/440 painel.
+
+**9 dos 12 são uma causa raiz só.** Sobram 3 de causa própria (264, 295, 313) — no 264 o
+page snapshot volta **vazio**, o que não parece ser o mesmo problema.
+
+## O achado principal: deadlock de bootstrap do painel do RH
+
+`#btnAcessar` mora **dentro** de `#porta` (index.html:20/5) e `mostrarAguardando()` chama
+`mostrar('aguardando')`, que esconde `#porta`. Logo: **em aparelho não aprovado o painel do
+RH é inalcançável** — e é o RH que aprova aparelhos, pelo painel. O primeiro aparelho do
+sistema nunca sai de `#aguardando`, e o RH abrindo o painel num navegador novo cai no mesmo
+buraco (navegador novo também é dispositivo não aprovado).
+
+Não apareceu em teste isolado porque `acesso.spec.js` e `gestor.spec.js` aprovam o
+dispositivo no setup. Foi a integração que achou — terceira vez nesta rodada, primeira em
+que o achado é de desenho e não de arquivo.
+
+**Decisão fechada (T-E3DBD4, Full-Stack):** o acesso do RH sai de trás do gate. Fechei sem
+levar ao cliente porque **não é decisão de produto nova — é bug**: o servidor e a intenção
+declarada já concordavam, só o roteamento client-side contrariava os dois.
+- `tests/e2e/servidor-falso.js:181-182` já pula a checagem de credencial de dispositivo
+  para `/efrat/rh/*`
+- `js/app.js:7` já diz "nunca precisa do aparelho do campo"
+
+Critério de aceite (do Arquiteto, adotado integral): aparelho pendente → botão de RH visível
+→ senha errada negada → senha válida abre o RH → logout volta para `#aguardando` (não presume
+`#porta`) → e durante todo o fluxo `/efrat/carga` e o botão de ponto seguem inacessíveis.
+Nota do Revisor: o elemento sai do rodízio exclusivo do `mostrar()`
+(`porta|aguardando|fila|rh|loginRh|painelGestor`) e **não** se toca em `#aguardandoCodigo`,
+porque o critério 3 de `acesso.spec.js` continua valendo.
+
+Exigido: um teste dedicado que num aparelho **pendente** alcance o login do RH. Hoje reprova.
+Os 9 ficam verdes por consequência e isso **não** substitui o teste dedicado — sem ele,
+alguém reintroduz o gate e os 9 quebram sem ninguém entender por quê.
+
+## Guarda 8: congelada de propósito
+
+Baseline seria 12, mas **não fixar agora**: 9 viram verde de uma vez quando a T-E3DBD4 fechar,
+e catraca que precisa ser atualizada três vezes numa hora é ruído, não trava. Remedir depois.
+
+## Padrão que se repetiu três vezes hoje — vale como regra
+
+Três especialistas reportaram contagem de testes da base **antiga** (`47`/`48` em vez de
+`59`), cada um convencido de ter mesclado a integração. O número de testes é o detector mais
+barato que temos de "não estou na base que penso": se não der 59 (ou 60 com a guarda do
+DevOps), a mescla não aconteceu. **Peça o número, não a afirmação.**
+
+## Fila de E2E (liberada, um de cada vez)
+
+1. Full-Stack — T-E3DBD4
+2. Arquiteto — 4 mutações dirigidas + 2 casos 422 (T-E1B1CB fecha nisso)
+3. DevOps — `servir.spec.js`, depois de corrigir o acoplamento com `#porta`
+4. eu — remedir
+
+`pgrep -cf 'playwright test'` = 0 antes de cada um.
+
+## Ainda em aberto com o cliente
+
+As **até 2** linhas pendentes em `efrat_dispositivo` de produção. Não verificadas, não
+apagadas: as ferramentas de n8n aqui não leem nem apagam linha. Decisão dele.
