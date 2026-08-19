@@ -6,6 +6,7 @@ const ASSETS = [
   './index.html',
   './manifest.json',
   './css/fontes.css',
+  './css/tema.css',
   './vendor/face-api.js',
   './vendor/chart.umd.min.js',
   './vendor/fontes/plus-jakarta-sans-latin-400-normal.woff2',
