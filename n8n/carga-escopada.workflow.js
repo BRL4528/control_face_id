@@ -9,7 +9,7 @@ const dispositivos = node({
   type: 'n8n-nodes-base.dataTable', version: 1.1,
   config: { name: 'Consultar Dispositivos', parameters: {
     resource: 'row', operation: 'get',
-    dataTableId: { __rl: true, mode: 'name', value: 'efrat_dispositivo' },
+    dataTableId: { __rl: true, mode: 'list', value: 'gFJaT1uUyeVpHC74', cachedResultName: 'efrat_dispositivo' },
     returnAll: true, options: {},
     executeOnce: true,
   } },
@@ -33,7 +33,7 @@ const pessoas = node({
   type: 'n8n-nodes-base.dataTable', version: 1.1,
   config: { name: 'Consultar Pessoas', parameters: {
     resource: 'row', operation: 'get',
-    dataTableId: { __rl: true, mode: 'name', value: 'efrat_pessoa' },
+    dataTableId: { __rl: true, mode: 'list', value: 'ZB53ZUrgAgv1u7Mg', cachedResultName: 'efrat_pessoa' },
     returnAll: true, options: {},
     executeOnce: true,
   } },
@@ -43,7 +43,7 @@ const templates = node({
   type: 'n8n-nodes-base.dataTable', version: 1.1,
   config: { name: 'Consultar Templates', parameters: {
     resource: 'row', operation: 'get',
-    dataTableId: { __rl: true, mode: 'name', value: 'efrat_template' },
+    dataTableId: { __rl: true, mode: 'list', value: 'T33xTjG0vmcQlMem', cachedResultName: 'efrat_template' },
     returnAll: true, options: {},
     executeOnce: true,
   } },
