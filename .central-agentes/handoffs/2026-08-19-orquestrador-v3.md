@@ -74,3 +74,60 @@ Nenhum especialista deve ser reiniciado: os quatro estao escrevendo ou rodando t
 Ao retomar: colher T-97088E (as 3 correcoes) e T-057A05 (tema), conferir o diff de cada um
 como fiz com o ADR, e so depois liberar T-607E5A para o Full-Stack. A fase 2 do frontend
 depende do servidor falso do Arquiteto estar falando o contrato novo — cobrar isso primeiro.
+
+---
+
+# Atualizacao — integracao provada
+
+## Branch `integra/v3`
+
+Criado de `main`, com DevOps + Arquiteto + Full-Stack mesclados. **56 unitarios / 56 passando
+e 23 e2e / 23 passando com a CSP ativa.** E a prova de que as quatro entregas compoem.
+
+Fechou por medicao, nao por leitura, o achado 2 da auditoria de integracao: a funcao
+`extrairCspDeHeaders` (nascida no branch do DevOps, absorvida pelo Arquiteto) e o teste que
+a importa (`tests/unit/estaticos.test.js`, do DevOps) nunca tinham rodado juntos. Rodaram, passou.
+
+**Conserto feito na integracao:** o Full-Stack trouxe `css/fontes.css` e os woff2 do branch do
+DevOps com `git checkout`, mas pegou a versao pre-poda — 18 arquivos com `latin-ext`, 224 KB.
+Reverteria o D1 em silencio, porque as duas versoes sao internamente consistentes e nenhum
+teste distingue. Alinhado para 8 arquivos, 103 KB, nos commits `c4e6a97` e `aa8d8e7`.
+
+**Nao esta em `integra/v3` ainda** (commitado depois do merge): `tests/e2e/offline.spec.js`
+(24o e2e, prova offline real com `setOffline`), a guarda 6 do DevOps, os seeds do Arquiteto
+(`7920cc9`) e os 3 SDKs com CORS (`89bdd89`). Re-integrar quando o proximo lote fechar.
+
+## Cartoes concluidos (8)
+
+ADR de acesso v3 · threat model + invariantes · privacidade da tela compartilhada ·
+auditoria de integracao · fontes/CSP/cache · guardas de CI + offline · design system/tema.
+
+## Em andamento
+
+- **T-607E5A Full-Stack — caminho critico.** Fluxo do colaborador sem token. Todo o resto
+  do Revisor depende desta tela existir.
+- **T-E1B1CB Arquiteto.** 3 de 6 SDKs prontos e validados no CLI (`registrar`, `estado`,
+  `carga-v3`). Faltam `identificar` e os dois de gestor. `carga-v3` usa path temporario de
+  proposito, para coexistir com o ativo — a virada e combinada comigo.
+- **T-38A7C1 Revisor.** Fazendo os 3 testes do RH com seed direto; o resto bloqueado pela UI.
+
+## Licao operacional desta rodada
+
+Tres bugs de integracao, todos da mesma familia: duas metades certas que nao se conhecem.
+Fontes sem `<link>`; `servidor-falso.js` editado por dois donos; `fontes.css` copiado
+envelhecido. **Nenhum apareceu para quem escreveu o codigo, e nenhum teste isolado pegava.**
+Os dois que viraram teste (guarda 3 e guarda 6) nao podem voltar. O terceiro depende de eu
+lembrar — e por isso vai voltar. Se sobrar orcamento, virar teste tambem: comparar
+`css/`+`vendor/` entre branches antes de mesclar.
+
+## Backend n8n — o R1 confirmado em producao
+
+Li o Code node do workflow ativo `iykvFQQfkNv4jIxM`. Ele calcula as unidades a partir das
+equipes do dispositivo e devolve `equipesUnidade`/`idsUnidade` — **a unidade inteira**, com
+o filtro por equipe apenas no campo `minha:true`, decidido no cliente. O R1 do Revisor nao
+era hipotese: esta escrito e rodando. `carga-v3` escopado no servidor e o conserto.
+
+Padrao dos webhooks ativos, para os novos seguirem: `allowedOrigins:'*'` no webhook (e o que
+faz o preflight OPTIONS passar — sem ele a chamada nao chega e nao aparece execucao),
+`responseCode` lendo `_status` do proprio item, e `executeOnce:true` nos Data Table nodes
+que nao dependem do item de entrada.
