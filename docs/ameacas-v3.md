@@ -393,14 +393,30 @@ já usado no resto do projeto, então é um trabalho conhecido, não exploratór
 **Total: ~2,5–3 dias de desenvolvimento**, risco técnico baixo. Cartão próprio,
 como já decidido — não bloqueia a T-ARQ nem a fase 2 dos testes desta rodada.
 
-## Nota pra quando eu escrever o helper novo (substituto de `abrirFila`)
+## Critérios de aceite para o helper novo (substituto de `abrirFila`)
 
-Restrição do Orquestrador, registrada aqui pra não se perder até a T-607E5A/
-T-8FB792 do Full-Stack destravarem a escrita: o helper novo não pode esperar
-em estado interno de módulo JS (o `abrirFila` atual espera
-`window.__EFRAT.Fila.gestor !== null` e `Fila.estado === 'armado'`) — isso
-acoplou 14 testes a uma implementação específica de fluxo, e é exatamente por
-isso que ela quebra inteira na próxima mudança de fluxo. O helper novo espera
-por **sinal visível na tela** (seletor de DOM que aparece, texto renderizado),
-não por propriedade de objeto JS interno — mais devagar de escrever agora,
-mais barato na próxima vez que o fluxo mudar de novo.
+Aprovados pelo Orquestrador, registrados aqui pra não se perder até a
+T-607E5A/T-8FB792 do Full-Stack destravarem a escrita.
+
+**1. Não acoplar a estado interno de módulo JS — esperar sinal visível na
+tela.** O `abrirFila` atual espera `window.__EFRAT.Fila.gestor !== null` e
+`Fila.estado === 'armado'` — isso acoplou 14 testes a uma implementação
+específica de fluxo, e é exatamente por isso que ela quebra inteira na
+próxima mudança de fluxo. O helper novo espera por seletor de DOM que
+aparece / texto renderizado, nunca por propriedade de objeto JS interno —
+mais devagar de escrever agora, mais barato na próxima vez que o fluxo mudar.
+
+**2. O fluxo novo continua passando offline.** Aparelho pendente e o polling
+de `/efrat/dispositivo/estado` não podem travar a tela quando não há rede —
+é o cenário real de campo (obra sem sinal, aparelho novo, ninguém sabe por
+que a tela não sai do lugar), não um caso de borda hipotético. `tests/e2e/
+offline.spec.js` (DevOps) já prova que o PWA carrega offline hoje; o helper
+novo e a tela que ele dirige não podem regredir isso quando o dispositivo
+está no meio do fluxo de aprovação.
+
+**Por que vale a pena escrever os dois por escrito:** a medição real dos 3
+testes de RH desacoplados da fila (T-38A7C1) caiu de ~4-8s para menos de 1s
+cada — não é só teste mais rápido, é prova empírica de que a fila nunca foi
+o objeto daqueles testes, só cenografia cara de montar. O mesmo raciocínio
+sustenta o critério 1: acoplar teste a estrutura interna de tela sempre foi
+o caminho caro, mesmo quando parece mais direto de escrever.
