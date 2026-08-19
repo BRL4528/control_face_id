@@ -82,18 +82,21 @@ Nenhuma delas contradiz ou reabre o TTL do ADR; são independentes e se somam.
   completo ficam atrás de uma aba separada que exige um toque adicional e
   deliberado — não elimina a exposição, mas tira do caminho do "bati o ponto e
   já vi de relance", que é o padrão de maior volume.
-- **M2 — Números sensíveis (banco de horas, histórico) não usam a mesma escala
-  tipográfica de leitura-a-distância do comprovante.** Fonte menor, sem o
-  destaque de 26-38px reservado ao horário da marcação — o objetivo aqui é o
-  oposto do resto do design system: dificultar leitura de relance, não facilitar.
-- **M3 — Painel "ver minha equipe" do gestor não deveria abrir automaticamente
-  no fluxo de reconhecimento em sequência com a fila operando.** Ele expõe
-  N pessoas de uma vez para quem estiver por perto, um risco maior em espécie
-  que o do colaborador individual (cenário 2). Isto é tensão real com "sessão
-  curta sustentada pela face" do plano — não é uma decisão minha pra tomar
-  sozinho; registro como ponto que o Orquestrador/cliente precisa decidir
-  conscientemente, com o trade-off explícito, antes do Full-Stack implementar
-  T-8FB792.
+- **M2 — DECIDIDO pelo Orquestrador.** Mono e `tabular-nums` continuam valendo
+  pra todo número (mantém a leitura estável, sem tremular dígito), mas o
+  destaque tipográfico grande (26-38px) fica reservado só ao número que
+  **qualquer um já pode legitimamente ler**: hora da marcação, contador de
+  fila, KPI agregado do painel do RH. Saldo de banco de horas, histórico e
+  nome completo vão em corpo pequeno — a regra geral corrigida é "mono em
+  todo número, tamanho grande só no que já é público por natureza".
+- **M3 — DECIDIDO pelo Orquestrador, sem levar ao cliente.** O reconhecimento
+  do gestor marca o ponto dele e mostra só um link discreto "ver minha
+  equipe" — o painel não abre sozinho. Ao abrir, mostra primeiro o agregado
+  (`em jornada 8, intervalo 2, ausentes 1`), com **ausentes antes de
+  presentes** porque é o que o gestor precisa saber na maioria das vezes;
+  nome individual só num segundo toque deliberado, que o gestor pode dar de
+  costas pra fila. Resolve o cenário 2 sem cortar a feature: o uso comum
+  (ver quem falta) para de expor o dia de todo mundo pro grupo reunido.
 - **M4 — Saudação por nome não fica no mesmo cartão visual que qualquer número
   sensível.** Pode ficar com jornada/comprovante (já público), não com banco de
   horas/histórico.
@@ -109,10 +112,16 @@ Nenhuma delas contradiz ou reabre o TTL do ADR; são independentes e se somam.
   inspeção casual via zoom de foto/câmera de quem está por perto.
 - Banco de horas e histórico só aparecem depois de uma ação explícita
   (clique/toque em aba própria), nunca como conteúdo inicial da sessão pessoal.
-- Painel de equipe do gestor: teste de contrato confirma que `nome` +
-  `estado` por pessoa é exatamente o que o ADR especifica em
-  `/efrat/gestor/equipe-hoje` (nada além disso) — decisão de UI (M3) fica
-  registrada aqui como pendência de produto, não como teste automatizável.
+- Painel de equipe do gestor: reconhecimento do gestor marca o ponto e exibe
+  o link "ver minha equipe", mas não navega pro painel sozinho — abrir o
+  painel exige toque explícito.
+- Ao abrir, o primeiro estado renderizado é o agregado (`em_jornada`,
+  `em_intervalo`, `ausentes`), com a lista de ausentes antes da de presentes;
+  nomes individuais só aparecem depois de uma segunda ação do usuário.
+- Números com destaque tipográfico grande (26-38px) só nos campos definidos
+  como públicos por natureza (horário de marcação, contador de fila, KPI
+  agregado do RH) — saldo de banco de horas, histórico e nome completo nunca
+  nesse tamanho, checável por classe/estilo computado, não só por leitura visual.
 
 ## Fora de escopo deste documento
 
