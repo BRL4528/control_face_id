@@ -38,6 +38,8 @@ export function criarServidor(opts = {}) {
     correcoes: [],
     auditoriaIdentificacao: [],
     limitesIdentificacao: new Map(),
+    limitesCadastro: new Map(),
+    tokenLegadoConsumido: false,
     idempotencia: new Map(),
     recadastros: [],
     equipesCriadas: [],
@@ -121,9 +123,22 @@ export function criarServidor(opts = {}) {
   const servidor = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const responder = (cod, obj) => {
-      res.writeHead(cod, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.writeHead(cod, {
+        'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Authorization, Content-Type, Idempotency-Key'
+      });
       res.end(JSON.stringify(obj));
     };
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Authorization, Content-Type, Idempotency-Key',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
+      });
+      res.end();
+      return;
+    }
 
     if (url.pathname.startsWith('/webhook/')) {
       if (estado.fora) { res.destroy(); return; }
@@ -149,8 +164,42 @@ export function criarServidor(opts = {}) {
 
       if (rotaRegistrar) {
         estado.chamadas.registrar++;
+        const agora = Date.now();
+        const ip = req.socket.remoteAddress || 'desconhecido';
+        const janelaMs = opts.cadastroJanelaMs || 60_000;
+        const limite = opts.cadastroLimite || 10;
+        let contador = estado.limitesCadastro.get(ip);
+        if (!contador || agora - contador.inicio >= janelaMs) contador = { inicio: agora, total: 0 };
+        contador.total++;
+        estado.limitesCadastro.set(ip, contador);
+        if (contador.total > limite) {
+          res.setHeader('Retry-After', String(Math.max(1, Math.ceil((janelaMs - (agora - contador.inicio)) / 1000))));
+          return responder(429, erro('LIMITE_CADASTRO', 'limite de cadastro excedido'));
+        }
         if (!body.dispositivo_id || !body.credencial_publica || !body.apelido || !body.ua) {
           return responder(400, erro('CORPO_INVALIDO', 'campos obrigatorios ausentes'));
+        }
+        const tokenLegado = bearer(req);
+        if (tokenLegado) {
+          if (tokenLegado !== estado.token) {
+            return responder(401, erro('TOKEN_LEGADO_INVALIDO', 'token legado invalido'));
+          }
+          if (estado.tokenLegadoConsumido) {
+            return responder(409, erro('TOKEN_LEGADO_CONSUMIDO', 'token legado ja migrado'));
+          }
+          const migrado = {
+            dispositivo_id: body.dispositivo_id, credencial_hash: body.credencial_publica,
+            estado: 'ativo', codigo_curto: null, apelido: body.apelido, ua: body.ua,
+            geo: body.geo || null, tentativas: 1, local_id: 'local-piloto',
+            equipes_ids: ['eq-1'], configuracao_versao: 1,
+            aprovado_por: 'migracao-v3', aprovado_em: new Date().toISOString()
+          };
+          estado.dispositivos.set(body.dispositivo_id, migrado);
+          estado.tokenLegadoConsumido = true;
+          return responder(200, {
+            ok: true, estado: 'ativo', migrado: true,
+            dispositivo_id: body.dispositivo_id, request_id: requestId()
+          });
         }
         const existente = estado.dispositivos.get(body.dispositivo_id);
         if (existente) {
