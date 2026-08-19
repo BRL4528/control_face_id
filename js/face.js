@@ -205,7 +205,7 @@ export const Face = {
         const c = overlay.getContext('2d');
         c.clearRect(0, 0, overlay.width, overlay.height);
         if (boxCheia) {
-          c.strokeStyle = q.ok ? '#3fb984' : '#e0a740';
+          c.strokeStyle = q.ok ? '#28a745' : '#e0a800';
           c.lineWidth = Math.max(3, overlay.width / 160);
           c.strokeRect(boxCheia.x, boxCheia.y, boxCheia.width, boxCheia.height);
         }

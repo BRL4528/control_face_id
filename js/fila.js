@@ -77,7 +77,7 @@ export const Fila = {
           const base = !q.rosto ? DICA_ADORNO
             : this.estado === 'identificando' ? 'Gestor, olhe para a câmera' : q.msg;
           $('dica').textContent = base + (Face.latencia ? ' · ' + Face.latencia + ' ms' : '');
-          $('dica').style.color = q.ok ? '#3fb984' : '#e0a740';
+          $('dica').style.color = q.ok ? '#28a745' : '#e0a800';
         },
         autoCaptura: () => this.estado === 'identificando' || this.estado === 'armado',
         onCaptura: c => this.aoCapturar(c)
@@ -213,7 +213,7 @@ export const Fila = {
           (c.pessoa.miniatura ? '<img class="face" src="' + c.pessoa.miniatura + '">' : '<div class="face"></div>') +
           '<div><div class="tit">' + esc(c.pessoa.nome) + '</div>' +
           '<div class="sub">' + (tipo === 'entrada' ? 'ENTRADA' : 'SAÍDA') +
-          ' · dist ' + c.dist.toFixed(3) +
+          ' · dist <span class="mono">' + c.dist.toFixed(3) + '</span>' +
           (cinza ? ' · vai para conferência' : '') + '</div></div>' +
         '</div>' +
         '<button class="act big" id="btnConfirmar">CONFIRMAR ' + (tipo === 'entrada' ? 'ENTRADA' : 'SAÍDA') + '</button>' +
@@ -349,8 +349,9 @@ export const Fila = {
     $('cartao').innerHTML =
       '<div class="cartao ok">' +
         '<div class="tit">✓ ' + (m.tipo === 'entrada' ? 'ENTRADA' : 'SAÍDA') + '</div>' +
-        '<div class="sub">' + esc(pessoa.nome) + ' · ' + hora(m.marcado_em) +
-        ' · comprovante <b>' + m.id_cliente.slice(0, 8).toUpperCase() + '</b></div>' +
+        '<div class="horaGrande">' + hora(m.marcado_em) + '</div>' +
+        '<div class="sub">' + esc(pessoa.nome) +
+        ' · comprovante <b class="mono">' + m.id_cliente.slice(0, 8).toUpperCase() + '</b></div>' +
         (ehGestor ? '<div class="sub okfg">Fila aberta. Pode chamar o primeiro.</div>' : '') +
       '</div>';
     clearTimeout(this._t);
