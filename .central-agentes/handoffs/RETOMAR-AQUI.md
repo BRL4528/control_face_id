@@ -22,11 +22,18 @@ Duas decisões que ELE tomou e não se discutem mais:
 
 | Branch (`central/50bbfbf909/<id>-control_face_id`) | Head | Conteúdo |
 |---|---|---|
-| `f9024bcab1` Orquestrador | `08284a5` | `docs/plano-v3.md`, checkpoints, README |
-| `72b3e79015` Arquiteto | `c2a71c1` | ADR, `n8n/*.workflow.js`, `servidor-falso.js` v3 |
-| `a7f15f0974` Revisor | `2e98ffe` | 4 docs de análise, 3 e2e do RH com seed |
-| `41fa23ad22` DevOps | `00428c7` | fontes, CSP, sw.js v6, 7 guardas, `offline.spec.js` |
-| `c9bb844c20` Full-Stack | `9abfc2a` | tema, fluxo do colaborador, `acesso.spec.js` |
+| `f9024bcab1` Orquestrador | `36b9ece` | `docs/plano-v3.md`, checkpoints, README, este arquivo |
+| `72b3e79015` Arquiteto | **`c71a1eb`** | ADR, 4 de 6 `n8n/*.workflow.js`, `servidor-falso.js` v3 |
+| `a7f15f0974` Revisor | **`908f212`** | 4 docs de análise, 3 e2e do RH com seed, **WIP: UI nova trazida, `fluxo.spec.js` intocado** |
+| `41fa23ad22` DevOps | **`a0874c9`** | fontes, CSP, sw.js v6, 7 guardas, `offline.spec.js` |
+| `c9bb844c20` Full-Stack | **`3328bf7`** | tema, fluxo do colaborador, `acesso.spec.js`, T-8FB792 **não iniciada** |
+
+Handoffs individuais, um por branch, em `.central-agentes/handoffs/`:
+`2026-08-19-arquiteto-t-e1b1cb.md` · `2026-08-19-devops-v3.md` ·
+`2026-08-19-engenheiro-fullstack-c9bb844c20.md`. O do Revisor foi pedido na parada.
+
+Nada ficou pela metade: a T-8FB792 do Full-Stack **não começou**, e o Revisor parou antes de
+tocar em `fluxo.spec.js`. Os 4 agentes commitaram e pararam sob ordem.
 
 `integra/v3` está em `aa8d8e7` — **desatualizado**. Foi integração provada (56 unit + 23 e2e
 verdes) de um lote anterior. Refazer do zero na retomada: `git branch -f integra/v3 main` e
