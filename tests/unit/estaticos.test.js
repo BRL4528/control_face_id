@@ -116,3 +116,19 @@ test('a politica de CSP fecha terceiros e protege contra vazamentos', () => {
   assert.match(csp.value, /font-src\s+'self'/, 'CSP da Vercel deve fechar font-src para self');
 });
 
+test('a CSP do servidor de testes e2e e da Vercel sao identicas a do _headers', async () => {
+  const { extrairCspDeHeaders } = await import('../e2e/servidor-falso.js');
+  const headers = ler('_headers');
+  const matchHeader = headers.match(/Content-Security-Policy:\s*(.+)/);
+  const cspHeader = matchHeader ? matchHeader[1].trim() : '';
+
+  const cspTestServer = extrairCspDeHeaders();
+  assert.equal(cspTestServer, cspHeader, 'a CSP do servidor de testes deve ser identica a do _headers');
+
+  const vercel = JSON.parse(ler('vercel.json'));
+  const vHeaders = vercel.headers.find(h => h.source === '/(.*)');
+  const cspVercel = vHeaders.headers.find(h => h.key === 'Content-Security-Policy').value;
+  assert.equal(cspVercel, cspHeader, 'a CSP do vercel.json deve ser identica a do _headers');
+});
+
+

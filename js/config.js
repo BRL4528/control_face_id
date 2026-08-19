@@ -1,6 +1,10 @@
 // Configuração de runtime. Não passa por build, então pode ser editada
 // direto no servidor sem republicar o app.
 //
+// ATENÇÃO: apiBase está vinculado à política de CSP (connect-src em _headers e
+// vercel.json). Se trocar o domínio de apiBase, é OBRIGATÓRIO atualizar a CSP
+// nesses arquivos, caso contrário as chamadas de API serão bloqueadas.
+//
 // Nada aqui é segredo. O token do aparelho NÃO mora neste arquivo: ele é
 // digitado pelo gestor no primeiro acesso e fica só no IndexedDB daquele
 // celular. Num site estático tudo que entra no bundle é público.
@@ -8,7 +12,7 @@
 // assim que o ambiente de teste, ou um deploy especifico, troca a apiBase sem
 // precisar editar nada.
 window.EFRAT_CFG = Object.assign({
-  apiBase: 'https://n8n.samasc.com.br/webhook',
+  apiBase: 'https://n8n.samasc.com.br/webhook', // se alterar o domínio, atualize connect-src em _headers e vercel.json
 
   // Distância euclidiana entre descritores de 128 dimensões.
   limiarAceite: 0.45,   // abaixo disso registra direto
