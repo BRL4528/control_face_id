@@ -168,3 +168,98 @@ novos que não existiam porque o mecanismo não existia):**
   `efrat_dispositivo`, etc.) — isso é escopo da T-ARQ (T-66191D), que já está
   rodando em paralelo. Este documento entrega o que deve entrar nos requisitos
   dela e nos critérios de aceite da fase 2 de testes.
+
+## Revisão pós-decisão (commit `44b96f6` do plano) — o que é novo
+
+R1 foi promovido a bloqueante e os achados 1–3 têm decisão de fechamento no
+plano. Revisão específica: as decisões novas em si introduzem alguma ameaça
+que a versão anterior deste documento não cobria? Três pontos, nenhum deles
+reabre o veredito (a direção continua correta) — são ajustes de desenho antes
+da T-ARQ travar a implementação.
+
+### Novo 1 — `POST /efrat/identificar` recria a exposição de R1, só que como oráculo em vez de dump
+
+R1 fecha o download em massa: cada aparelho passa a receber só a própria
+equipe. Mas o substituto do "buscar na unidade" — `POST /efrat/identificar
+{ dispositivo_id, descritor }`, 1:N **no servidor, contra a unidade inteira**
+— reabre o mesmo raio de exposição em formato de consulta, não de cópia. A
+diferença importa: um dump é um evento único e finito (rouba uma vez, tem uma
+foto do banco daquele dia); um oráculo de identificação é repetível e
+interativo. Um aparelho aprovado para a equipe A pode, tecnicamente, submeter
+qualquer descritor — inclusive um calculado offline a partir de uma foto de
+fora da empresa, já que o modelo do `face-api.js` é público e roda local — e
+perguntar "essa pessoa está no quadro desta unidade". Isso é uma capacidade
+que não existia antes de forma alguma: um serviço de verificação de
+identidade contra a base biométrica inteira da unidade, reduzindo a proteção
+de R1 a "não dá pra baixar tudo de uma vez", sem impedir "dá pra confirmar
+qualquer pessoa, quantas vezes quiser". O plano só menciona rate limit para
+`/efrat/dispositivo/registrar`; falta o mesmo (ou mais rígido, por ser
+consulta biométrica) para `/efrat/identificar`: limite por `dispositivo_id`/
+dia, alerta de volume anômalo, e — ponto que precisa virar requisito
+explícito da T-ARQ — **a resposta nunca deve devolver o vetor 128d ou a
+miniatura armazenada**, só identidade mínima (nome/matrícula/equipe) para o
+fluxo de remanejamento; devolver o descritor faria do oráculo também um canal
+de exfiltração vetor-a-vetor, pior que o dump que R1 acabou de fechar.
+
+### Novo 2 — o código de pareamento não pode aparecer na própria lista de pendentes do RH
+
+"RH digita no painel o código exibido na tela do aparelho" só prova posse
+física se o código **não estiver visível em nenhum outro lugar que o RH já
+enxergue logado** — inclusive a própria lista de "Aparelhos pendentes". Se a
+lista de pendências mostrar o código ao lado do `apelido`/`ua`/`geo`
+autodeclarados (útil para o RH achar a linha, como o desenho original
+previa), digitar o código vira copiar de um campo da tela para outro, sem
+nunca olhar para o aparelho físico — e o achado 2 (Cenário 2, fadiga de
+aprovação com apelido plausível) volta a valer exatamente como antes. Requisito
+a registrar na T-ARQ: o código só existe na tela do aparelho pendente; a lista
+do RH mostra o pendente sem o código, e o campo de confirmação é digitação
+livre, não um dropdown/autocomplete que dá a resposta.
+
+### Novo 3 (menor) — fila de `efrat_correcao` como novo alvo de flood via spoofing
+
+Achado 3 reduz o pior caso de um spoof do gestor a "ver o dia da equipe e
+propor ajuste que o RH confere" — correto, e bem menor que acesso admin. Mas
+"propor ajuste" grava em `efrat_correcao`, a mesma fila que o RH já usa para
+decisão de marcação/recadastro. Um spoof repetido (foto do gestor, sem
+liveness, tentado várias vezes) pode inflar essa fila com propostas de ajuste
+falsas — não é escalação de privilégio, é ruído operacional que aumenta o
+custo de revisão do RH exatamente na fila que devia ficar mais confiável
+depois da mudança. Vale um limite de propostas pendentes por gestor/dia, mas
+isto é ajuste fino, não bloqueante — sinalizando para não virar prioridade
+acima de Novo 1 e Novo 2.
+
+## Dívida conhecida, fora desta rodada — chave PBKDF2 do RH como credencial permanente
+
+Registro a pedido do Orquestrador, para custo estimado ir ao cliente. Nota de
+proveniência: esse achado específico ("achado 4") não estava na primeira
+versão deste documento — confirmei em `js/rh.js` a pedido, e é real, mas
+não fui eu quem levantou originalmente; pode ter vindo da leitura em paralelo
+da T-ARQ. Registro aqui porque foi validado no código.
+
+**O problema:** `js/rh.js:21-28` — `chave` (derivada de PBKDF2-SHA256, sal e
+iterações vindos do servidor) é enviada em **toda** chamada `/efrat/rh/*` como
+prova de identidade, e fica em memória no módulo `Rh` até `btnSairRh` limpar
+(`this.cred = null`). Não existe camada de sessão entre "chave derivada" e
+"autenticado": a chave **é** a credencial de longo prazo, equivalente à senha
+em si — não expira, não gira sozinha, e não há como revogar uma chave
+comprometida sem trocar a senha de todo o usuário RH. Se a chave vazar
+(devtools, extensão maliciosa, aparelho da RH comprometido, aba esquecida
+aberta em máquina compartilhada), o atacante tem acesso de admin indefinido,
+indistinguível do RH real, até alguém perceber e trocar a senha.
+
+**Custo estimado para fechar** (ordem de grandeza, não inclui taxa/hora do
+cliente): introduzir uma camada de sessão de curta duração entre login e as
+rotas de RH — `/efrat/rh/entrar` verifica a chave no servidor uma vez e emite
+um token opaco de vida curta (nova Data Table ou campo de expiração), as
+rotas de leitura/escrita do RH passam a exigir o token em vez da chave, e um
+`/efrat/rh/sair` revoga o token. Reaproveita o padrão de Data Table + webhook
+já usado no resto do projeto, então é um trabalho conhecido, não exploratório:
+
+- Backend n8n: ~1 dia (tabela de sessão, endpoint de emissão/revogação,
+  ajuste das duas rotas de RH existentes para checar token).
+- Frontend (`js/rh.js`, `js/api.js`): ~1 dia (trocar `cred` por token,
+  tratar expiração/relogin, logout explícito revogando no servidor).
+- Testes novos (unit + e2e de sessão expirada/revogada): ~0,5–1 dia.
+
+**Total: ~2,5–3 dias de desenvolvimento**, risco técnico baixo. Cartão próprio,
+como já decidido — não bloqueia a T-ARQ nem a fase 2 dos testes desta rodada.
