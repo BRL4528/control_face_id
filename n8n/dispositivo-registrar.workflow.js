@@ -5,7 +5,7 @@ const webhook = trigger({
   version: 2.1,
   config: {
     name: 'Webhook',
-    parameters: { httpMethod: 'POST', path: 'efrat/dispositivo/registrar', responseMode: 'responseNode', options: {} },
+    parameters: { httpMethod: 'POST', path: 'efrat/dispositivo/registrar', responseMode: 'responseNode', options: { allowedOrigins: '*' } },
   },
 });
 
@@ -19,6 +19,7 @@ const consultarDispositivos = node({
       dataTableId: { __rl: true, mode: 'name', value: 'efrat_dispositivo' },
       returnAll: true, options: {},
     },
+    executeOnce: true,
   },
 });
 
@@ -126,7 +127,10 @@ const responder = node({
       responseBody: expr('{{ $json.resposta }}'),
       options: {
         responseCode: expr('{{ $json.status_http }}'),
-        responseHeaders: { entries: [{ name: 'Access-Control-Allow-Origin', value: '*' }] },
+        responseHeaders: { entries: [
+          { name: 'Access-Control-Allow-Origin', value: '*' },
+          { name: 'Access-Control-Allow-Headers', value: 'content-type' },
+        ] },
       },
     },
   },

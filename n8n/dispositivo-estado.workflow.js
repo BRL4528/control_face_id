@@ -2,7 +2,7 @@ import { workflow, node, trigger, expr } from '@n8n/workflow-sdk';
 
 const webhook = trigger({
   type: 'n8n-nodes-base.webhook', version: 2.1,
-  config: { name: 'Webhook', parameters: { httpMethod: 'POST', path: 'efrat/dispositivo/estado', responseMode: 'responseNode', options: {} } },
+  config: { name: 'Webhook', parameters: { httpMethod: 'POST', path: 'efrat/dispositivo/estado', responseMode: 'responseNode', options: { allowedOrigins: '*' } } },
 });
 
 const consultar = node({
@@ -14,6 +14,7 @@ const consultar = node({
       dataTableId: { __rl: true, mode: 'name', value: 'efrat_dispositivo' },
       returnAll: true, options: {},
     },
+    executeOnce: true,
   },
 });
 
@@ -30,7 +31,10 @@ const responder = node({
       respondWith: 'json', responseBody: expr('{{ $json.resposta }}'),
       options: {
         responseCode: expr('{{ $json.status_http }}'),
-        responseHeaders: { entries: [{ name: 'Access-Control-Allow-Origin', value: '*' }] },
+        responseHeaders: { entries: [
+          { name: 'Access-Control-Allow-Origin', value: '*' },
+          { name: 'Access-Control-Allow-Headers', value: 'content-type' },
+        ] },
       },
     },
   },
