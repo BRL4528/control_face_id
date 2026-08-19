@@ -90,6 +90,18 @@ export function criarServidor(opts = {}) {
     return dispositivo;
   };
 
+  const distancia = (a, b) => Math.sqrt(a.reduce((soma, valor, i) => {
+    const delta = valor - b[i];
+    return soma + delta * delta;
+  }, 0));
+  const sessaoGestorValida = req => {
+    const sessao = estado.sessoesGestor.get(bearer(req));
+    const agora = Date.now();
+    if (!sessao || agora >= sessao.expira_absoluto || agora - sessao.ultima_atividade >= 5 * 60_000) return null;
+    sessao.ultima_atividade = agora;
+    return sessao;
+  };
+
   function carga() {
     const fim = new Date(); fim.setHours(23, 59, 59, 0);
     return {
@@ -192,7 +204,168 @@ export function criarServidor(opts = {}) {
 
       if (url.pathname === '/webhook/efrat/carga') {
         estado.chamadas.carga++;
+        if (body.dispositivo_id) {
+          const dispositivo = dispositivoAutenticado(req, body.dispositivo_id);
+          if (!dispositivo) return responder(401, erro('CREDENCIAL_INVALIDA', 'credencial invalida'));
+          if (dispositivo.estado === 'pendente') {
+            return responder(403, erro('DISPOSITIVO_PENDENTE', 'dispositivo aguarda aprovacao'));
+          }
+          if (dispositivo.estado !== 'ativo') {
+            return responder(403, erro('DISPOSITIVO_INATIVO', 'dispositivo inativo'));
+          }
+          if (!dispositivo.equipes_ids.length) {
+            return responder(403, erro('DISPOSITIVO_SEM_ESCOPO', 'dispositivo sem equipes'));
+          }
+          return responder(200, {
+            ok: true, versao: dispositivo.configuracao_versao,
+            gerado_em: new Date().toISOString(),
+            escopo: { equipes_ids: [...dispositivo.equipes_ids] },
+            pessoas: pessoas
+              .filter(p => !estado.inativos.has(p.pessoa_id) && dispositivo.equipes_ids.includes(p.equipe_id))
+              .map(p => ({
+                pessoa_id: p.pessoa_id, nome: p.nome, equipe_id: p.equipe_id, papel: p.papel,
+                template: { versao: p.versao, vetores: p.vetores }, miniatura: p.miniatura
+              })),
+            removidos_ids: [], request_id: requestId()
+          });
+        }
         return responder(200, carga());
+      }
+
+      if (url.pathname === '/webhook/efrat/identificar') {
+        estado.chamadas.identificar++;
+        const dispositivo = dispositivoAutenticado(req, body.dispositivo_id);
+        if (!dispositivo) return responder(401, erro('CREDENCIAL_INVALIDA', 'credencial invalida'));
+        if (dispositivo.estado !== 'ativo') {
+          return responder(403, erro('DISPOSITIVO_INATIVO', 'dispositivo inativo'));
+        }
+        if (!Array.isArray(body.descritor) || body.descritor.length !== 128
+            || body.descritor.some(v => !Number.isFinite(v))) {
+          return responder(400, erro('DESCRITOR_INVALIDO', 'descritor invalido', 'descritor'));
+        }
+        const janelaMs = opts.identificarJanelaMs || 60_000;
+        const limite = opts.identificarLimite || 20;
+        const agora = Date.now();
+        let contador = estado.limitesIdentificacao.get(dispositivo.dispositivo_id);
+        if (!contador || agora - contador.inicio >= janelaMs) contador = { inicio: agora, total: 0 };
+        contador.total++;
+        estado.limitesIdentificacao.set(dispositivo.dispositivo_id, contador);
+        if (contador.total > limite) {
+          const retryAfter = Math.max(1, Math.ceil((janelaMs - (agora - contador.inicio)) / 1000));
+          res.setHeader('Retry-After', String(retryAfter));
+          estado.auditoriaIdentificacao.push({
+            dispositivo_id: dispositivo.dispositivo_id, instante: new Date().toISOString(),
+            resultado: 'limitado', request_id: requestId()
+          });
+          return responder(429, erro('LIMITE_IDENTIFICACAO', 'limite de identificacao excedido'));
+        }
+        const candidatos = pessoas.filter(p => !estado.inativos.has(p.pessoa_id));
+        const ranking = candidatos
+          .map(p => ({ pessoa: p, distancia: Math.min(...p.vetores.map(v => distancia(body.descritor, v))) }))
+          .sort((a, b) => a.distancia - b.distancia);
+        const melhor = ranking[0];
+        const reconhecido = melhor && melhor.distancia < 0.45;
+        const auditoria = {
+          dispositivo_id: dispositivo.dispositivo_id, instante: new Date().toISOString(),
+          resultado: reconhecido ? 'reconhecido' : 'nao_reconhecido',
+          pessoa_id: reconhecido ? melhor.pessoa.pessoa_id : undefined, request_id: requestId()
+        };
+        estado.auditoriaIdentificacao.push(auditoria);
+        if (!reconhecido) {
+          return responder(200, { ok: true, resultado: 'nao_reconhecido', request_id: auditoria.request_id });
+        }
+        const pessoa = melhor.pessoa;
+        const resposta = {
+          ok: true, resultado: 'reconhecido',
+          pessoa: {
+            pessoa_id: pessoa.pessoa_id, nome: pessoa.nome,
+            equipe_id: pessoa.equipe_id, papel: pessoa.papel
+          },
+          distancia: melhor.distancia,
+          pode_registrar: true,
+          fora_do_escopo_offline: !dispositivo.equipes_ids.includes(pessoa.equipe_id),
+          request_id: auditoria.request_id
+        };
+        if (pessoa.papel === 'gestor' && melhor.distancia < 0.45) {
+          const tokenSessao = crypto.randomBytes(32).toString('base64url');
+          estado.sessoesGestor.set(tokenSessao, {
+            gestor_id: pessoa.pessoa_id, dispositivo_id: dispositivo.dispositivo_id,
+            equipes_ids: [pessoa.equipe_id], criado_em: agora, ultima_atividade: agora,
+            expira_absoluto: agora + 10 * 60_000, evento: auditoria.request_id
+          });
+          resposta.sessao_gestor = tokenSessao;
+          resposta.sessao_expira_em = new Date(agora + 10 * 60_000).toISOString();
+        }
+        return responder(200, resposta);
+      }
+
+      if (url.pathname === '/webhook/efrat/gestor/equipe-hoje') {
+        const sessao = sessaoGestorValida(req);
+        if (!sessao) return responder(401, erro('SESSAO_EXPIRADA', 'sessao expirada'));
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(body.data_local || ''))) {
+          return responder(400, erro('DATA_INVALIDA', 'data local invalida', 'data_local'));
+        }
+        const equipe = pessoas.filter(p => sessao.equipes_ids.includes(p.equipe_id)
+          && !estado.inativos.has(p.pessoa_id));
+        const itens = equipe.map(p => {
+          const doDia = [...estado.marcacoes.values()]
+            .filter(m => m.pessoa_id === p.pessoa_id && String(m.marcado_em).slice(0, 10) === body.data_local)
+            .sort((a, b) => String(a.marcado_em).localeCompare(String(b.marcado_em)));
+          const ultima = doDia.at(-1);
+          const estadoPessoa = !ultima ? 'ausente' : ultima.tipo === 'intervalo' ? 'em_intervalo' : 'em_jornada';
+          return {
+            pessoa_id: p.pessoa_id, nome: p.nome, equipe_id: p.equipe_id, estado: estadoPessoa,
+            ultima_marcacao: ultima ? { tipo: ultima.tipo, em: ultima.marcado_em } : null
+          };
+        });
+        const conta = nome => itens.filter(p => p.estado === nome).length;
+        return responder(200, {
+          ok: true, data_local: body.data_local, equipes_ids: [...sessao.equipes_ids],
+          resumo: {
+            em_jornada: conta('em_jornada'), em_intervalo: conta('em_intervalo'),
+            ausentes: conta('ausente')
+          },
+          pessoas: itens, request_id: requestId()
+        });
+      }
+
+      if (url.pathname === '/webhook/efrat/gestor/ajustar') {
+        const sessao = sessaoGestorValida(req);
+        if (!sessao) return responder(401, erro('SESSAO_EXPIRADA', 'sessao expirada'));
+        const pessoa = pessoas.find(p => p.pessoa_id === body.pessoa_id && !estado.inativos.has(p.pessoa_id));
+        if (!pessoa || !sessao.equipes_ids.includes(pessoa.equipe_id)) {
+          return responder(403, erro('PESSOA_FORA_DO_ESCOPO', 'pessoa fora do escopo'));
+        }
+        const idempotencyKey = req.headers['idempotency-key'];
+        if (!idempotencyKey) return responder(400, erro('IDEMPOTENCIA_AUSENTE', 'Idempotency-Key obrigatoria'));
+        const hashRequisicao = hashCredencial(JSON.stringify(body));
+        const anterior = estado.idempotencia.get(idempotencyKey);
+        if (anterior && anterior.hash !== hashRequisicao) {
+          return responder(409, erro('IDEMPOTENCIA_CONFLITANTE', 'chave reutilizada com outro corpo'));
+        }
+        if (anterior) return responder(anterior.status, anterior.resposta);
+        if (!['incluir_marcacao', 'alterar_marcacao', 'excluir_marcacao'].includes(body.acao)
+            || String(body.motivo || '').trim().length < 10) {
+          return responder(422, erro('AJUSTE_INVALIDO', 'ajuste invalido'));
+        }
+        if (body.acao !== 'incluir_marcacao' && !estado.marcacoes.has(body.marcacao_id)) {
+          return responder(404, erro('MARCACAO_NAO_ENCONTRADA', 'marcacao nao encontrada'));
+        }
+        const correcao = {
+          correcao_id: 'corr-' + crypto.randomUUID(), estado: 'pendente_rh',
+          pessoa_id: pessoa.pessoa_id, marcacao_id: body.marcacao_id || null,
+          valor_anterior: body.marcacao_id ? estado.marcacoes.get(body.marcacao_id) : null,
+          valor_proposto: body.marcacao || null, motivo: body.motivo,
+          autor_id: sessao.gestor_id, sessao_evento: sessao.evento,
+          criado_em: new Date().toISOString()
+        };
+        estado.correcoes.push(correcao);
+        const resposta = {
+          ok: true, estado: 'pendente_rh', correcao_id: correcao.correcao_id,
+          criado_em: correcao.criado_em, request_id: requestId()
+        };
+        estado.idempotencia.set(idempotencyKey, { hash: hashRequisicao, status: 202, resposta });
+        return responder(202, resposta);
       }
 
       if (url.pathname === '/webhook/efrat/marcacoes') {
