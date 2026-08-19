@@ -200,5 +200,29 @@ test('guarda 5: nenhum token de verdade ou segredo foi commitado em js/, css/, s
   }
 });
 
+test('guarda 6: todo arquivo local referenciado no index.html deve estar no precache do sw.js', () => {
+  const html = ler('index.html');
+  const sw = ler('sw.js');
+  const assetsSw = [...sw.matchAll(/'(\.\/[^']+)'/g)].map(m => m[1]);
+  const links = [...html.matchAll(/(?:href|src)=["']([^"']+)["']/g)].map(m => m[1]);
+  
+  // Lista de exceções legítimas não-cacheadas por Service Worker (se houver no futuro)
+  const excecoesLegitimas = new Set([]);
+
+  for (const l of links) {
+    if (l.startsWith('http://') || l.startsWith('https://') || l.startsWith('data:') || l.startsWith('#') || l.startsWith('mailto:')) {
+      continue;
+    }
+    if (excecoesLegitimas.has(l)) continue;
+
+    const padronizado = l.startsWith('./') ? l : `./${l}`;
+    assert.ok(
+      assetsSw.includes(padronizado),
+      `recurso ${l} linkado em index.html nao esta presente na lista ASSETS do sw.js`
+    );
+  }
+});
+
+
 
 
