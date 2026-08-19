@@ -53,9 +53,12 @@ Para produção, publique como site estático (sem build). Na Vercel: Framework 
 ## Testes
 
 ```bash
-npm run test:unit   # 37 testes de regras e de estáticos, em Node puro
-npm run test:e2e    # 19 testes de fluxo, navegador com câmera falsa
+npm run test:unit   # regras, estáticos e guardas de higiene, em Node puro
+npm run test:e2e    # fluxo + offline, navegador com câmera falsa
 ```
+
+Os números não estão escritos aqui de propósito: eles sobem toda semana e um número
+desatualizado no README já fez uma estimativa nascer errada. Rode e veja.
 
 O E2E roda com o **motor de reconhecimento fingido**, de propósito: o que está sob teste é o fluxo que escrevemos, não a biblioteca de terceiros. Assim o CI é determinístico e não depende do rosto de ninguém.
 
