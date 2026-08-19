@@ -10,9 +10,10 @@ const dispositivos = node({
   config: { name: 'Consultar Dispositivos', parameters: {
     resource: 'row', operation: 'get',
     dataTableId: { __rl: true, mode: 'list', value: 'gFJaT1uUyeVpHC74', cachedResultName: 'efrat_dispositivo' },
+    matchType: 'allConditions',
+    filters: { conditions: [{ keyName: 'dispositivo_id', condition: 'eq', keyValue: expr('{{ $("Webhook").first().json.body.dispositivo_id }}') }] },
     returnAll: true, options: {},
-    executeOnce: true,
-  } },
+  }, executeOnce: true },
 });
 
 const autenticar = node({

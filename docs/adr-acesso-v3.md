@@ -306,7 +306,8 @@ associar varias equipes ao mesmo canteiro.
 Colunas novas por Data Table:
 
 - `efrat_dispositivo`: `dispositivo_id`, `credencial_hash`, `estado`, `codigo_curto`,
-  `apelido`, `ua`, `geo`, `tentativas`, `local_id`, `configuracao_versao`,
+  `descricao` (recebe o campo `apelido` da API), `ua`, `geo`, `tentativas`,
+  `local_id`, `configuracao_versao`,
   `aprovado_por`, `aprovado_em`;
 - `efrat_correcao`: `estado`, `marcacao_id`, `valor_anterior`, `valor_proposto`,
   `sessao_evento`;
