@@ -5,16 +5,16 @@ const cfg = () => window.EFRAT_CFG;
 
 // Nunca lanca. Queda de rede vira { ok:false, status:0 } — sem isso, um
 // aparelho sem sinal derruba a tela com excecao nao tratada em vez de mostrar
-// "sem rede".
-async function post(rota, corpo, timeoutMs = 30000) {
+// "sem rede". `credencial`, quando presente, vira Authorization: Bearer — é
+// como as rotas v3 do dispositivo autenticam (docs/adr-acesso-v3.md).
+async function post(rota, corpo, { credencial, timeoutMs = 30000 } = {}) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (credencial) headers.Authorization = 'Bearer ' + credencial;
     const r = await fetch(cfg().apiBase + rota, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(corpo),
-      signal: ctrl.signal
+      method: 'POST', headers, body: JSON.stringify(corpo), signal: ctrl.signal
     });
     const txt = await r.text();
     let json = null;
@@ -45,24 +45,70 @@ export const ApiRh = {
 
 export const Api = {
   /**
-   * Login do gestor. Além da carga, mede a diferença entre o relógio do
-   * aparelho e o do servidor — sem isso, celular com hora errada gera ponto
-   * errado e ninguém percebe.
+   * Primeiro cadastro do aparelho (ou migração de token legado, se
+   * `tokenLegado` vier preenchido). Nunca exige credencial própria aqui — ela
+   * ainda não existe no servidor.
    */
-  async carga(token) {
+  registrarDispositivo(dados, tokenLegado) {
+    return post('/efrat/dispositivo/registrar', dados, { credencial: tokenLegado });
+  },
+
+  /** Estado do cadastro: pendente (com código curto), ativo, negado ou revogado. */
+  estadoDispositivo(dispositivoId, credencial) {
+    return post('/efrat/dispositivo/estado', { dispositivo_id: dispositivoId }, { credencial });
+  },
+
+  /**
+   * Carga da unidade. Sempre pede o conjunto completo — sem "desde_versao":
+   * este cliente ainda não faz merge incremental de pessoas/removidos_ids, e
+   * pedir incremental sem mesclar apagaria a galeria local a cada "sem
+   * mudança". Além dos dados, mede a diferença entre o relógio do aparelho e
+   * o do servidor — sem isso, celular com hora errada gera ponto errado e
+   * ninguém percebe.
+   *
+   * Normaliza `pessoas[].template.{versao,vetores}` (formato v3) para
+   * `pessoas[].{versao,vetores}` (formato flat) porque regras.js — que não
+   * muda nesta rodada — espera `pessoa.vetores` direto.
+   */
+  async carga(dispositivoId, credencial) {
     const t0 = Date.now();
-    const r = await post('/efrat/carga', { token });
+    const r = await post('/efrat/carga', { dispositivo_id: dispositivoId }, { credencial });
     const t1 = Date.now();
     if (!r.ok || !r.json || !r.json.ok) {
       return { ok: false, status: r.status, rede: r.rede === true,
                erro: (r.json && r.json.erro) || (r.rede ? 'sem conexao' : 'falha ao carregar') };
     }
-    const deriva = calcularDeriva(t0, t1, r.json.servidor_hora);
-    return { ok: true, carga: r.json, deriva };
+    const c = r.json;
+    const pessoas = (c.pessoas || []).map(p => ({
+      pessoa_id: p.pessoa_id, nome: p.nome, equipe_id: p.equipe_id, papel: p.papel,
+      versao: p.template && p.template.versao, vetores: (p.template && p.template.vetores) || [],
+      miniatura: p.miniatura || ''
+    }));
+    const deriva = calcularDeriva(t0, t1, c.gerado_em);
+    return {
+      ok: true,
+      carga: { versao: c.versao, gerado_em: c.gerado_em, escopo: c.escopo, pessoas },
+      deriva
+    };
   },
 
-  async cadastrar(token, dados) {
-    const r = await post('/efrat/cadastro', Object.assign({ token }, dados));
+  /**
+   * Fallback 1:N on-line para rosto fora da galeria offline do aparelho.
+   * Nunca devolve material biométrico — só identidade e, se for gestor
+   * reconhecido com margem segura, uma sessão de gestor de vida curta.
+   */
+  async identificar(dispositivoId, credencial, descritor, capturadoEm) {
+    const r = await post('/efrat/identificar',
+      { dispositivo_id: dispositivoId, descritor, capturado_em: capturadoEm }, { credencial });
+    if (!r.ok || !r.json || !r.json.ok) {
+      return { ok: false, status: r.status, rede: r.rede === true,
+               erro: (r.json && r.json.erro) || (r.rede ? 'sem conexao' : 'falha ao identificar') };
+    }
+    return { ok: true, resultado: r.json };
+  },
+
+  async cadastrar(dispositivoId, credencial, dados) {
+    const r = await post('/efrat/cadastro', Object.assign({ dispositivo_id: dispositivoId }, dados), { credencial });
     if (!r.ok || !r.json || !r.json.ok) {
       return { ok: false, erro: (r.json && r.json.erro) || ('HTTP ' + r.status) };
     }
@@ -84,16 +130,16 @@ export const Api = {
   // que a chamada entra. Se a checagem ficasse antes de um await, tres chamadas
   // seguidas passariam as tres pelo `if` antes de qualquer uma marcar o voo.
   // Quem chega no meio recebe a MESMA promessa em vez de abrir um segundo lote.
-  sincronizar(token) {
+  sincronizar(dispositivoId, credencial) {
     if (this._emVoo) return this._emVoo;
     if (!navigator.onLine) return Promise.resolve({ ok: false, offline: true });
-    const p = this._enviarLote(token);
+    const p = this._enviarLote(dispositivoId, credencial);
     this._emVoo = p;
     p.then(() => { this._emVoo = null; }, () => { this._emVoo = null; });
     return p;
   },
 
-  async _enviarLote(token) {
+  async _enviarLote(dispositivoId, credencial) {
     const pendentes = await Store.fila();
     if (!pendentes.length) return { ok: true, nada: true };
 
@@ -108,7 +154,7 @@ export const Api = {
         });
       if (!lote.length) return { ok: true, nada: true };
 
-      const r = await post('/efrat/marcacoes', { token, marcacoes: lote });
+      const r = await post('/efrat/marcacoes', { dispositivo_id: dispositivoId, marcacoes: lote }, { credencial });
       if (!r.ok || !r.json || !r.json.ok) {
         await Store.registrar('sync_falhou', { status: r.status, erro: r.texto && r.texto.slice(0, 200) });
         return { ok: false, erro: (r.json && r.json.erro) || ('HTTP ' + r.status) };

@@ -4,7 +4,7 @@
 // FLUXO, não o face-api. Assim o resultado é determinístico e o CI não depende
 // de foto de rosto real. O motor real tem verificação própria fora do CI.
 import { test, expect } from '@playwright/test';
-import { subir } from './servidor-falso.js';
+import { subir, semearMarcacao, semearPendencia } from './servidor-falso.js';
 
 const TOKEN = 'TOKEN-TESTE';
 
@@ -311,13 +311,17 @@ test('RH cria equipe e colaborador', async ({ page }) => {
   expect(ctx.estado.colaboradoresCriados).toContain('Novo Colaborador');
 });
 
+// Estas duas semeiam a marcação direto no servidor-falso em vez de dirigir a
+// fila do gestor: a fila não é o SUT aqui, é só um jeito frágil de produzir
+// dado — acopla três testes de RH a uma tela que muda de forma nesta mesma
+// rodada. Mesmo precedente de logarRh() trocando PBKDF2 real por chave fixa.
 test('RH ve a pendencia do gestor e decide', async ({ page }) => {
-  await abrir(page, ctx.url, 'p-gestor');
-  await parear(page);
-  await abrirFila(page);
-  await expect(page.locator('#kEnvio')).toHaveText('0', { timeout: 20000 });
-  await page.click('#btnSairFila');
-  await page.waitForSelector('#porta:not(.hide)');
+  semearPendencia(ctx.estado, {
+    id_cliente: 'seed-pend-gestor', pessoa_id: 'p-gestor', equipe_id: 'eq-1',
+    tipo: 'entrada', origem: 'biometria', veredito: 'aceito',
+    marcado_em: new Date().toISOString()
+  });
+  await abrir(page, ctx.url);
 
   await logarRh(page);
   await page.click('#rh nav button[data-aba="pendencias"]');
@@ -329,12 +333,12 @@ test('RH ve a pendencia do gestor e decide', async ({ page }) => {
 });
 
 test('espelho de ponto mostra as marcacoes do colaborador', async ({ page }) => {
-  await abrir(page, ctx.url, 'p-gestor');
-  await parear(page);
-  await abrirFila(page);
-  await marcar(page, 'p-ana');
-  await expect(page.locator('#kEnvio')).toHaveText('0', { timeout: 20000 });
-  await page.click('#btnSairFila');
+  semearMarcacao(ctx.estado, {
+    id_cliente: 'seed-marc-ana', pessoa_id: 'p-ana', equipe_id: 'eq-1',
+    tipo: 'entrada', origem: 'biometria', veredito: 'aceito',
+    marcado_em: new Date().toISOString()
+  });
+  await abrir(page, ctx.url);
 
   await logarRh(page);
   await page.click('#rh nav button[data-aba="registros"]');
@@ -361,13 +365,13 @@ test('card traz o numero junto da cor (leitura sem depender de cor)', async ({ p
 });
 
 test('ver dados abre a tabela com os mesmos numeros do grafico', async ({ page }) => {
-  // uma marcação real hoje: o gestor entra ao abrir a fila.
-  await abrir(page, ctx.url, 'p-gestor');
-  await parear(page);
-  await abrirFila(page);
-  await expect(page.locator('#kEnvio')).toHaveText('0', { timeout: 20000 });
-  await page.click('#btnSairFila');
-  await page.waitForSelector('#porta:not(.hide)');
+  // uma marcação real hoje, semeada direto — não precisa da fila pra existir.
+  semearMarcacao(ctx.estado, {
+    id_cliente: 'seed-marc-gestor', pessoa_id: 'p-gestor', equipe_id: 'eq-1',
+    tipo: 'entrada', origem: 'biometria', veredito: 'aceito',
+    marcado_em: new Date().toISOString()
+  });
+  await abrir(page, ctx.url);
 
   await logarRh(page);
   await expect(page.locator('#rh-painel')).toBeVisible({ timeout: 15000 });
