@@ -6,10 +6,11 @@
 // continuam de propósito: quem bate ponto nunca vê administração, e o RH
 // nunca precisa do aparelho do campo.
 import { Store } from './store.js';
-import { Api, ApiRh } from './api.js';
+import { Api, ApiRh, ApiGestor } from './api.js';
 import { Face } from './face.js';
 import { Fila } from './fila.js';
 import { Rh } from './rh.js';
+import { Gestor } from './gestor.js';
 import { $, mostrar, toast } from './ui.js';
 
 const cfg = () => window.EFRAT_CFG;
@@ -308,7 +309,7 @@ async function boot() {
 // Superfície de teste: o E2E dirige o app por aqui em vez de depender de
 // tempo de câmera e de rosto real.
 window.__EFRAT = {
-  S, Store, Api, ApiRh, Face, Fila, Rh,
+  S, Store, Api, ApiRh, ApiGestor, Face, Fila, Rh, Gestor,
   irParaPorta, abrirFila, sincronizarFundo, verificarDispositivo
 };
 

@@ -8,7 +8,7 @@ export const esc = s => {
 };
 
 export function mostrar(tela) {
-  ['porta', 'aguardando', 'fila', 'rh', 'loginRh'].forEach(t => {
+  ['porta', 'aguardando', 'fila', 'rh', 'loginRh', 'painelGestor'].forEach(t => {
     $(t).classList.toggle('hide', t !== tela);
   });
 }

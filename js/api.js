@@ -7,12 +7,13 @@ const cfg = () => window.EFRAT_CFG;
 // aparelho sem sinal derruba a tela com excecao nao tratada em vez de mostrar
 // "sem rede". `credencial`, quando presente, vira Authorization: Bearer — é
 // como as rotas v3 do dispositivo autenticam (docs/adr-acesso-v3.md).
-async function post(rota, corpo, { credencial, timeoutMs = 30000 } = {}) {
+async function post(rota, corpo, { credencial, timeoutMs = 30000, idempotencyKey } = {}) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const headers = { 'Content-Type': 'application/json' };
     if (credencial) headers.Authorization = 'Bearer ' + credencial;
+    if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
     const r = await fetch(cfg().apiBase + rota, {
       method: 'POST', headers, body: JSON.stringify(corpo), signal: ctrl.signal
     });
@@ -41,6 +42,26 @@ export const ApiRh = {
   equipe(cred, dados) { return postRh('/efrat/rh/equipe', Object.assign({}, cred, dados)); },
   colaborador(cred, dados) { return postRh('/efrat/rh/colaborador', Object.assign({}, cred, dados)); },
   decidir(cred, dados) { return postRh('/efrat/rh/decidir', Object.assign({}, cred, dados)); }
+};
+
+/**
+ * Painel do gestor (docs/adr-acesso-v3.md § Sessão facial do gestor). `sessao`
+ * é o `sessao_gestor` opaco emitido por /efrat/identificar — nunca um token
+ * de aparelho. 401 é sempre SESSAO_EXPIRADA: quem chama trata como sinal para
+ * apagar a sessão e voltar pra tela de ponto.
+ */
+async function postGestor(rota, sessao, corpo, idempotencyKey) {
+  const r = await post(rota, corpo, { credencial: sessao, idempotencyKey });
+  if (!r.ok || !r.json || !r.json.ok) {
+    return { ok: false, status: r.status,
+             erro: (r.json && r.json.erro) || { mensagem: r.rede ? 'sem conexão' : ('HTTP ' + r.status) } };
+  }
+  return { ok: true, dados: r.json };
+}
+
+export const ApiGestor = {
+  equipeHoje(sessao, dados) { return postGestor('/efrat/gestor/equipe-hoje', sessao, dados); },
+  ajustar(sessao, dados, idempotencyKey) { return postGestor('/efrat/gestor/ajustar', sessao, dados, idempotencyKey); }
 };
 
 export const Api = {
@@ -97,9 +118,9 @@ export const Api = {
    * Nunca devolve material biométrico — só identidade e, se for gestor
    * reconhecido com margem segura, uma sessão de gestor de vida curta.
    */
-  async identificar(dispositivoId, credencial, descritor, capturadoEm) {
+  async identificar(dispositivoId, credencial, descritor, capturadoEm, timeoutMs) {
     const r = await post('/efrat/identificar',
-      { dispositivo_id: dispositivoId, descritor, capturado_em: capturadoEm }, { credencial });
+      { dispositivo_id: dispositivoId, descritor, capturado_em: capturadoEm }, { credencial, timeoutMs });
     if (!r.ok || !r.json || !r.json.ok) {
       return { ok: false, status: r.status, rede: r.rede === true,
                erro: (r.json && r.json.erro) || (r.rede ? 'sem conexao' : 'falha ao identificar') };

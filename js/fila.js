@@ -7,6 +7,7 @@
 import { Store } from './store.js';
 import { Api } from './api.js';
 import { Face, DICA_ADORNO } from './face.js';
+import { Gestor } from './gestor.js';
 import {
   tipoDaVez, vereditoPorDistancia, ranquear, emCooldown, agoraCorrigido,
   euclidiana, dia
@@ -26,6 +27,9 @@ export const Fila = {
   cam: null,
   candidato: null,
   aoSair: null,
+  // Sessão de gestor (T-8FB792): só o servidor emite, só vive em memória
+  // aqui (docs/adr-acesso-v3.md § Sessão facial do gestor). Nunca IndexedDB.
+  sessaoGestor: null,
 
   galeria() {
     return (this.carga.pessoas || []).concat(this.carga.sem_cadastro || []);
@@ -73,10 +77,14 @@ export const Fila = {
     }
   },
 
-  sair() {
+  pararCamera() {
     Face.parar();
     if (this.cam) { this.cam.getTracks().forEach(t => t.stop()); this.cam = null; }
     clearTimeout(this._t);
+  },
+
+  sair() {
+    this.pararCamera();
     $('cartao').innerHTML = '';
     this.candidato = null;
     this.estado = 'parado';
@@ -113,7 +121,37 @@ export const Fila = {
       cap.descritor, new Date().toISOString());
     if (!r.ok || r.resultado.resultado !== 'reconhecido') return this.falhou('Rosto não reconhecido', true);
     const p = r.resultado.pessoa;
+    this.registrarSessaoGestor(r.resultado);
     this.confirmarCandidato(p, r.resultado.distancia, 'aceito', cap, true);
+  },
+
+  /**
+   * Sessão de gestor (T-8FB792): só o servidor emite `sessao_gestor`, e só
+   * depois de checar a distância do próprio descritor — nunca a partir do
+   * veredito local (docs/adr-acesso-v3.md). O reconhecimento online já traz
+   * a sessão pronta em `resultado.sessao_gestor`; guarda aqui.
+   */
+  registrarSessaoGestor(resultado) {
+    if (resultado && resultado.sessao_gestor) {
+      this.sessaoGestor = { token: resultado.sessao_gestor, expiraEm: resultado.sessao_expira_em };
+    }
+  },
+
+  sessaoValida() {
+    return !!(this.sessaoGestor && this.sessaoGestor.expiraEm && Date.parse(this.sessaoGestor.expiraEm) > Date.now());
+  },
+
+  /**
+   * O reconhecimento local (galeria offline do aparelho) nunca passa pelo
+   * servidor, então nunca ganha sessão sozinho. Quando o candidato local é
+   * gestor, faz o mesmo round-trip online — melhor esforço, nunca bloqueia o
+   * ponto se falhar ou estiver offline: sem sessão, o link simplesmente não
+   * aparece no comprovante.
+   */
+  async obterSessaoGestor(cap) {
+    const r = await Api.identificar(this.dispositivo.dispositivo_id, this.dispositivo.credencial,
+      cap.descritor, new Date().toISOString(), 5000);
+    if (r.ok && r.resultado.resultado === 'reconhecido') this.registrarSessaoGestor(r.resultado);
   },
 
   confirmarCandidato(pessoa, dist, veredito, cap, online) {
@@ -251,6 +289,16 @@ export const Fila = {
     const revisar = veredito !== 'aceito' || origem === 'manual'
       || pessoa.papel === 'gestor' || Math.abs(this.deriva) > 120000;
 
+    // Sem resquício entre pessoas: sessão de gestor não sobrevive à marcação
+    // de outra pessoa no mesmo aparelho.
+    if (pessoa.papel !== 'gestor') this.sessaoGestor = null;
+    // `biometria_online` já capturou a sessão em tentarIdentificarOnline.
+    // Reconhecimento manual (sem cap.descritor) não prova identidade o
+    // suficiente para abrir sessão — o link simplesmente não aparece.
+    const sessaoPendente = (pessoa.papel === 'gestor' && origem !== 'biometria_online'
+      && !this.sessaoValida() && navigator.onLine && cap && cap.descritor)
+      ? this.obterSessaoGestor(cap) : Promise.resolve();
+
     const m = {
       id_cliente: (crypto.randomUUID ? crypto.randomUUID()
         : 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2)),
@@ -272,6 +320,7 @@ export const Fila = {
     await Store.enfileirar(m);
     await Store.registrar('marcacao', { pessoa: pessoa.nome, tipo, veredito, origem });
     await this.recarregarDia();
+    await sessaoPendente;   // só espera de verdade quando é gestor sem sessão ainda
     this.comprovante(m, pessoa);
     this.sincronizar();
   },
@@ -285,18 +334,26 @@ export const Fila = {
   comprovante(m, pessoa) {
     this.estado = 'comprovante';
     const ehGestor = pessoa.papel === 'gestor';
+    // Painel não abre automático (docs/plano-v3.md): o link só aparece
+    // quando existe sessão de gestor válida, e mesmo assim exige o toque.
+    const mostrarLink = ehGestor && this.sessaoValida();
     $('cartao').innerHTML =
       '<div class="cartao ok">' +
         '<div class="tit">✓ ' + (m.tipo === 'entrada' ? 'ENTRADA' : 'SAÍDA') + '</div>' +
         '<div class="horaGrande">' + hora(m.marcado_em) + '</div>' +
         '<div class="sub">' + esc(pessoa.nome) +
         ' · comprovante <b class="mono">' + m.id_cliente.slice(0, 8).toUpperCase() + '</b></div>' +
-        (ehGestor ? '<a href="#" class="verdados" id="linkVerEquipe">Ver minha equipe</a>' : '') +
+        (mostrarLink ? '<a href="#" class="verdados" id="linkVerEquipe">Ver minha equipe</a>' : '') +
       '</div>';
-    if (ehGestor) {
+    if (mostrarLink) {
       $('linkVerEquipe').onclick = e => {
         e.preventDefault();
-        toast('Painel do gestor chega na próxima etapa', 'warn');
+        const sessao = this.sessaoGestor;
+        this.pararCamera();
+        $('cartao').innerHTML = '';
+        this.candidato = null;
+        this.estado = 'parado';
+        Gestor.abrir(sessao, this.aoSair);
       };
     }
     // O candidato já virou marcação — nada mais precisa dele. Solta a

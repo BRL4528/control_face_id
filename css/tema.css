@@ -94,6 +94,15 @@ canvas.ov{transform:scaleX(-1);pointer-events:none}
 /* .pilula (alias de .tag) — rotulo curto em capsula, ex. papel/estado */
 .tag,.pilula{font-size:9.5px;background:var(--azul-bg);color:var(--azul-esc);padding:2px 7px;border-radius:6px;font-weight:700}
 
+/* ---------------- painel do gestor (T-8FB792) ---------------- */
+#painelGestor{background:var(--surface-2);min-height:100vh}
+#painelGestor header{display:flex;align-items:center;gap:10px;padding:12px 0}
+#painelGestor header .quem{flex:1;text-align:center;font-size:13.5px;font-weight:700;color:var(--ink)}
+#painelGestor header button{background:var(--surface);border:1px solid var(--linha);color:var(--muted);
+  border-radius:20px;padding:9px 15px;font-size:11px;cursor:pointer;width:auto}
+/* linha-item clicável (lista de nomes do gestor) — reseta o cromo de <button> */
+button.linha-item{border:0;background:none;font:inherit;color:inherit;cursor:pointer;width:100%}
+
 /* ---------------- rh ---------------- */
 #rh{background:var(--bg)}
 
