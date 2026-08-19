@@ -5,9 +5,10 @@
 // vercel.json). Se trocar o domínio de apiBase, é OBRIGATÓRIO atualizar a CSP
 // nesses arquivos, caso contrário as chamadas de API serão bloqueadas.
 //
-// Nada aqui é segredo. O token do aparelho NÃO mora neste arquivo: ele é
-// digitado pelo gestor no primeiro acesso e fica só no IndexedDB daquele
-// celular. Num site estático tudo que entra no bundle é público.
+// Nada aqui é segredo — num site estático tudo que entra no bundle é
+// público. O v3 não tem mais token digitado (docs/adr-acesso-v3.md): o
+// aparelho se autocadastra e a credencial de 256 bits fica só no IndexedDB
+// daquele celular, nunca aqui.
 // Object.assign preserva o que ja tiver sido definido antes deste arquivo — e
 // assim que o ambiente de teste, ou um deploy especifico, troca a apiBase sem
 // precisar editar nada.
