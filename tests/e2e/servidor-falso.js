@@ -32,6 +32,21 @@ export function vetorDe(semente) {
   return v;
 }
 
+export function semearMarcacao(estado, marcacao) {
+  if (!marcacao || !marcacao.id_cliente) throw new Error('seed de marcacao exige id_cliente');
+  estado.marcacoes.set(marcacao.id_cliente, Object.assign({}, marcacao));
+  return estado.marcacoes.get(marcacao.id_cliente);
+}
+
+export function semearPendencia(estado, pendencia) {
+  if (!pendencia) throw new Error('seed de pendencia obrigatorio');
+  if (pendencia.id_cliente) {
+    return semearMarcacao(estado, Object.assign({ requer_revisao: true }, pendencia));
+  }
+  estado.correcoes.push(Object.assign({ estado: 'pendente_rh' }, pendencia));
+  return estado.correcoes.at(-1);
+}
+
 export function criarServidor(opts = {}) {
   const estado = {
     token: opts.token || 'TOKEN-TESTE',
@@ -55,6 +70,9 @@ export function criarServidor(opts = {}) {
     lotesSimultaneos: 0,
     maxLotesSimultaneos: 0
   };
+
+  for (const marcacao of (opts.marcacoes || [])) semearMarcacao(estado, marcacao);
+  for (const pendencia of (opts.pendencias || [])) semearPendencia(estado, pendencia);
 
   const rhUsuario = opts.rhUsuario || {
     usuario: 'rh', nome: 'RH Teste',
