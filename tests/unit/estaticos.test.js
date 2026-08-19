@@ -81,3 +81,38 @@ test('a versao do cache do sw acompanha o conjunto de arquivos', () => {
   const sw = ler('sw.js');
   assert.match(sw, /const CACHE = 'efrat-ponto-v\d+'/, 'sw.js precisa de versao de cache explicita');
 });
+
+test('as fontes auto-hospedadas estao no repositorio e no css de fontes', () => {
+  const css = ler('css/fontes.css');
+  assert.ok(!/fonts\.googleapis\.com/i.test(css), 'css/fontes.css nao pode carregar do Google Fonts');
+  assert.ok(!/fonts\.gstatic\.com/i.test(css), 'css/fontes.css nao pode carregar do gstatic');
+  
+  const fontes = [...css.matchAll(/url\(['"]?(\.\.\/vendor\/fontes\/[^'")]+)['"]?\)/g)].map(m => m[1]);
+  assert.ok(fontes.length >= 8, 'esperado conjunto de fontes woff2');
+  for (const f of fontes) {
+    const rel = f.replace('../', '');
+    assert.ok(fs.existsSync(path.join(RAIZ, rel)), 'fonte inexistente no disco: ' + rel);
+  }
+});
+
+test('chart.js esta auto-hospedado em vendor e configurado localmente', () => {
+  const cfg = ler('js/config.js');
+  assert.ok(!/cdn\.jsdelivr\.net/i.test(cfg), 'config.js nao pode apontar chartCdn para CDN externa');
+  assert.ok(fs.existsSync(path.join(RAIZ, 'vendor/chart.umd.min.js')), 'falta o vendor/chart.umd.min.js');
+});
+
+test('a politica de CSP fecha terceiros e protege contra vazamentos', () => {
+  const headers = ler('_headers');
+  const vercel = JSON.parse(ler('vercel.json'));
+  
+  assert.match(headers, /Content-Security-Policy:/, '_headers precisa conter Content-Security-Policy');
+  assert.match(headers, /font-src\s+'self'/, 'font-src deve ser fechado para self');
+  assert.match(headers, /script-src\s+'self'/, 'script-src deve ser fechado para self');
+  
+  const vHeaders = vercel.headers.find(h => h.source === '/(.*)');
+  assert.ok(vHeaders, 'vercel.json deve configurar headers globais');
+  const csp = vHeaders.headers.find(h => h.key === 'Content-Security-Policy');
+  assert.ok(csp, 'vercel.json deve conter Content-Security-Policy');
+  assert.match(csp.value, /font-src\s+'self'/, 'CSP da Vercel deve fechar font-src para self');
+});
+

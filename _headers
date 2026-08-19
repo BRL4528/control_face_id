@@ -1,6 +1,15 @@
 /*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://n8n.samasc.com.br; media-src 'self' blob:; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';
   Permissions-Policy: camera=(self)
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: same-origin
+  X-Frame-Options: DENY
+
 /models/*
   Cache-Control: public, max-age=31536000, immutable
+
 /vendor/*
   Cache-Control: public, max-age=31536000, immutable
+
+/sw.js
+  Cache-Control: no-cache

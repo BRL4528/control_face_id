@@ -35,5 +35,5 @@ window.EFRAT_CFG = Object.assign({
   // registro manual (o mesmo do monitor diário em n8n).
   limiarPresenca: { bom: 0.95, atencao: 0.85, serio: 0.70 },
   alarmeManual: 20,     // taxa de registro manual (%) que acende o alerta
-  chartCdn: 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js'
+  chartCdn: './vendor/chart.umd.min.js'
 }, window.EFRAT_CFG || {});
