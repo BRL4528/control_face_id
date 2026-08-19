@@ -137,6 +137,15 @@ Da varredura teste a teste, só os que dependem de digitar/validar token morrem
 de fato; o resto (identificação, fila, offline, RH, painel) independe de como o
 aparelho se autenticou e sobrevive sem alteração.
 
+> **SUPERSEDIDA PELA SEÇÃO "Correção de escopo — a mudança de FLUXO" (mais
+> abaixo).** A tabela logo a seguir só mede a troca de **autenticação**. A linha
+> "4–14 ... Sobrevivem sem alteração" está incompleta: os 11 testes dessa faixa
+> — mais 3 da faixa "15–23" que só usam a fila pra gerar dado de RH — na
+> verdade mudam por uma segunda razão, de **fluxo**: o helper `abrirFila` deixa
+> de existir porque o colaborador passa a bater o ponto direto, sem o gestor
+> abrir fila nenhuma. 14 testes ao todo. Quem for implementar a T-38A7C1 deve
+> ler a seção de fluxo antes de agir com base só nesta tabela.
+
 | # | Teste atual (`tests/e2e/fluxo.spec.js`) | Depende do token digitado? | Destino no v3 |
 |---|---|---|---|
 | 1 | `porta comeca bloqueada ate o aparelho ser pareado` | Sim — checa tela de pareamento por token | **Morre.** Vira "porta bloqueada até o aparelho ter `ativo=true`" |
