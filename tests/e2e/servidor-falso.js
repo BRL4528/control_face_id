@@ -158,6 +158,8 @@ export function criarServidor(opts = {}) {
         const token = body.token || url.searchParams.get('token');
         const dispositivo = body.dispositivo_id && dispositivoAutenticado(req, body.dispositivo_id);
         if (token !== estado.token && !dispositivo) {
+          // Compatibilidade do piloto: o cliente v2 ainda espera `erro` textual.
+          if (token) return responder(401, { ok: false, erro: 'token invalido' });
           return responder(401, erro('CREDENCIAL_INVALIDA', 'credencial invalida'));
         }
       }
