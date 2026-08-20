@@ -221,3 +221,24 @@ auto-marcar a `p-ana` da carga quente sem querer.
 Vale como padrão: sugeri um teste próprio para "aparelho virgem sem rede não abre a fila" —
 hoje esse comportamento correto só existe como efeito colateral de três testes que mediam
 outra coisa.
+
+## T-E3DBD4 fechado — deadlock corrigido (Full-Stack, `47848bb`)
+
+Verificado por mim no código, não no relato:
+- `js/ui.js:20` — `btnAcessar` sai do rodízio exclusivo, controlado por `ACESSO_RH_VISIVEL`
+  (visível em `porta`+`aguardando`). É a nota do Revisor seguida à risca.
+- `js/app.js:173` — `if (S.emRh) return;` suspende o poll; `forcado` limpa em 172.
+- `acesso.spec.js` de 6 para 7 testes, o dedicado incluído. `#aguardandoCodigo` intocado.
+- Vermelho antes confirmado, verde depois.
+
+**O achado de brinde é o melhor da entrega e não estava no meu critério.** O poll de fundo de
+`verificarDispositivo()` ia arrancar a tela do RH debaixo da pessoa **a cada 15s** num aparelho
+pendente. Eu pedi "RH alcançável"; ele entregou "RH utilizável". Sem isso, o RH seria expulso
+do painel três vezes antes de aprovar o primeiro aparelho — durante a instalação no cliente,
+e ninguém ligaria a causa ao gate.
+
+Padrão que fica: **quem implementa vê o efeito de segunda ordem que quem escreveu o critério
+não viu.** Peça o efeito, não a letra.
+
+Também de brinde, do Full-Stack: `pgrep -f "[p]laywright test"` com colchete não conta o
+próprio comando — foi o falso positivo que me enganou duas vezes hoje.
