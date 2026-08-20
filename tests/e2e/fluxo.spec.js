@@ -48,6 +48,24 @@ async function vira(page, pessoa) {
 }
 
 /**
+ * Simula um aparelho que já sincronizou a carga com o servidor antes de cair
+ * offline. `aprovarDispositivo` só libera `#btnPonto`; carga nunca é buscada
+ * nesse passo (só dentro do próprio `abrirFila` em js/app.js). Sem isso,
+ * "nunca baixou a equipe" e "sem rede agora" ficam indistinguíveis pro app —
+ * ele falha fechado (critério 5 de docs/plano-v3.md) com "Não consegui
+ * carregar a equipe" em vez de abrir a tela de ponto com a carga em cache,
+ * que é o cenário que os testes de sincronismo offline querem testar.
+ */
+async function primeCarga(page) {
+  await page.evaluate(async () => {
+    const d = window.__EFRAT.S.dispositivo;
+    const r = await window.__EFRAT.Api.carga(d.dispositivo_id, d.credencial);
+    await window.__EFRAT.Store.set('carga', r.carga);
+    await window.__EFRAT.Store.set('deriva', r.deriva);
+  });
+}
+
+/**
  * Abre a tela de ponto. Substitui o antigo `abrirFila`, que esperava
  * `Fila.gestor`/`Fila.estado === 'armado'` — sinais que só existiam no modelo
  * "gestor abre a fila para os outros". Não existe mais: qualquer rosto
@@ -264,6 +282,7 @@ test('registro manual exige motivo quando ninguem reconhece o rosto', async ({ p
 test('offline enfileira e sobe quando a rede volta', async ({ page }) => {
   await abrir(page, ctx.url, 'p-ana');
   await aprovarDispositivo(page, ctx);
+  await primeCarga(page);
   ctx.estado.fora = true;
   await abrirPonto(page);
   await marcar(page, 'p-ana');
@@ -295,6 +314,7 @@ test('reenvio do mesmo id_cliente nao duplica', async ({ page }) => {
 test('envio unico em voo: nunca ha dois lotes simultaneos', async ({ page }) => {
   await abrir(page, ctx.url, 'p-ana');
   await aprovarDispositivo(page, ctx);
+  await primeCarga(page);
   ctx.estado.fora = true;
   await abrirPonto(page);
   await page.evaluate(() => { window.EFRAT_CFG.cooldownMs = 0; });
@@ -313,6 +333,7 @@ test('envio unico em voo: nunca ha dois lotes simultaneos', async ({ page }) => 
 test('colaborador inativo e rejeitado e a marcacao fica retida', async ({ page }) => {
   await abrir(page, ctx.url, 'p-ana');
   await aprovarDispositivo(page, ctx);
+  await primeCarga(page);
   ctx.estado.fora = true;
   await abrirPonto(page);
   await marcar(page, 'p-ana');
@@ -326,6 +347,21 @@ test('colaborador inativo e rejeitado e a marcacao fica retida', async ({ page }
   }, null, { timeout: 25000 });
   const fila = await page.evaluate(() => window.__EFRAT.Store.fila());
   expect(fila.find(m => m._erro)._erro).toContain('inativo');
+});
+
+// Comportamento correto e defensavel (nao e o mesmo cenario dos tres acima):
+// aparelho aprovado mas que NUNCA baixou a carga da equipe, perdendo a rede
+// bem no primeiro acesso. Sem galeria nenhuma em cache, nao ha quem
+// reconhecer offline — abrirFila() falha fechado com toast em vez de abrir
+// #fila. Antes disso so aparecia como efeito colateral acidental nos testes
+// de sincronismo; agora tem asserção própria.
+test('aparelho que nunca baixou a equipe nao abre a fila sem rede', async ({ page }) => {
+  await abrir(page, ctx.url, 'p-ana');
+  await aprovarDispositivo(page, ctx);
+  ctx.estado.fora = true;
+  await page.click('#btnPonto');
+  await expect(page.locator('#toast')).toContainText('conex', { timeout: 15000 });
+  await expect(page.locator('#fila')).toHaveClass(/hide/);
 });
 
 /* -------------------------------------------------------- painel RH */
