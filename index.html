@@ -21,9 +21,16 @@
   <h1>Ponto Facial</h1>
   <div class="sub" id="portaSub">Efrat</div>
   <button class="act big" id="btnPonto">REGISTRAR PONTO</button>
-  <button class="act ghost" id="btnAcessar">ACESSAR</button>
   <p class="nota" id="portaStatus" style="margin-top:20px"></p>
 </div>
+
+<!-- Acesso do RH (T-E3DBD4): fica FORA do rodízio exclusivo de mostrar()
+     (porta/aguardando/fila/rh/loginRh/painelGestor) de propósito — precisa
+     continuar alcançável com o aparelho pendente, não só aprovado. A
+     autenticação do RH (usuário + chave PBKDF2) sempre foi independente da
+     credencial do aparelho; só o roteamento client-side contrariava isso.
+     js/ui.js decide quando mostrar. -->
+<button id="btnAcessar" class="hide">Acessar RH</button>
 
 <!-- ===================== AGUARDANDO LIBERAÇÃO (v3, sem token) ===================== -->
 <div id="aguardando" class="hide" style="max-width:380px;margin:0 auto;padding:14vh 22px 40px;text-align:center">

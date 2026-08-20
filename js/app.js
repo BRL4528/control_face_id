@@ -14,7 +14,10 @@ import { Gestor } from './gestor.js';
 import { $, mostrar, toast } from './ui.js';
 
 const cfg = () => window.EFRAT_CFG;
-const S = { dispositivo: null, deriva: 0, persistido: false, pollTimer: null };
+// `emRh` (T-E3DBD4): true do momento em que "Acessar RH" é tocado até sair —
+// suspende o poll de fundo de verificarDispositivo() pra ele não arrancar a
+// tela do RH debaixo do usuário no meio do login/painel.
+const S = { dispositivo: null, deriva: 0, persistido: false, pollTimer: null, emRh: false };
 
 /* --------------------------------------------- identidade do aparelho */
 
@@ -156,9 +159,18 @@ function mostrarBloqueado(msg) {
  * não vira sinônimo de aprovado — só reaproveita a carga em cache se este
  * aparelho já tiver sido confirmado `ativo` alguma vez (persistido em
  * `ultimo_estado`); sem esse registro, sem rede mantém bloqueado.
+ *
+ * `forcado` (T-E3DBD4): quem sai do RH chama assim, de propósito, pra
+ * reativar o poll e redescobrir a tela certa sem presumir #porta — o
+ * aparelho pode ter continuado pendente o tempo todo. Sem `forcado`, uma
+ * consulta agendada de antes de entrar no RH (`S.emRh`) não arranca a tela
+ * do usuário no meio do login/painel; ela só reagenda, silenciosa, e quem
+ * sai do RH retoma o poll de verdade.
  */
-async function verificarDispositivo() {
+async function verificarDispositivo(forcado) {
   clearTimeout(S.pollTimer);
+  if (forcado) S.emRh = false;
+  if (S.emRh) return;
 
   const ident = S.dispositivo || await assegurarIdentidade();
   if (!ident) {
@@ -253,6 +265,9 @@ async function abrirFila() {
 /* -------------------------------------------------------- acesso RH */
 
 function abrirLoginRh() {
+  // T-E3DBD4: alcançável com o aparelho pendente. Suspende o poll de fundo
+  // até sair — ver o comentário de verificarDispositivo().
+  S.emRh = true;
   mostrar('loginRh');
   $('rhSenha').value = '';
   setTimeout(() => $('rhUsuario').focus(), 100);
@@ -268,7 +283,9 @@ async function entrarRh() {
     const r = await Rh.entrar(u, s);
     if (!r.ok) { toast(r.erro, 'bad'); return; }
     Rh._dispositivo = S.dispositivo;
-    Rh.abrir(irParaPorta);
+    // Sair do RH não presume #porta (T-E3DBD4) — redescobre a tela certa,
+    // porque o aparelho pode ter continuado pendente o tempo todo.
+    Rh.abrir(() => verificarDispositivo(true));
   } finally {
     $('btnEntrarRh').disabled = false;
     $('btnEntrarRh').textContent = 'Entrar';
@@ -284,7 +301,8 @@ async function boot() {
   $('btnAcessar').onclick = abrirLoginRh;
   $('btnEntrarRh').onclick = entrarRh;
   $('rhSenha').addEventListener('keydown', e => { if (e.key === 'Enter') entrarRh(); });
-  $('btnVoltarPorta').onclick = irParaPorta;
+  // Idem: cancelar o login não presume #porta (T-E3DBD4).
+  $('btnVoltarPorta').onclick = () => verificarDispositivo(true);
   $('btnSairFila').onclick = () => Fila.sair();
 
   window.addEventListener('online', () => { S.dispositivo ? sincronizarFundo() : verificarDispositivo(); });

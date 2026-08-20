@@ -125,3 +125,50 @@ test('critério 5b — aparelho cadastrado mas NUNCA aprovado (ficou pendente) n
   await expect(page.locator('#porta')).toHaveClass(/hide/);
   await expect(page.locator('#aguardando')).not.toHaveClass(/hide/);
 });
+
+// T-E3DBD4 — achado da integração (docs, não arquivo: a decisão fechou sem
+// levar ao cliente porque servidor-falso.js:181-182 já pulava a checagem de
+// credencial de dispositivo para /efrat/rh/*, e js/app.js:7 já dizia que o RH
+// "nunca precisa do aparelho do campo" — só o roteamento client-side
+// contrariava os dois. #btnAcessar morava dentro de #porta, que mostrarAguardando()
+// esconde; aparelho nunca aprovado == RH nunca alcançável == ninguém aprova.
+test('T-E3DBD4 — RH alcançável com aparelho pendente, sem liberar carga nem o botão de ponto', async ({ page }) => {
+  await abrir(page, ctx.url);
+  await expect(page.locator('#aguardando')).not.toHaveClass(/hide/);
+  await expect(page.locator('#btnAcessar')).toBeVisible();
+
+  await page.click('#btnAcessar');
+  await expect(page.locator('#loginRh')).not.toHaveClass(/hide/);
+
+  // senha errada continua negada
+  await page.fill('#rhUsuario', 'rh');
+  await page.fill('#rhSenha', 'errada');
+  await page.click('#btnEntrarRh');
+  await expect(page.locator('#toast')).toContainText('invalidos', { timeout: 8000 });
+  await expect(page.locator('#rh')).toHaveClass(/hide/);
+
+  // senha válida abre o RH — mesmo bypass de derivação PBKDF2 que
+  // tests/e2e/fluxo.spec.js usa pra ficar determinístico.
+  await page.evaluate(() => {
+    window.__EFRAT.Rh.entrar = async function (u) {
+      const d = await window.__EFRAT.ApiRh.dados({ usuario: u, chave: 'CHAVE-DE-TESTE' }, 30);
+      if (!d.ok) return { ok: false, erro: d.erro };
+      this.cred = { usuario: u, chave: 'CHAVE-DE-TESTE' };
+      this.dados = d.dados;
+      return { ok: true };
+    };
+  });
+  await page.fill('#rhSenha', 'qualquer');
+  await page.click('#btnEntrarRh');
+  await expect(page.locator('#rh')).not.toHaveClass(/hide/, { timeout: 15000 });
+
+  // durante todo o fluxo, carga da unidade e botão de ponto continuam presos
+  expect(ctx.estado.chamadas.carga).toBe(0);
+  await expect(page.locator('#porta')).toHaveClass(/hide/);
+
+  // logout não presume #porta — o aparelho continua pendente de verdade
+  await page.click('#btnSairRh');
+  await expect(page.locator('#aguardando')).not.toHaveClass(/hide/, { timeout: 8000 });
+  await expect(page.locator('#porta')).toHaveClass(/hide/);
+  expect(ctx.estado.chamadas.carga).toBe(0);
+});
