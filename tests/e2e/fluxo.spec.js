@@ -60,6 +60,10 @@ async function primeCarga(page) {
   await page.evaluate(async () => {
     const d = window.__EFRAT.S.dispositivo;
     const r = await window.__EFRAT.Api.carga(d.dispositivo_id, d.credencial);
+    // Falha aqui, alto e claro, em vez de semear undefined: senão o teste só
+    // reprova passos depois, em abrirPonto, com o MESMO timeout dos 3
+    // vermelhos que este helper existe pra evitar — apontando pro lugar errado.
+    if (!r.ok) throw new Error('primeCarga: Api.carga falhou: ' + r.erro);
     await window.__EFRAT.Store.set('carga', r.carga);
     await window.__EFRAT.Store.set('deriva', r.deriva);
   });
