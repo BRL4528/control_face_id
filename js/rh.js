@@ -1,5 +1,5 @@
 // Painel do RH. Tudo que é administração vive aqui e em lugar nenhum mais.
-import { Api, ApiRh } from './api.js';
+import { ApiRh } from './api.js';
 import { Face } from './face.js';
 import { derivar } from './cripto.js';
 import {
@@ -767,8 +767,30 @@ export const Rh = {
     if (!p) return;
     this.alvoCadastro = p;
     this.capturas = [];
+    this.uploadFotos = [null, null, null];
     $('areaBio').innerHTML =
       '<div class="card"><h2>Biometria de ' + esc(p.nome) + '</h2>' +
+        '<p class="nota">Como cadastrar o rosto?</p>' +
+        '<button class="act" id="btnModoCamera">Câmera do computador</button>' +
+        '<button class="act ghost" id="btnModoUpload">Upload de 3 fotos</button>' +
+        '<button class="act ghost" id="btnFecharBio">Fechar</button>' +
+      '</div>';
+    $('btnModoCamera').onclick = () => this.abrirBiometriaCamera();
+    $('btnModoUpload').onclick = () => this.abrirBiometriaUpload();
+    $('btnFecharBio').onclick = () => { $('areaBio').innerHTML = ''; };
+    $('areaBio').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
+
+  idempotencyKeyNova() {
+    return crypto.randomUUID ? crypto.randomUUID() : 'idem-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+  },
+
+  /* ------------------------------------------------- biometria: câmera */
+
+  abrirBiometriaCamera() {
+    const p = this.alvoCadastro;
+    $('areaBio').innerHTML =
+      '<div class="card"><h2>Câmera — ' + esc(p.nome) + '</h2>' +
         '<div class="camwrap" style="aspect-ratio:1/1">' +
           '<video id="videoCad" playsinline muted autoplay></video>' +
           '<div class="camoff" id="camOffCad">A câmera liga na primeira captura</div>' +
@@ -776,13 +798,13 @@ export const Rh = {
         '<div class="shots" id="cadShots"></div>' +
         '<button class="act ghost" id="btnCapCad">Capturar 1/3</button>' +
         '<button class="act" id="btnSalvarBio" disabled>Salvar biometria</button>' +
-        '<button class="act ghost" id="btnFecharBio">Fechar</button>' +
+        '<button class="act ghost" id="btnFecharBio">Voltar</button>' +
         '<p class="nota" style="margin-top:10px">Sem boné, óculos escuros ou máscara. Mova um pouco a cabeça entre as capturas.</p>' +
       '</div>';
     this.pintarShots();
     $('btnCapCad').onclick = () => this.capturarCadastro();
     $('btnSalvarBio').onclick = () => this.salvarBiometria();
-    $('btnFecharBio').onclick = () => { this.pararCamCad(); $('areaBio').innerHTML = ''; };
+    $('btnFecharBio').onclick = () => { this.pararCamCad(); this.abrirBiometria(p.pessoa_id); };
     $('areaBio').scrollIntoView({ behavior: 'smooth', block: 'start' });
   },
 
@@ -822,27 +844,151 @@ export const Rh = {
 
   async salvarBiometria() {
     const c = this.capturas;
-    $('btnSalvarBio').disabled = true;
     const p = this.alvoCadastro;
-    // versao_cadastro precisa ir junto (§3.2): sem ela o servidor recusa com
-    // CADASTRO_DESATUALIZADO — esta chamada não muda nada na pessoa, mas é a
-    // MESMA rota de edição, então segue a mesma pré-condição.
-    const r = await ApiRh.colaborador(this.cred, {
-      pessoa_id: p.pessoa_id, versao_cadastro: p.versao_cadastro, nome: p.nome, matricula: p.matricula,
-      equipe_id: p.equipe_id, papel: p.papel
-    });
-    if (!r.ok) { toast(r.erro || 'Falha', 'bad'); $('btnSalvarBio').disabled = false; return; }
-    // T-4B538E: coerência é calculada e decidida no servidor (§4.2 do
-    // contrato) — mandar um número calculado aqui era campo morto que parecia
-    // vivo: o servidor sempre ignorou e recalculou o dele.
-    const bio = await Api.cadastrar(this._dispositivo.dispositivo_id, this._dispositivo.credencial, {
-      origem: 'rh', pessoa_id: p.pessoa_id, nome: p.nome, matricula: p.matricula,
-      equipe_id: p.equipe_id, vetores: c.map(x => x.descritor), miniatura: c[0].thumb
+    if (!Face.modeloId) {
+      toast('Não consegui confirmar o modelo de reconhecimento — recarregue a página e tente de novo', 'bad');
+      return;
+    }
+    $('btnSalvarBio').disabled = true;
+    // Rota autenticada como RH (usuario+chave), não credencial de aparelho
+    // (docs/fase3-contrato.md §4.3): antes disso, um PC de RH que nunca se
+    // registrou como aparelho tinha `_dispositivo` nulo e a câmera não
+    // funcionava — T-8ADD9C/T-65D806.
+    const bio = await ApiRh.faceCadastrar(this.cred, {
+      pessoa_id: p.pessoa_id, origem: 'rh_camera',
+      vetores: c.map(x => x.descritor), miniatura: c[0].thumb,
+      modelo_id: Face.modeloId, idempotency_key: this.idempotencyKeyNova()
     });
     $('btnSalvarBio').disabled = false;
     if (!bio.ok) { toast(bio.erro || 'Falha ao gravar biometria', 'bad'); return; }
     toast('Biometria salva', 'ok');
     this.pararCamCad();
+    $('areaBio').innerHTML = '';
+    await this.recarregar();
+  },
+
+  /* ------------------------------------------------- biometria: upload */
+
+  abrirBiometriaUpload() {
+    const p = this.alvoCadastro;
+    $('areaBio').innerHTML =
+      '<div class="card"><h2>Upload de 3 fotos — ' + esc(p.nome) + '</h2>' +
+        '<p class="nota"><b>O sistema não distingue uma pessoa de uma foto dela.</b><br>' +
+          'Use fotos que você mesmo tirou, ou recebeu diretamente do colaborador. Foto de tela, foto de crachá ' +
+          'e foto de foto são aceitas normalmente — quem garante que é a pessoa certa é você.</p>' +
+        '<p class="nota">Escolha fotos com o rosto descoberto — sem óculos escuros, boné, capacete ou máscara. ' +
+          'O sistema reconhece pelo formato do rosto: se estiver coberto, ele simplesmente não encontra.</p>' +
+        '<div class="shots" id="uploadSlots"></div>' +
+        '<p class="nota badfg hide" id="uploadErro"></p>' +
+        '<input type="file" id="uploadInput" accept="image/jpeg,image/png,image/webp" style="display:none">' +
+        '<button class="act" id="btnSalvarUpload" disabled>Salvar biometria</button>' +
+        '<button class="act ghost" id="btnFecharBio">Voltar</button>' +
+      '</div>';
+    this.pintarSlotsUpload();
+    let indiceAlvo = null;
+    $('uploadSlots').onclick = e => {
+      const slot = e.target.closest('[data-slot]');
+      if (!slot) return;
+      indiceAlvo = Number(slot.dataset.slot);
+      $('uploadInput').click();
+    };
+    $('uploadInput').onchange = async e => {
+      const file = e.target.files[0];
+      e.target.value = ''; // permite escolher o mesmo arquivo de novo (ex.: repor a mesma foto após corrigir)
+      if (!file || indiceAlvo == null) return;
+      await this.processarArquivoUpload(indiceAlvo, file);
+    };
+    $('btnSalvarUpload').onclick = () => this.salvarBiometriaUpload();
+    $('btnFecharBio').onclick = () => this.abrirBiometria(p.pessoa_id);
+    $('areaBio').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
+
+  async processarArquivoUpload(indice, file) {
+    this.uploadFotos[indice] = await Face.capturarDeArquivo(file);
+    this.pintarSlotsUpload();
+  },
+
+  /**
+   * Vazio e falhou não podem se parecer (achado do Orquestrador): vazio é
+   * convite pra ação, falhou é problema que já aconteceu. Ícone e cor
+   * diferentes fazem esse trabalho — texto sozinho pode não ser lido.
+   */
+  pintarSlotsUpload() {
+    const el = $('uploadSlots');
+    if (!el) return;
+    el.innerHTML = [0, 1, 2].map(i => {
+      const f = this.uploadFotos[i];
+      if (f && f.ok) return '<div class="slot ok" data-slot="' + i + '"><img src="' + f.thumb + '"></div>';
+      if (f && !f.ok) {
+        return '<div class="slot falhou" data-slot="' + i + '">' +
+          '<span class="ic">✕</span><span>Foto ' + (i + 1) + '</span></div>';
+      }
+      return '<div class="slot vazio" data-slot="' + i + '">' +
+        '<span class="ic">+</span><span>Foto ' + (i + 1) + '</span></div>';
+    }).join('');
+
+    const indiceFalha = this.uploadFotos.findIndex(f => f && !f.ok);
+    const areaErro = $('uploadErro');
+    if (areaErro) {
+      if (indiceFalha >= 0) {
+        areaErro.textContent = this.mensagemErroUploadArquivo(this.uploadFotos[indiceFalha].motivo, indiceFalha);
+        areaErro.classList.remove('hide');
+      } else {
+        areaErro.classList.add('hide');
+      }
+    }
+
+    // As 3 posições precisam estar OK, não só preenchidas — o botão nunca
+    // habilita sobre uma posição vazia ou falhou (docs/fase3-contrato.md
+    // §4.2: menos de 3 vetores válidos é 422 VETORES_INVALIDOS; a tela não
+    // pode ser o caminho que produz esse lote).
+    const btn = $('btnSalvarUpload');
+    if (btn) btn.disabled = !this.uploadFotos.every(f => f && f.ok);
+  },
+
+  // Textos fechados com o Designer (750f40fef8) — não reusa o de fila.js: lá
+  // o gestor está CAPTURANDO ao vivo ("refaça"), aqui o RH está ESCOLHENDO
+  // arquivo já pronto ("escolha outra").
+  mensagemErroUploadArquivo(motivo, indice) {
+    const n = indice + 1;
+    const M = {
+      formato_heic: 'Este formato de foto (HEIC) o navegador não abre. No iPhone, mande como JPEG.',
+      sem_rosto: 'Não encontrei um rosto na foto ' + n + ' de 3. Escolha outra, com o rosto bem visível e descoberto.',
+      multiplos_rostos: 'Tem mais de uma pessoa na foto ' + n + ' de 3. Escolha uma foto só com o rosto da pessoa cadastrada.',
+      qualidade: 'A foto ' + n + ' de 3 ficou com o rosto tampado ou embaçado. Escolha outra, com boa luz.'
+    };
+    return M[motivo] || 'Uma das fotos não pôde ser usada. Escolha outra, com boa luz e o rosto bem visível e descoberto.';
+  },
+
+  mensagemErroUploadLote(codigo) {
+    const M = {
+      COERENCIA_INSUFICIENTE: 'Essas 3 fotos ficaram muito diferentes entre si — pode ser iluminação, ângulo, ou fotos de pessoas diferentes. Escolha 3 fotos mais parecidas, da mesma pessoa e com boa luz.',
+      FOTOS_IGUAIS: 'As 3 fotos são iguais ou quase iguais. Escolha 3 fotos diferentes entre si, tiradas em momentos diferentes.'
+    };
+    return M[codigo] || null;
+  },
+
+  async salvarBiometriaUpload() {
+    if (!this.uploadFotos.every(f => f && f.ok)) return; // reafirma a condição do botão, nunca confia só nela
+    const p = this.alvoCadastro;
+    if (!Face.modeloId) {
+      toast('Não consegui confirmar o modelo de reconhecimento — recarregue a página e tente de novo', 'bad');
+      return;
+    }
+    $('btnSalvarUpload').disabled = true;
+    const bio = await ApiRh.faceCadastrar(this.cred, {
+      pessoa_id: p.pessoa_id, origem: 'rh_upload',
+      vetores: this.uploadFotos.map(f => f.descritor), miniatura: this.uploadFotos[0].thumb,
+      modelo_id: Face.modeloId, idempotency_key: this.idempotencyKeyNova()
+    });
+    $('btnSalvarUpload').disabled = false;
+    if (!bio.ok) {
+      toast(this.mensagemErroUploadLote(bio.codigo) || bio.erro || 'Falha ao enviar', 'bad');
+      return;
+    }
+    // origem rh_upload nasce pendente (§4.3): ninguém do RH viu a captura
+    // acontecer, então um humano confere antes de virar referência.
+    toast('Fotos enviadas — aguardando aprovação do RH', 'ok');
     $('areaBio').innerHTML = '';
     await this.recarregar();
   },
