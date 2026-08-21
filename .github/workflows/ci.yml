@@ -550,6 +550,35 @@ jobs:
             console.log("servidor de teste envia a politica do _headers em " + ALVOS.length + " caminhos conferidos");
           '
 
+      - name: Nenhum cabeçalho de teste escapa para fora de tests/
+        run: |
+          # Pedido do T-C20AD3. O servidor falso precisa simular o IP de origem
+          # para tornar testavel o pedidos_da_mesma_rede_1h (§1.2), e o jeito
+          # obvio e um cabecalho so-de-teste. O risco, que ja aconteceu nesta
+          # base com o campo coerencia: o servidor falso e o modelo que alguem
+          # usa para escrever o workflow real do n8n. Se o cabecalho for
+          # copiado para la, nasce falsificacao de origem — qualquer requisicao
+          # externa manda o cabecalho e o sinal que existe para DETECTAR flood
+          # passa a ser o que o atacante escolher, inclusive variando o valor
+          # para se esconder do proprio sinal.
+          #
+          # Casa por PADRAO e nao por um nome so: qualquer cabecalho marcado
+          # como teste/fake/mock. Assim vale para o nome que o T-C20AD3
+          # escolher e para o proximo que alguem inventar.
+          #
+          # tests/ e onde ele PODE existir. .github/ esta fora porque este
+          # arquivo cita o padrao. vendor/ e models/ sao terceiros e binarios.
+          alvos=$(git ls-files | grep -vE '^(tests|vendor|models|\.github)/' || true)
+          if [ -z "$alvos" ]; then echo "::error::nenhum arquivo para varrer — a guarda ficaria sem efeito"; exit 1; fi
+
+          achados=$(grep -niE 'x-(teste|test|fake|falso|mock|dev)-' $alvos || true)
+          if [ -n "$achados" ]; then
+            echo "$achados"
+            echo "::error::cabeçalho de teste fora de tests/ — se isto chegar ao workflow do n8n, a origem da requisição passa a ser escolhida por quem chama, e o sinal de flood vira decoração"
+            exit 1
+          fi
+          echo "nenhum cabeçalho de teste fora de tests/ ($(echo "$alvos" | wc -l) arquivos varridos)"
+
       - name: npm run serve nunca aponta para produção (T-B1D7F6)
         run: |
           node --input-type=module -e '
