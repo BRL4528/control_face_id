@@ -37,6 +37,24 @@ nenhuma peça deste contrato pode violar:
 
 1. **Nada de segredo no bundle.** Todo arquivo servido é público. `js/config.js`
    é configuração de runtime, não cofre.
+   **E a dependência de ordem em `js/config.js:15` é inerente ao desenho, não defeito a
+   corrigir** — registro pedido pelo DevOps (T-F1E72A) para ninguém "consertar" aquele
+   arquivo achando que fecha um buraco. Por desenho o app precisa de duas coisas ao mesmo
+   tempo: um default de produção escrito no arquivo, e um jeito de o ambiente de teste
+   sobrepor esse default. **Toda** forma de conseguir isso é ordem-dependente —
+   `Object.assign` com os defaults no primeiro argumento, spread, ou uma variável separada
+   que o config prefere. Trocar dependência de **ordem** por dependência de **convenção**
+   não compra robustez e custa complexidade num arquivo cuja virtude é ser simples o
+   bastante para o cliente ler e editar no servidor.
+   O que protege é a guarda de CI, e ela protege porque verifica o **resultado**: busca o
+   `config.js` servido, executa num contexto real e lê o `window.EFRAT_CFG.apiBase`
+   resolvido — nunca analisa o texto, nunca afirma que `Object.assign` existe. Consequência:
+   qualquer refatoração que preserve o comportamento passa, e qualquer uma que o quebre
+   falha, **inclusive as que ninguém previu**.
+   **Medido, não deduzido** (DevOps): trocando o `Object.assign` por objeto literal — a
+   limpeza que um revisor aprovaria sem pensar — a guarda foi de `exit 0` para `exit 1`
+   nomeando `n8n.samasc.com.br`. Antes: "npm run serve → 127.0.0.1:37475 (local)". Depois:
+   "o servidor de teste entrega o app apontando para n8n.samasc.com.br".
 2. **Nenhum passo de build.** Página nova é arquivo `.html` novo + módulo ES novo.
    Sem bundler, sem transpilação, sem `process.env`.
 3. **A página pública de face vive em origem própria.** Subdomínio, não caminho.
@@ -85,8 +103,24 @@ a falta é lida como afirmação**.
 | protocolo de pista | resultado não anunciado | suíte verde |
 | protocolo de pista | anúncio de fim que nunca chega (rodada morreu) | pista ocupada para sempre |
 
-Os dois últimos são do nosso canal e não do produto, e é por isso que o princípio ficou
-visível: o mesmo defeito aparece igual quando o "sistema" é a equipe. **Regra prática:**
+### O terceiro irmão: guarda que confere o mecanismo, não o resultado
+
+Nomeado pelo Orquestrador sobre a guarda do `serve`, e é distinto dos dois anteriores: não é
+sinal que mente nem ausência lida como afirmação — é **verificação apontada para a
+implementação em vez do efeito**. Guarda de propriedade sobrevive a refatoração; guarda de
+implementação vira mentira na primeira limpeza, e pior: continua verde enquanto mente.
+
+| Guarda | Conferia o mecanismo | Passou a conferir o resultado |
+|---|---|---|
+| `apiBase` do `serve` | presença da linha injetada / domínio no texto | `window.EFRAT_CFG.apiBase` resolvido, após executar o arquivo servido |
+| `modelo_id` (§4.7) | existência de um `manifesto.json` de build | digest dos 7 arquivos **servidos**, comparado entre as duas origens |
+| decimal fora da tela (§7 item 14) | ausência do campo no registro | ausência do campo **no payload**, com o registro semeado |
+
+Os três foram consertados no mesmo dia, e nos três o defeito era o mesmo: a asserção olhava
+para como a coisa é feita, e o que importa é o que sai.
+
+Os dois últimos casos da tabela anterior são do nosso canal e não do produto, e é por isso
+que o princípio ficou visível: o mesmo defeito aparece igual quando o "sistema" é a equipe. **Regra prática:**
 todo campo, teste ou protocolo deste contrato que trate falta de dado como resultado tem de
 dizer explicitamente qual dos dois lados a falta significa — e, quando não puder dizer,
 perguntar em vez de assumir. É o que §1.8 já faz com o aparelho offline (falha fechado, e
