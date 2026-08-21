@@ -152,8 +152,8 @@ frente do n8n (a resposta "nenhum" muda a recomendação de rate limit).
 
 ## Atualização 4 · fecho do dia (medido, não reportado)
 
-**Medição válida: 93 unitários + 106 e2e passando, 5 armados, zero falhas** (mais 16
-etapas de higiene), medida pelo DevOps em 9341dc9 com procedência declarada — anúncio
+**Medição válida: 93 unitários + 106 e2e passando, 5 armados, zero falhas** (mais 15
+etapas de guarda — eram 15 e não 16; o DevOps recontou e corrigiu o próprio número), medida pelo DevOps em 9341dc9 com procedência declarada — anúncio
 de pista mais observação no fim. Substitui a minha medição anterior (95 e2e em 6151115),
 que teve um vermelho não explicado e portanto procedência contendida: reconferir só o
 vermelho responde se *ele* era real, não se a rodada era confiável.
@@ -220,9 +220,10 @@ na prova. T-9C35B7 com o QA.
 `integra/v3-r3` em d000718: **98 unitários + 130 e2e passando, 1 armado, zero falhas.**
 Procedência: janela travada por anúncio, os seis confirmaram parada, `pgrep` 0 no fim.
 Substitui as medições anteriores minha e do DevOps — as duas tinham observação parcial.
-**Cobertura, não arredondar:** isso mede unitário e e2e. As 16 etapas de higiene do CI
-não rodam em `node --test` nem em `playwright test`, então as guardas de borda seguem
-**não verificadas** — e foi exatamente ali que apareceu o `sw.js` preso em v10 com oito
+**Cobertura, não arredondar:** isso mede unitário e e2e. As 15 etapas de guarda do CI
+não rodam em `node --test` nem em `playwright test`. Medidas depois, contra f0d9fc3:
+**15 de 15 verdes**, invocadas com base real (sem base, a guarda do `sw.js` falha de
+propósito — endurecimento do próprio dia contra ausência lida como satisfação) — e foi exatamente ali que apareceu o `sw.js` preso em v10 com oito
 arquivos pré-cacheados mudados depois (corrigido em f0d9fc3, v11).
 
 `pgrep` antes/depois só pega sobreposição que **começou** antes da entrada e ainda
@@ -236,3 +237,14 @@ telefone, edição e inativar/reativar · cadastro de face pela **câmera do PC*
 descartada; os quatro status soltam a fila).
 
 **Falta:** link do celular (hostname do cliente) · T-C20AD3, a fatia de segurança da §1.
+
+## Cobertura completa do dia (as três medições)
+
+| | número | procedência |
+|---|---|---|
+| unitário | 98 / 0 falhas | janela travada |
+| e2e | 132 / 0 falhas, 1 armado | janela anunciada, sem anúncio de terceiro |
+| guardas de CI | 15 / 0 falhas | anúncio + pgrep nas duas pontas; quase insensível a contenção (nenhuma abre navegador) |
+
+Nenhuma das três é "a" medição: cada uma cobre o que cobre, e as três juntas são o
+estado. Foi o erro que eu cometi ao registrar unitário+e2e como *a* medição válida.
