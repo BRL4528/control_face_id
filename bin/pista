@@ -1,29 +1,45 @@
 #!/usr/bin/env bash
-# Diz se a pista de testes esta livre. Existe porque a versao "todos lembram"
-# falhou no mesmo dia em que foi escrita, com o autor da regra: rodar o pgrep
-# no MESMO comando que o resto do script faz o argv do bash casar com o proprio
-# padrao, e aparece um processo que e voce. Regra que depende de memoria falha
-# exatamente quando a atencao esta em outro lugar, que e sempre que ela importa.
+# Diz se a pista de testes esta livre, e sai com 1 quando ocupada -- entao
+#   ./bin/pista && npx playwright test <alvo>
+# e um portao de verdade, sem depender de alguem LER a saida.
 #
-# Cobre os dois recursos, nao so playwright: o navegador visivel (Chrome da flag
-# NAVEGADOR) compete pelo mesmo CPU e nao aparece num filtro por "playwright".
+# TODO detector filtra por EXECUTAVEL REAL (/proc/PID/comm), nunca so pela linha
+# de comando. O truque do colchete protege o pgrep de casar CONSIGO e nao
+# protege de casar com o SHELL que apenas carrega a string -- qualquer comando
+# composto que mencione "playwright test" aparecia como OCUPADO, com PID novo a
+# cada foto e ja morto quando alguem ia conferir. Isso custou uma investigacao
+# de pista fantasma, e o conserto ja existia aqui aplicado a UM dos tres
+# detectores: filtro parcial e pior que nenhum, porque os dois que faltavam
+# pareciam cobertos.
 set -u
-alvo=$(pgrep -f '[p]laywright test' | tr '\n' ' ')
-chrome=$(pgrep -f '[c]hrome --.*--remote-debugging|[c]hromium.*--headless' | tr '\n' ' ')
-# Casa servir.js E proxy ad hoc de validacao visual (visual-*.mjs, proxy-*.js na
-# raiz), porque servidor esquecido de pe foi incidente real: a porta 38975 ficou
-# uma hora no ar. O caso que mais importa e justamente o proxy ad hoc, que a
-# nossa propria regra manda usar para nao apontar navegador visivel a producao.
-# Filtra por EXECUTAVEL real (/proc/PID/comm), nao pela linha de comando: o
-# truque do colchete protege o pgrep de casar consigo, e NAO protege de casar
-# com o shell que carrega a string. Foi assim que o QA quebrou a propria regra
-# hoje, e assim que eu a quebrei de novo cinco minutos depois de escrever isto.
-so_node() { for p in $1; do [ "$(cat /proc/$p/comm 2>/dev/null)" = node ] && printf '%s ' "$p"; done; }
-serve=$(so_node "$(pgrep -f '(tests/e2e/servir\.js|(visual|proxy|servir)[^/]*\.(mjs|cjs|js))')")
+
+# $1 = pids, $2 = basenames de executavel aceitos, separados por espaco.
+# Usa /proc/PID/exe (symlink para o binario real) e NAO /proc/PID/comm, porque
+# comm e cortado em 15 caracteres pelo kernel e o limite nao esta escrito em
+# lugar nenhum: chrome-headless-shell chega como "chrome-headless" e
+# chrome_crashpad_handler como "chrome_crashpad". Lista de nomes completos nunca
+# casava, e o sintoma era SILENCIO -- o detector de navegador deixou de ver o
+# navegador do playwright inteiro.
+# exe resolve os dois lados de uma vez: nome completo sem truncagem, e o shell
+# que apenas carrega a string aparece como bash e cai fora. Prefixo tambem
+# funcionaria, mas seria contorno de um limite que este campo nao tem.
+# Ressalvas: exige mesmo usuario (e o caso) e nao vale para kernel thread.
+so_exe() {
+  for p in $1; do
+    b=$(basename "$(readlink -f "/proc/$p/exe" 2>/dev/null)" 2>/dev/null) || continue
+    case " $2 " in *" $b "*) printf '%s ' "$p";; esac
+  done
+}
+
+alvo=$(so_exe    "$(pgrep -f 'playwright test')" "node")
+chrome=$(so_exe  "$(pgrep -f 'remote-debugging|--headless')" "chrome chromium headless_shell chrome_crashpad_handler chromium-browser")
+serve=$(so_exe   "$(pgrep -f '(tests/e2e/servir\.js|(visual|proxy|servir)[^/]*\.(mjs|cjs|js))')" "node")
+
 ocupado=0
-[ -n "${alvo// /}" ] && { echo "OCUPADO playwright: $alvo"; ocupado=1; }
+[ -n "${alvo// /}" ]   && { echo "OCUPADO playwright: $alvo"; ocupado=1; }
 [ -n "${chrome// /}" ] && { echo "OCUPADO navegador: $chrome"; ocupado=1; }
-[ -n "${serve// /}" ] && { echo "servidor de serve de pe: $serve (derrube quando terminar)"; }
+[ -n "${serve// /}" ]  && { echo "servidor de serve de pe: $serve (derrube quando terminar)"; }
+
 if [ "$ocupado" = 0 ]; then
   echo "LIVRE  $(date -Is)"
   echo
@@ -33,8 +49,4 @@ if [ "$ocupado" = 0 ]; then
   echo "    - \"janela travada, todos confirmaram parada\"  <- medicao valida"
   echo "    - \"sem travar janela, pista LIVRE na entrada\"  <- honesta, nao valida"
 fi
-# exit reflete o achado, senao `npm run pista && npx playwright test` e um portao
-# que nunca fecha -- e a ferramenta volta a depender de alguem LER a saida, que e
-# a dependencia de atencao que ela existe para remover. Achado do DevOps.
-# Servidor de serve esquecido continua AVISO e nao bloqueio: nao disputa navegador.
 exit "$ocupado"
