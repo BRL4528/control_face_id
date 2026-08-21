@@ -201,27 +201,29 @@ Decisões dentro dessa resposta:
   rede" a "possível ataque" e não sabe o que fazer com `12`. A tela mostra, **só quando
   é anômalo**, uma frase com a ação embutida.
 
-  **Duas versões, com gatilho — porque "mesma rede" depende de o n8n ver o IP do
-  cliente.** Se o proxy na frente do n8n não repassar o IP real (`X-Forwarded-For` ou
-  equivalente), o `ip_hash` passa a ser o mesmo para todo mundo — o do proxy — e o
-  contador conta o mundo inteiro como "a mesma rede": acende **sempre**, e a frase fica
-  tecnicamente verdadeira e informativamente vazia. É o mesmo modo de falha do
-  manifesto sobre a árvore do repositório (§4.7): detector que lê uma constante é
-  detector que mente.
+  **Resposta do cliente (21/08/2026): não há proxy — o n8n responde direto.** Logo o
+  n8n vê o endereço real do cliente, o `ip_hash` não é constante, e o sinal **fica com a
+  palavra "mesma rede"**, que é a versão mais específica: "Vários aparelhos pediram
+  liberação **pela mesma internet** na última hora — se você só está esperando um,
+  recuse os outros."
 
-  | Se o IP real… | Campo | Frase na tela |
-  |---|---|---|
-  | **chega** ao n8n | `pedidos_da_mesma_rede_1h` | "Vários aparelhos pediram liberação **pela mesma internet** na última hora — se você só está esperando um, recuse os outros." |
-  | **não chega** | `pedidos_pendentes_1h` | "Vários aparelhos pediram liberação na última hora — se você só está esperando um, recuse os outros." |
+  **Mas a validade desse sinal passa a depender da topologia, e isso é armadilha para o
+  futuro.** No dia em que alguém puser um proxy na frente do n8n, o `ip_hash` vira
+  constante — o do proxy — e o aviso passa a acender **sempre**: "mesma rede" para o
+  mundo inteiro. É exatamente o modo de falha do manifesto sobre a árvore do repositório
+  (§4.7), e por isso fica escrito com o gatilho ligado à topologia e não ao acaso:
 
-  `Por quê a segunda versão preserva o invariante:` o que sai é a palavra "mesma rede",
-  não o sinal. O Cenário 1 é **flood** — muitos pedidos plausíveis ao mesmo tempo — e
-  isso o servidor observa com certeza, com proxy ou sem: quantos pendentes existem
-  agora e quantos apareceram na última hora. A segunda frase é verdadeira
-  independentemente de topologia, continua dizendo a ação, e **não acende sempre**,
-  porque a condição passa a ser volume real em vez de um hash constante. Tirar o sinal
-  inteiro jogaria fora o invariante junto com a métrica — e o invariante nunca dependeu
-  de IP.
+  > **Se um proxy for introduzido na frente do n8n, este campo tem de ser reavaliado
+  > ANTES de o proxy entrar.** Se o IP real não chegar ao n8n, o campo degrada para
+  > `pedidos_pendentes_1h` — contagem de pedidos pendentes recentes — e a frase perde a
+  > palavra internet: "Vários aparelhos pediram liberação na última hora — se você só
+  > está esperando um, recuse os outros."
+
+  `Por quê a versão degradada preserva o invariante:` o que sairia é a palavra "mesma
+  rede", não o sinal. O Cenário 1 é **flood** — muitos pedidos plausíveis ao mesmo tempo
+  — e isso o servidor observa com certeza, com proxy ou sem. A frase degradada é
+  verdadeira independentemente de topologia, continua dizendo a ação, e não acende
+  sempre, porque a condição volta a ser volume real em vez de um hash constante.
   `Por quê o número não sai do dado:` observabilidade. No dia em que alguém investigar
   um flood de verdade, "vários" não serve para nada. Frase para decidir, número para
   investigar.
@@ -334,6 +336,18 @@ local para perder. A regeneração fica contida pelo limite por IP que
 O motivo digitado pelo RH **nunca volta para o aparelho**. A tela mostra frase
 fixa. `Por quê:` texto livre do RH renderizado num aparelho que ele acabou de
 declarar não confiável é vazamento gratuito de contexto interno.
+
+**E a frase é a MESMA para recusado e para revogado** — proposta do Designer, aceita:
+"Este aparelho não pode ser usado agora. Fale com o RH pra saber o que fazer."
+`Por quê uma só:` distinguir os dois estados no texto conta a quem está com o aparelho
+que houve um juízo negativo do RH, e em qual direção. Quem revogou por suspeita não quer
+anunciar a suspeita ao aparelho suspeito. É o princípio da indistinção do link público
+(§4.4), um andar acima.
+O que **difere** é a **ação disponível**, não o texto: o recusado oferece "Pedir
+liberação de novo" (que regenera identidade); o revogado não oferece nada. `Por quê isso
+não anula a decisão acima:` o botão fala do que **este aparelho** pode fazer agora, não
+do que o RH concluiu — e sem ele o aparelho recusado legítimo fica sem saída, que é o
+problema que a frase única não pode criar.
 
 ### 1.5 `POST /efrat/rh/aparelho/revogar`
 
@@ -1299,20 +1313,25 @@ argumento de que ele não precisa ser apertado: com 256 bits, adivinhar é impos
 limite é contra **volume**, não contra sorte — logo não precisa morar na rota nem ser
 severo.
 
-Desenho aprovado, em dois lugares com **chaves diferentes de propósito**:
+**Sem proxy, os dois limites vivem na rota** — e é isto que a resposta do cliente
+mudou. O DevOps já havia avisado que "nenhum proxy" muda a recomendação, porque a camada
+da rota passa a carregar **também** o custo de execução da instância. Duas chaves, dois
+códigos, e **não se unificam num contador só**:
 
-| Onde | Chave | Limiar | Resposta |
+| Limite | Chave | Limiar | Código |
 |---|---|---|---|
-| Regra de produto, na rota | **o convite** (o token já vem em `Authorization`) | 5 envios recusados → `bloqueado`; aberturas não limitadas | envelope normal do app |
-| Guarda de volume, no proxy | IP | generoso, ordem de **centenas por minuto** | `429` seco, **sem imitar o envelope do app** |
+| Regra de produto | **o convite** (o token já vem em `Authorization`) | 5 envios recusados → `bloqueado`; aberturas não limitadas | `CONVITE_BLOQUEADO` |
+| Guarda de volume e custo | **IP** | generoso, ordem de **centenas por minuto** | `LIMITE_VOLUME` + `Retry-After` |
 
-`Por quê chaves diferentes:` o mesmo limite em dois lugares com a mesma chave produz
-`429` que ninguém consegue explicar depois — o suporte não sabe qual camada disparou,
-e o número na tela do RH não corresponde a nenhuma regra que alguém escreveu. Chaves
-distintas fazem cada `429` ter uma causa única e legível: se veio do proxy é volume
-anômalo, se veio da rota é aquele convite específico. Por isso o `429` do proxy
-**não** deve imitar o formato de erro do app: é resposta de infraestrutura, e parecer
-erro de aplicação faria o cliente tratá-la como regra de negócio.
+`Por quê o limite por IP volta, depois de eu o ter tirado:` o problema do NAT era o
+limite **apertado** por IP, que tranca uma turma no mesmo canteiro. Limiar generoso não
+alcança usuário legítimo — e, sem proxy, passa a ser a única coisa protegendo a
+instância de queimar execução. O que eu tirei foi o aperto, não o teto.
+
+`Por quê chaves e códigos distintos:` a propriedade que precisa sobreviver é cada `429`
+ter causa única e legível. Com um contador só, o suporte não sabe qual regra disparou e
+o número na tela não corresponde a nada que alguém escreveu. Com dois: veio do convite,
+é aquele link; veio do volume, é a instância se protegendo.
 
 `LIMITE_CONVITE` sai do catálogo da rota: a rota não limita abertura.
 
@@ -1634,43 +1653,61 @@ São eixos independentes: a mesma pessoa pode ter `versao: 3` com `modelo_id` no
 duas pessoas diferentes têm `versao: 1` com o mesmo `modelo_id`. Nomes distintos de
 propósito.
 
-**Como o `modelo_id` é formado.** Um `models/manifesto.json` servido junto dos pesos,
-gerado pelo mesmo passo que copia (§4.6) e, na árvore do app, no release:
+**Como o `modelo_id` é formado — hash no navegador, não manifesto de build.** Esta
+parte mudou depois de o DevOps e o Biometria apontarem que um manifesto gerado no build
+**não consegue** descrever os bytes servidos: existem pelo menos quatro camadas capazes
+de divergir um do outro (cache do service worker servindo primeiro, `Cache-Control:
+immutable` sem hash na URL, cópia de build da origem pública desatualizada, e cache de
+borda do CDN). Manifesto de build é, portanto, a própria armadilha que §4.7 existe para
+fechar — declararia o id certo sobre bytes errados.
 
-```json
-{ "modelo_id": "m-9f4c1a2b",
-  "gerado_em": "2026-08-21T12:00:00Z",
-  "motor": "face-api.js · tiny_face_detector + face_landmark_68 + face_recognition",
-  "dimensoes": 128,
-  "arquivos": [
-    { "nome": "face_recognition_model.bin", "sha256": "…", "bytes": 6444032 },
-    { "nome": "face_landmark_68_model.bin", "sha256": "…", "bytes": 356480 },
-    { "nome": "tiny_face_detector_model.bin", "sha256": "…", "bytes": 193321 }
-  ] }
-```
+> `modelo_id` = SHA-256 sobre os bytes dos **7 arquivos do pipeline**, concatenados em
+> ordem fixa: os 3 `*_model.bin`, os 3 `*-weights_manifest.json` e
+> `vendor/face-api.js`. Calculado **no navegador**, na carga da página.
 
-`modelo_id` é hash curto sobre os três `sha256` concatenados mais a versão do
-`vendor/face-api.js`. Escolhi hash de conteúdo em vez de versão carimbada à mão
-porque é o que responde à pergunta que interessa: dois deploys com bytes idênticos
-**têm** de dar o mesmo id, e um deploy com peso velho **tem** de dar id diferente
-sem depender de alguém lembrar de incrementar um número.
+Os 7, e não só os pesos, porque **versão de biblioteca diferente sobre os mesmos pesos
+pode produzir vetor diferente** — o motor é parte do pipeline tanto quanto o peso.
 
-**O manifesto é calculado sobre os bytes EFETIVAMENTE PUBLICADOS naquela origem,
-nunca sobre a árvore de origem.** É o que impede o detector de cegar.
+**Como o hash alcança os bytes que o motor usou.** `js/face.js:109-111` usa
+`loadFromUri()`, então o próprio face-api busca os arquivos e o `ArrayBuffer` não fica na
+mão de ninguém. Duas saídas foram consideradas, e a escolhida é a primeira:
 
-`Por quê, e é o modo de falha mais perigoso desta seção:` se o manifesto for gerado
-a partir do repositório enquanto os pesos vêm de camada de cache, de build anterior
-ou de cópia que não rodou, ele declara o **id certo sobre bytes errados**. Nesse
-arranjo o `modelo_id` **concorda** com a referência, nenhuma divergência é marcada, e
-o detector fica cego exatamente no único modo de falha que ele existe para pegar. É
-pior do que não ter detector, porque passa a **atestar sanidade**: o painel diria
-"tudo conforme" enquanto os templates saem incompatíveis. Detector que mente desliga
-a suspeita de quem olharia.
+- **Escolhida — `fetch` próprio dos mesmos 7 arquivos, logo após `loadFromUri`, só para
+  hashear.** O `fetch` **não** pode ignorar cache (nada de `no-store`): tem de acertar o
+  mesmo cache que o face-api acabou de popular, senão hasheia um deploy mais novo do que
+  o que o motor carregou — o inverso do que se quer. Janela teórica: o cache ser
+  despejado entre o carregamento do face-api e o hash, na mesma carga de página.
+- **Recusada — trocar o loader, buscando os buffers e entregando-os ao face-api.**
+  Garantia sem janela nenhuma, e custo alto: exige a API de baixo nível do face-api/tfjs
+  e passa a acoplar o nosso código ao caminho interno de carga da biblioteca.
 
-Logo: o passo que gera o manifesto lê os arquivos **como eles saem servidos** —
-depois da cópia, no artefato publicado — e o critério de aceite tem de **provar**
-isso, baixando os pesos da origem pública e recalculando o hash contra o manifesto
-dela (§7, item 16-B). Roda sem DNS, no segundo listener que §4.6 já desenhou.
+`Por quê a janela de milissegundos é aceitável, e por quê não vale trocar o loader:`
+duas razões, e a segunda é a decisiva.
+Primeira: o `modelo_id` é **procedência declarada pelo cliente** (o parágrafo abaixo), e
+o cliente poderia mentir sobre o hash inteiro. Fechar uma janela de milissegundos dentro
+de um mecanismo que já não é prova é comprar precisão na dimensão errada — a incerteza
+dominante é "quem afirma", não "os bytes mudaram entre dois `fetch` da mesma carga".
+Segunda: trocar o loader coloca código nosso no caminho de carga do motor. Se ele
+quebrar num bump de biblioteca, o que quebra é **o reconhecimento**, não o carimbo. É
+péssima troca arriscar a função primária para endurecer um sinal secundário e
+consultivo.
+E o modo de falha da escolhida é benigno no sentido exato que importa: ela carimba uma
+versão **real**, que estava sendo servida um instante antes — nunca lixo, nunca um id
+inventado. A divergência que ela poderia perder é entre dois deploys adjacentes durante
+os segundos de um rollout; a divergência que o carimbo existe para pegar — origem pública
+um deploy atrás por horas ou dias — é pega igual pelas duas.
+
+**Se algum dos 7 `fetch` falhar, não se fabrica id.** O cliente envia sem `modelo_id`, e
+o servidor grava marcando `modelo_desconhecido: true` (comportamento que já está na
+tabela abaixo). Melhor um "não sei" registrado do que um id que ninguém pode explicar.
+
+**De onde vem a referência.** Não de infraestrutura: por **observação**. `efrat_modelo`
+registra cada `modelo_id` visto, com primeira e última aparição e de qual caminho veio; a
+**referência** é o `modelo_id` mais recente observado no caminho do **app** — que é o
+motor que de fato reconhece. Para isso o app reporta seu `modelo_id` em `/efrat/carga`,
+uma vez por sincronismo, e é o dado mais barato desta seção. Divergência é, então,
+submissão de `link` cujo `modelo_id` difere da referência corrente. Tudo observado, nada
+declarado por build.
 
 **A armadilha, e é a mesma de §4.2.** O cliente lê o manifesto e manda `modelo_id`
 no corpo — ou seja, **é o cliente declarando algo sobre si mesmo**, exatamente o
@@ -1754,6 +1791,42 @@ Exigência de C2 aplicada: `modelo_id` é obrigatório nas rotas novas
 (`/efrat/rh/face/cadastrar`, `/efrat/face/convite/enviar`) e tolerado ausente na
 rota antiga `/efrat/cadastro`, para não quebrar o cadastro pelo gestor em campo antes
 de o cliente ser atualizado.
+
+---
+
+### 4.8 A superfície anônima, e o que ela exige por não haver proxy
+
+O cliente confirmou que **não há proxy: o n8n responde direto na internet**. Isso não
+muda nenhuma decisão deste contrato, e acrescenta três exigências — porque a fase está
+acrescentando a primeira superfície pública apontada para o n8n, e o teto de volume
+passou a viver **dentro** da coisa que ele protege (§4.4).
+
+As rotas alcançáveis **sem nenhuma credencial prévia** são exatamente três, e é uma lista
+fechada:
+
+1. `POST /efrat/dispositivo/registrar` — anônima por definição (primeiro contato);
+2. `POST /efrat/face/convite/abrir` — qualquer um pode chamar; o token é o que separa;
+3. `POST /efrat/face/convite/enviar` — idem.
+
+Exigências, todas por não existir camada anterior:
+
+- **Ordem de execução é contrato, não detalhe.** Nas três, a checagem de volume (§4.4) e
+  a validação de formato do corpo vêm **antes** de qualquer leitura de Data Table. Um
+  limitador que consulta o banco para descobrir que deve recusar já pagou o custo que
+  estava tentando evitar.
+- **Teto de corpo.** As três recusam corpo acima do tamanho esperado, com `413`:
+  `registrar` é kilobytes (`apelido` ≤ 60 caracteres, `ua` ≤ 300, `geo` numérico);
+  `enviar` é o único grande, e tem teto explícito — `miniatura` ≤ 64 KB (folgado para um
+  JPEG 128×128) e exatamente 3 vetores de 128 números, o que já limita o resto. Sem WAF
+  na frente, um corpo de dezenas de megabytes é execução queimada só em desserializar.
+- **Nada de eco.** Nenhuma das três devolve no corpo de erro qualquer parte do que
+  recebeu. Eco é amplificação barata.
+
+**O que isso não resolve, e é informação para o cliente, não decisão nossa:** sem camada
+independente, o limitador compartilha destino com o que protege — instância sobrecarregada
+é limitador sobrecarregado. A expectativa honesta é que a guarda de volume contenha abuso
+acidental e uso anômalo comum, **não** um flood determinado. Registrado aqui para que a
+decisão de publicar seja tomada sabendo disso.
 
 ---
 
@@ -1844,6 +1917,9 @@ como está (§2.4).
 | `CONVITE_INVALIDO` | 404 | face/convite/abrir, face/convite/enviar |
 | `CONVITE_CONSUMIDO` | 409 | face/convite/enviar |
 | `MODELO_AUSENTE` | 400 | rh/face/cadastrar, face/convite/enviar |
+| `CONVITE_BLOQUEADO` | 429 | face/convite/enviar (5 recusas, §4.4) |
+| `LIMITE_VOLUME` | 429 | as três rotas anônimas de §4.8 |
+| `CORPO_GRANDE` | 413 | as três rotas anônimas de §4.8 |
 | `IDEMPOTENCIA_AUSENTE` | 400 | toda rota nova de escrita |
 
 `motivo_codigo` de item de lote (§1.6), que **não** é erro HTTP:
