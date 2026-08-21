@@ -1,0 +1,11 @@
+# Vale para o projeto do APP DO OPERADOR, cujo Root Directory e a raiz do repo.
+#
+# publico/ e o Root Directory de OUTRO projeto da Vercel, a origem publica do
+# cadastro de face. Ele nao pode ser publicado junto com o app: a pagina publica
+# rodando na origem do app leria o IndexedDB 'efrat-ponto' e com ele a
+# credencial de 256 bits do aparelho (js/store.js). A fronteira e a ORIGEM, e a
+# forma de garanti-la e o arquivo NAO EXISTIR neste deploy — nao uma regra de
+# rota que alguem precisa acertar para sempre.
+#
+# Ha guarda de CI conferindo que esta linha continua aqui.
+publico

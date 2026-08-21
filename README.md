@@ -102,6 +102,8 @@ js/app.js               a porta e o roteamento entre os dois apps
 vendor/ models/         face-api.js 1.7.15 (@vladmandic) e pesos
 tests/                  unidade, fluxo e o servidor falso
 docs/                   fluxo operacional, API e as análises técnicas
+publico/                Root Directory de OUTRO projeto da Vercel: a origem
+                        pública do cadastro de face (ver publico/LEIA-ME.md)
 ```
 
 ## Decisões que valem saber antes de mexer
@@ -123,6 +125,45 @@ docs/                   fluxo operacional, API e as análises técnicas
 **A foto de auditoria só acompanha marcação que vai para revisão.** Nas aceitas ela não agrega e encheria o armazenamento.
 
 **Não há prova de vida (liveness).** É intencional: foto na tela passa. Serve para justificar liveness certificado ISO/IEC 30107-3 Level 2 no sistema real, onde o adversário é o próprio gestor.
+
+## As guardas de CI, e por que cada uma existe
+
+Guarda sem motivo escrito é guarda que alguém remove por achar burocrática. Cada
+uma abaixo nasceu de um defeito real, e cada uma foi verificada **sabotando a
+própria invariante** e confirmando que o CI fica vermelho — não por leitura de
+código.
+
+**A versão do cache do `sw.js` acompanha o `ASSETS`.** O caso concreto: dois
+ramos mexeram no `ASSETS` e cada um subiu `efrat-ponto-v7` para `v8`. Como a
+linha da versão ficou **idêntica** nos dois lados, o git une as duas listas e
+**não dá conflito**. O merge sai com um `v8` diferente do `v8` que os celulares
+em campo já têm em disco — e como o número não mudou, o service worker não
+invalida nada: cache velho e incompleto, sem um aviso. Combinar "conferimos o
+número no merge" não resolve, porque nada avisa. A guarda compara o `ASSETS` com
+o da base e só exige número novo quando a lista mudou de fato.
+
+**O servidor de teste nunca entrega `apiBase` de produção.** `npm run serve` e
+todo o E2E serviam `js/config.js` apontando para o n8n de produção. Efeito
+medido: `tests/e2e/offline.spec.js` ficava verde **porque** a chamada falhava —
+sem API o app cai em `#porta`, que era o que o teste afirmava. Em qualquer
+máquina com rota para o host, runner do CI incluso, o E2E fazia `POST
+/dispositivo/registrar` em produção a cada execução. Teste que passa por efeito
+colateral de rede fica vermelho no dia em que a rede melhora.
+
+**A origem pública é isolada por ausência do arquivo.** `publico/` é o Root
+Directory de outro projeto da Vercel e `.vercelignore` o tira do deploy do app.
+Se ele voltar para o deploy do app, a página pública volta a estar na **mesma
+origem** e alcança o IndexedDB `efrat-ponto` (`js/store.js`) — a credencial de
+256 bits do aparelho. Caminho separado nunca foi fronteira: `IndexedDB`,
+`localStorage`, `Cache Storage` e cookie isolam por origem, não por caminho.
+
+**Nenhum asset externo em nada que vai ao ar.** Vale para os dois projetos. Uma
+fonte remota ou um script de CDN quebra o app offline em campo e adiciona um
+terceiro à cadeia de confiança de uma página que coleta biometria.
+
+**Nenhum service worker na origem pública.** Página de uso único não ganha nada
+com offline, e um SW ali reintroduziria exatamente o fallback-para-shell que
+motivou a origem separada.
 
 ## Referências medidas
 

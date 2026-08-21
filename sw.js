@@ -1,25 +1,22 @@
 // Cache dos estáticos. As chamadas de API nunca passam por aqui: resposta de
 // marcação em cache seria mentira sobre o que o servidor recebeu.
 const CACHE = 'efrat-ponto-v8';
-// MITIGACAO, NAO ISOLAMENTO. A pagina publica de cadastro de face vai para uma
-// origem propria (subdominio); enquanto ela nao existe, este desvio reduz o
-// dano de a pagina ser servida deste mesmo dominio, e nada mais.
+// BACKSTOP. A pagina publica de cadastro de face vive em ORIGEM PROPRIA
+// (projeto separado da Vercel, Root Directory publico/) — ver publico/LEIA-ME.md.
+// A fronteira de verdade e a origem, garantida por AUSENCIA: .vercelignore tira
+// publico/ do deploy do app, entao esses arquivos nao existem aqui.
 //
-// O que o desvio resolve: pedido sob este prefixo sai do handler sem
-// respondWith, vai direto a rede, nunca entra no cache e — o que importa —
-// nunca cai no fallback caches.match('./index.html') mais abaixo, que
-// entregaria o shell do app do operador ao colaborador quando faltasse rede.
+// Este desvio e o que sobra se aquela garantia falhar. Se publico/ escapar para
+// o deploy do app, ele responde em /publico/*; sem o desvio, o handler abaixo
+// serviria essa pagina do cache e, pior, cairia em caches.match('./index.html')
+// sem rede — entregando o shell do app do operador ao colaborador.
 //
-// O que o desvio NAO resolve, e por isso a origem propria: escopo de service
-// worker e prefixo de caminho, mas IndexedDB, localStorage, Cache Storage e
-// cookie sao por ORIGEM. Na mesma origem a pagina publica le o banco
-// 'efrat-ponto' (js/store.js), onde esta a credencial de 256 bits do aparelho.
-// Caminho separado nao cria fronteira nenhuma contra isso.
-//
-// O JS e o CSS da pagina moram sob o mesmo prefixo, de proposito: uma regra
-// cobre tudo. Ja vendor/ e models/ ficam de fora do desvio e seguem cache-first
-// — sao imutaveis e e o que faz o motor abrir rapido no celular.
-const FORA_DO_APP = '/cadastro';
+// Por que a origem separada e nao so o caminho: escopo de service worker e
+// prefixo de caminho, mas IndexedDB, localStorage, Cache Storage e cookie sao
+// por ORIGEM. Na mesma origem a pagina publica leria o banco 'efrat-ponto'
+// (js/store.js), onde esta a credencial de 256 bits do aparelho. Caminho
+// separado nunca foi fronteira contra isso.
+const FORA_DO_APP = '/publico';
 
 const ASSETS = [
   './',

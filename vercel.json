@@ -55,7 +55,7 @@
       ]
     },
     {
-      "source": "/cadastro",
+      "source": "/publico",
       "headers": [
         {
           "key": "Cache-Control",
@@ -72,7 +72,7 @@
       ]
     },
     {
-      "source": "/cadastro/(.*)",
+      "source": "/publico/(.*)",
       "headers": [
         {
           "key": "Cache-Control",

@@ -1,0 +1,5 @@
+# Saida do build. vendor/ e models/ aqui sao COPIA de ../vendor e ../models —
+# nunca commitar, senao volta a haver duas fontes de verdade.
+dist/
+vendor/
+models/

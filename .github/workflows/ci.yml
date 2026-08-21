@@ -196,6 +196,7 @@ jobs:
           publicados=$(git ls-files '*.html' '*.js' '*.css' '*.json' \
             | grep -vE '^(vendor|models|tests|docs|n8n|\.central-agentes|\.github)/' \
             | grep -v '^package-lock\.json$')
+          # publico/ entra de proposito: e a origem publica, o alvo mais exposto.
           echo "arquivos verificados:"; echo "$publicados" | sed 's/^/  /'
 
           proibidos='cdn\.jsdelivr\.net|unpkg\.com|cdnjs\.cloudflare\.com|fonts\.googleapis\.com|fonts\.gstatic\.com|ajax\.googleapis\.com|code\.jquery\.com|esm\.sh|skypack\.dev|googletagmanager\.com|google-analytics\.com'
@@ -208,7 +209,8 @@ jobs:
           # arquivo publicado tem motivo para citar origem externa.
           sobra=$(grep -nE 'https?://' $publicados \
             | grep -v '^js/config\.js:' \
-            | grep -v '^vercel\.json:' || true)
+            | grep -v '^vercel\.json:' \
+            | grep -v '^publico/vercel\.json:' || true)
           if [ -n "$sobra" ]; then
             echo "$sobra"
             echo "::error::origem externa em arquivo publicado — todo asset tem de ser local"
@@ -216,20 +218,81 @@ jobs:
           fi
           echo "nenhum asset externo"
 
-      - name: A página pública não fala com ninguém além da própria origem e do apiBase
+      - name: A origem pública é isolada por ausência do arquivo, não por rota
         run: |
-          test -d cadastro || { echo "cadastro/ ainda não existe — guarda ativa quando a página entrar"; exit 0; }
-          if grep -rnE 'https?://' cadastro/; then
-            echo "::error::a página pública não pode citar origem externa nenhuma — o apiBase vem de js/config.js"
+          # A pagina publica roda em projeto separado da Vercel (Root Directory
+          # publico/). Se ela for publicada junto com o app, volta a estar na
+          # MESMA ORIGEM e le o IndexedDB 'efrat-ponto' — a credencial de 256
+          # bits do aparelho. .vercelignore e o que garante a ausencia.
+          test -f .vercelignore || { echo "::error::.vercelignore desapareceu — publico/ voltaria para o deploy do app"; exit 1; }
+          grep -qE '^publico/?$' .vercelignore || {
+            echo "::error::.vercelignore nao exclui publico/ — a pagina publica seria servida na origem do app"; exit 1; }
+          echo ".vercelignore exclui publico/ do deploy do app"
+
+      - name: A origem pública não carrega nada de fora e não registra service worker
+        run: |
+          test -d publico || { echo "::error::publico/ nao existe — a origem publica perdeu o Root Directory"; exit 1; }
+
+          # Nenhuma origem externa. vercel.json e LEIA-ME.md sao excecao: um
+          # declara a CSP (que cita o apiBase), o outro e documentacao.
+          if grep -rnE 'https?://' publico/ --include='*.html' --include='*.js' --include='*.css'; then
+            echo "::error::a origem publica nao pode citar origem externa — motor, fontes e modelos vem do build"
             exit 1
           fi
-          # Nada dela pode morar em js/ ou css/: js/*.js é precacheado pelo
-          # service worker do operador por teste unitário.
-          if grep -rnE '(src|href)=["\x27](\.\./)?(js|css)/' cadastro/; then
-            echo "::error::a página pública carrega arquivo de js/ ou css/ — isso a coloca no precache do app do operador"
+
+          # Nenhum service worker: seria o fallback-para-shell de volta, agora
+          # na origem que menos precisa dele.
+          if grep -rnE 'serviceWorker|navigator\.serviceWorker|sw\.js' publico/ --include='*.html' --include='*.js'; then
+            echo "::error::a origem publica nao pode registrar service worker — pagina de uso unico nao ganha nada com offline"
             exit 1
           fi
-          echo "página pública sem asset externo e sem asset do app"
+
+          # Nenhuma copia commitada dos pesados: fonte de verdade e ../vendor e
+          # ../models, copiados no build.
+          if git ls-files publico/ | grep -qE '^publico/(vendor|models)/'; then
+            echo "::error::copia commitada de vendor/ ou models/ em publico/ — duas fontes de verdade"
+            exit 1
+          fi
+          echo "origem publica: sem asset externo, sem service worker, sem copia commitada"
+
+      - name: A política da origem pública fecha cache, indexação e terceiros
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const falhar = m => { console.error("::error::" + m); process.exit(1); };
+            const cfg = JSON.parse(fs.readFileSync("publico/vercel.json", "utf8"));
+
+            if (cfg.buildCommand !== "bash ./copiar-assets.sh") falhar("publico/vercel.json perdeu o buildCommand que copia vendor/ e models/");
+            if (cfg.outputDirectory !== "dist") falhar("publico/vercel.json perdeu o outputDirectory dist");
+
+            const regra = f => cfg.headers.find(h => h.source === f);
+            const valor = (f, k) => (regra(f)?.headers || []).find(h => h.key === k)?.value || "";
+
+            // A pagina de uso unico: nunca de cache, nunca indexada.
+            for (const fonte of ["/", "/index.html"]) {
+              if (!/no-store/.test(valor(fonte, "Cache-Control"))) falhar("publico/vercel.json: " + fonte + " tem de ser no-store");
+              if (!/noindex/.test(valor(fonte, "X-Robots-Tag"))) falhar("publico/vercel.json: " + fonte + " tem de ser noindex");
+            }
+            // Os pesados seguem imutaveis — e o que faz o motor abrir rapido.
+            for (const fonte of ["/vendor/(.*)", "/models/(.*)"]) {
+              if (!/max-age=31536000.*immutable/.test(valor(fonte, "Cache-Control"))) falhar("publico/vercel.json: " + fonte + " perdeu o cache longo");
+            }
+
+            // A CSP da origem publica e propria e nao pode abrir para terceiro.
+            const csp = valor("/(.*)", "Content-Security-Policy");
+            if (!csp) falhar("publico/vercel.json sem Content-Security-Policy");
+            for (const d of ["default-src \x27self\x27", "script-src \x27self\x27", "font-src \x27self\x27", "frame-ancestors \x27none\x27"]) {
+              if (!csp.includes(d)) falhar("a CSP da origem publica precisa de " + d);
+            }
+            // O unico host externo tolerado e o apiBase do app.
+            const externos = [...csp.matchAll(/https?:\/\/[^\s;]+/g)].map(m => m[0]);
+            const apiBase = fs.readFileSync("js/config.js", "utf8").match(/apiBase:\s*.(https?:\/\/[^\/\x27"]+)/)[1];
+            for (const h of externos) {
+              if (!h.startsWith(apiBase)) falhar("a CSP da origem publica libera host que nao e o apiBase: " + h);
+            }
+            if (!externos.length) falhar("a CSP da origem publica nao libera o apiBase — a pagina nao gravaria face nenhuma");
+            console.log("origem publica: cache, indexacao e CSP conferidos (apiBase " + apiBase + ")");
+          '
 
       - name: npm run serve nunca aponta para produção (T-B1D7F6)
         run: |
