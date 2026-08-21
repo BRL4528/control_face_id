@@ -50,3 +50,35 @@
 Receber os quatro relatórios, ler o contrato do Arquiteto contra o threat model do
 QA antes de liberar T-8188C6 e T-D30529, e rodar o e2e do ciclo de liberação —
 é ele que prova ao cliente que a tela do colaborador ficou alcançável.
+
+## Atualização · T-AED04B em review (QA)
+
+Três achados do QA, **todos verificados por mim no código** antes de virarem ação:
+
+1. **Coerência das 3 fotos está errada em produção.** `js/rh.js:504-509` é `confirm()`
+   com limiar 0,55 (entre o aceite 0,45 e o par de pessoas diferentes 0,61); o
+   servidor ignora (`servidor-falso.js:544-546`) o campo que o cliente manda
+   (`js/rh.js:520`). **Pior que o relatado:** `js/fila.js:262` manda `coerencia: 0`
+   fixo. → T-8ADD9C. Decisão minha, divergindo do QA: **o servidor calcula** dos
+   vetores e o campo sai do corpo — número que o cliente informa sobre si mesmo é
+   número que o cliente escolhe, e a linha 262 é a prova disso no próprio repo.
+2. **"Página separada" não era separação.** SW de raiz (`sw.js:57-60`), fallback
+   `caches.match('./index.html')` (`sw.js:65`), credencial no IndexedDB por origem
+   (`js/store.js:10`). → **origem própria (subdomínio)**, T-600DD4 com DevOps para
+   o custo em DNS/certificado. A mitigação inferior fica na gaveta.
+3. **A aprovação de aparelho nunca existiu** — os testes aprovam mexendo no Map
+   (`fluxo.spec.js:34-44`). Critério de pronto da T-87615C reescrito: código
+   digitado é a única forma de resolver o pendente, código nunca em leitura do RH,
+   campo livre sem datalist, expiração em 24h, e teste de clicar-sem-digitar.
+4. Achado extra: `/marcacoes` não checa estado do dispositivo (`servidor-falso.js:447`)
+   e `js/api.js:178-182` nunca solta o lote → aparelho revogado grava ponto hoje, e
+   a correção ingênua faria o dado do colaborador honesto sumir calado. → T-D00CE0.
+
+Sétimo membro: **Engenheiro Full-Stack Biometria** (`6d0c426d7f`), para a trilha
+biométrica não ficar na fila de um executor só. Divisão de arquivos registrada nos
+dois briefs: `js/rh.js`+`index.html`+rotas `/rh/*` são do `508cd44fd2`;
+`/efrat/cadastro`+`js/regras.js`+página pública+`n8n/` são do `6d0c426d7f`.
+
+Dívida assumida sem disfarce: chave PBKDF2 do RH é credencial permanente
+(`js/rh.js:22-28`) e toda invariante desta fase pressupõe que quem está logado como
+RH é o RH. Fora do escopo, ~2,5-3 dias.
