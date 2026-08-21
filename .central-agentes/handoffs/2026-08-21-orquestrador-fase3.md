@@ -303,3 +303,62 @@ vazio-vs-falhou está provado em dois níveis: classe pelo teste, aparência pel
 
 **Aberto:** link do celular (defeito em investigação) · métrica de pose · as quatro
 decisões do cliente.
+
+## Medição válida do dia · janela travada, os seis confirmando
+
+`integra/v3-r3` em **2717eb4**: **97 unitários · 173 e2e · zero falhas · zero skipped.**
+Procedência: janela travada, os seis confirmaram parada nomeando os recursos, ninguém
+entrou durante. As guardas de CI são a terceira cobertura e correm em separado.
+
+**A conta, por arquivo** (o total caiu fora da faixa que eu previ, e faixa não é
+previsão): a soma dos 22 arquivos de spec dá 173 exatos — fluxo 26, equipes-pessoas-
+contrato 19, convite-contrato 19, aparelho-liberacao 13, rh-face-cadastrar 11,
+marcacao-revogado-contrato 10, cadastro-coerencia 9, pagina-publica 8, aparelhos 8,
+rh-biometria 7, acesso 7, e o resto.
+
+**Regra adotada, do Arquiteto:** conferir o total contra a soma por arquivo **sempre**,
+não quando o número parece estranho. Eu só conferi porque caiu fora da faixa — sorte, não
+método. Total plausível é o caso em que ninguém confere, e o único em que a conta errada
+sobrevive.
+
+**Fora de propósito:** o ramo do QA (748e155) com 3 vermelhos que guiam a métrica de pose,
+esperando `avaliarPose`. Número limpo com o fato ao lado, não número limpo por omissão.
+
+## A escala que vale para o cliente
+
+| grau | exemplo |
+|---|---|
+| **visto** | porta destrancada · aba Aparelhos · equipe aberta com membros · telefone duplicado |
+| **medido** | as três coberturas, com procedência declarada |
+| **provado, não visto** | três fotos em sequência · retry de uma posição · recusa sem rosto |
+| **inferido, não medido** | navegador órfão · a política de produção da origem pública, conferida por guarda que **lê** o arquivo e nunca exercida num servidor |
+
+A média disso vira "o sistema está testado" — verdadeiro e inútil.
+
+## Decisão de fecho: o gate absoluto de pitch NÃO entra
+
+Sequência: o Biometria achou, lendo o código antes de implementar, que o motor 2D não tem
+zero natural de pitch — o nariz fica abaixo da linha dos olhos por anatomia. Qualquer
+métrica 2D precisa de uma razão antropométrica **dentro da fórmula**, e ela, errada,
+**desloca** a leitura de quem foge da razão assumida (variação por anatomia, ancestralidade,
+idade). Decidi contra a constante global pelo tipo de defeito trocado: hoje o gate é cego de
+forma **uniforme**; a constante trocaria isso por um gate que recusa mais algumas pessoas.
+Média melhor, distribuição pior — e no gate é pior que no matcher, porque o matcher errado
+manda para revisão e o gate errado nem tenta.
+
+Aprovei o candidato do QA (razão entre duas medidas do próprio rosto) e **ele mesmo o
+derrubou 20 minutos depois, com medição**: a razão cancela **escala**, não **forma** — duas
+anatomias frontais dão 0,6154 e 0,2778, fator 2,2 na mesma pose. Trocava uma constante por
+outra.
+
+O que funciona, medido: **diferença** entre duas fotos da mesma pessoa cancela o
+deslocamento exatamente (zero exato nas duas anatomias); a escala difere, então compara
+fotos e nunca mede ângulo absoluto.
+
+**Resultado:** o eixo relativo entra ("as 3 fotos estão em poses consistentes?", mesma forma
+da coerência que já existe, sem viés). O gate absoluto **não entra** — não é adiamento, é
+não-respondível em 2D sem viés. Fica a cegueira uniforme, que é o defeito justo. Vai ao
+cliente como **limite conhecido e nomeado**.
+
+Os 3 vermelhos do QA passariam com qualquer das duas fórmulas erradas — ele vai declarar no
+arquivo que não cobrem viés antropométrico.
