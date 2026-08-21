@@ -79,6 +79,7 @@ jobs:
       - name: A versão do cache do service worker subiu junto com o app
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EVENTO: ${{ github.event_name }}
         run: |
           v=$(grep -o "efrat-ponto-v[0-9]*" sw.js | head -1)
           echo "cache atual: $v"
@@ -103,13 +104,28 @@ jobs:
           #
           # Compara o hash de blob do git, que já é hash de conteúdo — exato, e sem
           # ler os 7 MB de pesos.
+          # NÃO INFERIR DE AUSÊNCIA. Faltar base é normal em execução manual e
+          # é ANOMALIA em push ou pull_request — e antes esta guarda tratava os
+          # dois casos igual, passando calada. Se o payload do evento mudar de
+          # forma, ou o disparo vier por um caminho que eu não previ, a guarda
+          # degradava para "só checa se a versão existe" e o CI seguia verde.
+          # Ausência de base agora só é aceitável no evento que legitimamente
+          # não tem base.
           if [ -z "${BASE:-}" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
-            echo "sem base para comparar (execução manual) — só a existência foi checada"
-            exit 0
+            if [ "${EVENTO:-}" = "workflow_dispatch" ]; then
+              echo "execução manual não tem base — comparação de conteúdo não se aplica"
+              exit 0
+            fi
+            echo "::error::evento $EVENTO deveria ter base para comparar e não tem — a guarda de conteúdo do sw.js ficaria sem efeito, e prefiro falhar a passar calada"
+            exit 1
           fi
           if ! git cat-file -e "$BASE:sw.js" 2>/dev/null; then
-            echo "sw.js não existia na base — nada a comparar"
-            exit 0
+            if [ "${EVENTO:-}" = "workflow_dispatch" ]; then
+              echo "sw.js não existia na base — nada a comparar"
+              exit 0
+            fi
+            echo "::error::a base $BASE não tem sw.js — ou a base está errada, ou o arquivo nasceu agora; nos dois casos quero saber em vez de passar calado"
+            exit 1
           fi
 
           versao_base=$(git show "$BASE:sw.js" | grep -o "efrat-ponto-v[0-9]*" | head -1)
