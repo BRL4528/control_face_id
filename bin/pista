@@ -13,16 +13,23 @@
 # pareciam cobertos.
 set -u
 
-# $1 = pids, $2 = lista de comm aceitos separados por espaco
+# $1 = pids, $2 = PREFIXOS de comm aceitos, separados por espaco.
+# PREFIXO e nao nome exato porque o Linux corta /proc/PID/comm em 15 CARACTERES:
+# chrome-headless-shell  -> "chrome-headless"
+# chrome_crashpad_handler -> "chrome_crashpad"
+# Lista de nomes completos nunca casa binario de nome longo, e o sintoma e
+# SILENCIO e nao erro -- foi assim que a primeira versao deste filtro deixou de
+# ver o navegador do playwright inteiro. O truncamento nao aparece em lugar
+# nenhum do codigo, entao vai voltar a morder se o casamento for exato.
 so_comm() {
   for p in $1; do
     c=$(cat "/proc/$p/comm" 2>/dev/null) || continue
-    case " $2 " in *" $c "*) printf '%s ' "$p";; esac
+    for pref in $2; do case "$c" in "$pref"*) printf '%s ' "$p"; break;; esac; done
   done
 }
 
 alvo=$(so_comm   "$(pgrep -f 'playwright test')" "node")
-chrome=$(so_comm "$(pgrep -f 'remote-debugging|--headless')" "chrome chromium headless_shell chromium-browser chrome_crashpad_handler")
+chrome=$(so_comm "$(pgrep -f 'remote-debugging|--headless')" "chrome chromium headless_shell headless")
 serve=$(so_comm  "$(pgrep -f '(tests/e2e/servir\.js|(visual|proxy|servir)[^/]*\.(mjs|cjs|js))')" "node")
 
 ocupado=0
