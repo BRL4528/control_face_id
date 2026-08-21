@@ -50,7 +50,9 @@ export function emCooldown(pessoaId, marcacoesDoDia, agoraMs, cooldownMs) {
 /**
  * Quais itens saem da fila local depois da resposta do servidor.
  * `aceito` e `duplicado` significam que o servidor tem o registro — some.
- * `rejeitado` fica retido: é problema que precisa de gente.
+ * `retido` também sai daqui: o servidor já gravou (§1.6), só falta revisão
+ * do RH — retentar localmente reenviaria pra sempre um item que o servidor
+ * não vai aceitar de novo. `rejeitado` é tratado à parte, por `itensRecusados`.
  */
 export function itensParaRemover(resultados) {
   return (resultados || [])
@@ -287,20 +289,13 @@ export function serieDiaria(marcacoes, dias, hoje) {
 }
 
 /**
- * Aparelhos da aba "Aparelhos" (T-87615C), separados em duas filas e cada uma
- * ordenada para quem decide primeiro: pendentes do mais antigo para o mais
- * novo — é quem está esperando há mais tempo — e aprovados do uso mais
- * recente para o mais antigo, para achar rápido um aparelho esquecido ligado.
- * Aparelho sem `ultimo_uso` (nunca chamou a API depois de aprovado) vai para
- * o fim da lista de aprovados, não para o topo.
+ * Chave de comparação de unidade (§2.4/§8-A): "Unidade A", "unidade a" e
+ * "Unidade  A" têm de resolver pra mesma unidade. Só pra COMPARAR — o valor
+ * exibido/gravado é sempre o texto original de alguma equipe, nunca esta
+ * chave normalizada.
  */
-export function separarAparelhos(dispositivos) {
-  const lista = dispositivos || [];
-  const pendentes = lista.filter(d => d && d.estado === 'pendente')
-    .slice().sort((a, b) => String(a.criado_em || '').localeCompare(String(b.criado_em || '')));
-  const aprovados = lista.filter(d => d && d.estado === 'ativo')
-    .slice().sort((a, b) => String(b.ultimo_uso || '').localeCompare(String(a.ultimo_uso || '')));
-  return { pendentes, aprovados };
+export function normalizarUnidade(bruto) {
+  return String(bruto || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 /* ------------------------------------------------------------ colaborador */
@@ -393,4 +388,20 @@ export function pendenciasPorMotivo(marcacoes, recadastros, pessoas) {
     { chave: 'relogio', rotulo: 'Relógio fora', total: c.relogio },
     { chave: 'recadastro', rotulo: 'Recadastro', total: c.recadastro }
   ].sort((a, b) => b.total - a.total);
+}
+
+/**
+ * Yaw (giro horizontal da cabeça) a partir de três landmarks do rosto — só
+ * `.x`, de propósito (T-5EC67B): pitch (queixo para baixo/cima) é rotação em
+ * torno do eixo HORIZONTAL, então mexe em `.y`/`.z`, nunca em `.x`. Esta
+ * função é matematicamente cega a pitch — não é limiar frouxo, é ausência de
+ * métrica. Função pura (sem DOM) de propósito, para o QA poder afirmar isso
+ * em unitário determinístico sem navegador.
+ */
+export function yaw(landmarks) {
+  const p = landmarks.positions;
+  const le = p[36], re = p[45], nariz = p[30];
+  const meio = (le.x + re.x) / 2;
+  const vao = Math.abs(re.x - le.x) || 1;
+  return (nariz.x - meio) / vao;
 }

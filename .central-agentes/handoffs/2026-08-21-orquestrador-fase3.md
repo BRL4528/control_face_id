@@ -152,8 +152,8 @@ frente do n8n (a resposta "nenhum" muda a recomendação de rate limit).
 
 ## Atualização 4 · fecho do dia (medido, não reportado)
 
-**Medição válida: 93 unitários + 106 e2e passando, 5 armados, zero falhas** (mais 16
-etapas de higiene), medida pelo DevOps em 9341dc9 com procedência declarada — anúncio
+**Medição válida: 93 unitários + 106 e2e passando, 5 armados, zero falhas** (mais 15
+etapas de guarda — eram 15 e não 16; o DevOps recontou e corrigiu o próprio número), medida pelo DevOps em 9341dc9 com procedência declarada — anúncio
 de pista mais observação no fim. Substitui a minha medição anterior (95 e2e em 6151115),
 que teve um vermelho não explicado e portanto procedência contendida: reconferir só o
 vermelho responde se *ele* era real, não se a rodada era confiável.
@@ -202,10 +202,13 @@ registrado.
 em `js/rh.js`) · marcação de aparelho revogado (T-D00CE0) · fatia de segurança da §1
 (T-C20AD3, fora do backlog de propósito — sua ausência é invisível).
 
-**Espera o cliente:** link do celular (hostname) · resposta ao capacete (quatro fotos,
+**Espera o cliente** (corrigido: o link do celular está sendo CONSTRUÍDO com placeholder
+— o hostname só publica, não desenvolve): resposta ao capacete (quatro fotos,
 com e sem, duas poses) · Parte 1 na Vercel (recomendada).
 
-**Não verificado visualmente:** oito das dez telas. Prints pedidos ao QA — equipe
+**OBSOLETO — corrigido abaixo.** Dizia que oito das dez telas não tinham verificação
+visual e que os prints estavam pedidos. Os prints chegaram e eu verifiquei duas por
+imagem (equipe aberta com membros; telefone duplicado). O texto original seguia: equipe
 aberta com membros, ficha do colaborador com telefone, diálogo de telefone duplicado,
 câmera do PC. É o único requisito do cliente sem conferência de olho.
 
@@ -220,9 +223,10 @@ na prova. T-9C35B7 com o QA.
 `integra/v3-r3` em d000718: **98 unitários + 130 e2e passando, 1 armado, zero falhas.**
 Procedência: janela travada por anúncio, os seis confirmaram parada, `pgrep` 0 no fim.
 Substitui as medições anteriores minha e do DevOps — as duas tinham observação parcial.
-**Cobertura, não arredondar:** isso mede unitário e e2e. As 16 etapas de higiene do CI
-não rodam em `node --test` nem em `playwright test`, então as guardas de borda seguem
-**não verificadas** — e foi exatamente ali que apareceu o `sw.js` preso em v10 com oito
+**Cobertura, não arredondar:** isso mede unitário e e2e. As 15 etapas de guarda do CI
+não rodam em `node --test` nem em `playwright test`. Medidas depois, contra f0d9fc3:
+**15 de 15 verdes**, invocadas com base real (sem base, a guarda do `sw.js` falha de
+propósito — endurecimento do próprio dia contra ausência lida como satisfação) — e foi exatamente ali que apareceu o `sw.js` preso em v10 com oito
 arquivos pré-cacheados mudados depois (corrigido em f0d9fc3, v11).
 
 `pgrep` antes/depois só pega sobreposição que **começou** antes da entrada e ainda
@@ -235,4 +239,36 @@ telefone, edição e inativar/reativar · cadastro de face pela **câmera do PC*
 **upload de 3 fotos** · marcação de aparelho revogado (retida na mesa do RH, nunca
 descartada; os quatro status soltam a fila).
 
-**Falta:** link do celular (hostname do cliente) · T-C20AD3, a fatia de segurança da §1.
+**Falta:** link do celular (em construção com placeholder; o hostname só publica) ·
+T-C20AD3, a fatia de segurança da §1 · métrica de pose (T-55A616).
+
+## Cobertura completa do dia (as três medições)
+
+| | número | procedência |
+|---|---|---|
+| unitário | 98 / 0 falhas | janela travada |
+| e2e | 132 / 0 falhas, 1 armado | janela anunciada, sem anúncio de terceiro |
+| guardas de CI | 15 / 0 falhas | anúncio + pgrep nas duas pontas; quase insensível a contenção (nenhuma abre navegador) |
+
+Nenhuma das três é "a" medição: cada uma cobre o que cobre, e as três juntas são o
+estado. Foi o erro que eu cometi ao registrar unitário+e2e como *a* medição válida.
+
+## Auditoria do próprio checkpoint (o documento também envelhece)
+
+O QA achou um parágrafo obsoleto no documento de segurança dele — declarava uma lacuna
+que ele mesmo já havia fechado no mesmo dia — e a distinção que ele fez vale para este
+arquivo: comentário errado tem o código ao lado para desmenti-lo; **documento é a única
+fonte, e ninguém tem com o que confrontar.** Lacuna declarada que já foi fechada faz
+alguém fechar de novo, ou tratar como aberto um risco coberto.
+
+Auditei este checkpoint e achei duas afirmações minhas que ficaram falsas:
+1. "oito das dez telas não verificadas visualmente, prints pedidos" — os prints chegaram
+   e eu verifiquei duas por imagem. Marcado como obsoleto acima em vez de apagado.
+2. "link do celular espera o hostname" — ele está sendo construído com placeholder; o
+   hostname **publica**, não desenvolve. A redação antiga fazia o hostname parecer
+   bloqueio de desenvolvimento, que foi um erro meu de sequenciamento antes.
+
+**Verificado visualmente por mim, em imagem:** app destrancado · aba Aparelhos · equipe
+aberta com membros, remover e adicionar de dentro · ficha do colaborador em edição com
+telefone e o diálogo de telefone duplicado (que avisa, na hora da autorização, que a
+pessoa não poderá receber o link de cadastro de face).

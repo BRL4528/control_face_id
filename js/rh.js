@@ -4,7 +4,7 @@ import { Face } from './face.js';
 import { derivar } from './cripto.js';
 import {
   indicadores, espelho,
-  presencaPorEquipe, serieDiaria, pendenciasPorMotivo, separarAparelhos, retidasPorAparelho
+  presencaPorEquipe, serieDiaria, pendenciasPorMotivo, retidasPorAparelho
 } from './regras.js';
 import { $, esc, mostrar, toast, hora, data } from './ui.js';
 
@@ -20,6 +20,7 @@ export const Rh = {
   dias: 30,          // período ativo do painel (7 / 30 / 90)
   _charts: [],       // instâncias Chart.js vivas, destruídas ao repintar
   _Chart: null,      // biblioteca carregada sob demanda
+  _pollAparelhos: null,  // T-C20AD3: refresh próprio da aba Aparelhos (§1.2)
 
   async entrar(usuario, senha) {
     const s = await ApiRh.sal(usuario);
@@ -60,7 +61,8 @@ export const Rh = {
     const atu = $('btnAtualizarRh');
     if (atu) atu.onclick = () => this.recarregar();
     $('btnSairRh').onclick = () => {
-      this.destruirGraficos(); this.cred = null; this.dados = null;
+      this.destruirGraficos(); clearTimeout(this._pollAparelhos);
+      this.cred = null; this.dados = null;
       this.pessoaAberta = null; this.equipeAberta = null;
       this.aoSair();
     };
@@ -75,6 +77,7 @@ export const Rh = {
 
   pintar() {
     this.destruirGraficos();   // troca de aba mata os gráficos da anterior
+    clearTimeout(this._pollAparelhos);   // idem pro refresh próprio da aba Aparelhos
     $('rhPeriodo').textContent = 'últimos ' + (this.dados.periodo_dias || this.dias) + ' dias';
     document.querySelectorAll('#rh nav button').forEach(b => b.classList.toggle('on', b.dataset.aba === this.aba));
     ['painel', 'aparelhos', 'pendencias', 'pessoas', 'equipes', 'registros'].forEach(a =>
@@ -358,18 +361,40 @@ export const Rh = {
   // (nem no card do pendente, nem na rede — servidor-falso.js não devolve
   // codigo_curto pro RH), e o campo é texto livre, sem datalist/autocomplete,
   // senão o navegador reconstrói a lista que acabou de ser escondida.
-  pintarAparelhos() {
-    const { pendentes, aprovados } = separarAparelhos(this.dados.dispositivos);
+  /**
+   * T-C20AD3 (§1.2): a aba tem leitura própria (/efrat/rh/aparelhos) — muda
+   * enquanto o RH olha, e recarregar o painel inteiro (marcações, pessoas,
+   * equipes) a cada refresh por causa de 3 linhas seria desperdício. Por
+   * isso tem poll próprio (`_pollAparelhos`), igual ao poll de estado do
+   * aparelho em app.js: reagenda a si mesmo, e para sozinho quando a aba
+   * troca ou o RH sai (ver `pintar()`/`btnSairRh`).
+   */
+  async pintarAparelhos() {
+    clearTimeout(this._pollAparelhos);
+    const r = await ApiRh.aparelhos(this.cred);
+    if (!r.ok) { toast(r.erro || 'Falha ao carregar aparelhos', 'bad'); return; }
+    const { pendentes, ativos, encerrados } = r.dados;
     const el = $('rh-aparelhos');
-    const linhaAprovado = d => '<div class="linha-item"><span class="ponto ok"></span>' +
-      '<div style="flex:1"><div class="nm">' + esc(d.apelido || d.dispositivo_id) + '</div>' +
-      '<div class="mt">último uso ' + (d.ultimo_uso ? (data(d.ultimo_uso.slice(0, 10)) + ' ' + hora(d.ultimo_uso)) : 'ainda não usou') + '</div></div>' +
-      '<button class="act ghost" style="width:auto;margin:0;padding:9px 12px;font-size:12px" data-revogar="' + d.dispositivo_id + '" data-apelido="' + esc(d.apelido || d.dispositivo_id) + '">Revogar</button>' +
-      '</div>';
+
+    // pendentes[] não tem dispositivo_id (§1.1 regra 2 — defesa em
+    // profundidade: a lista de pendentes não carrega nenhum identificador
+    // que outra rota aceite como alvo de ativação). Recusar resolve por
+    // pendente_id.
     const linhaPendente = d => '<div class="linha-item"><span class="ponto muted"></span>' +
+      '<div style="flex:1"><div class="nm">' + esc(d.apelido_declarado || '(sem nome)') + '</div>' +
+      '<div class="mt">pedindo liberação desde ' + data(String(d.primeiro_pedido_em).slice(0, 10)) + '</div></div>' +
+      '<button class="act ghost" style="width:auto;margin:0;padding:9px 12px;font-size:12px" data-pendente="' + esc(d.pendente_id) + '">Recusar</button>' +
+      '</div>';
+    const linhaAtivo = d => '<div class="linha-item"><span class="ponto ok"></span>' +
       '<div style="flex:1"><div class="nm">' + esc(d.apelido || d.dispositivo_id) + '</div>' +
-      '<div class="mt">pedindo liberação desde ' + data(String(d.criado_em).slice(0, 10)) + '</div></div>' +
-      '<button class="act ghost" style="width:auto;margin:0;padding:9px 12px;font-size:12px" data-aparelho="' + d.dispositivo_id + '" data-acao="recusar">Recusar</button>' +
+      '<div class="mt">' + esc(d.unidade || '—') + ' · último uso ' +
+        (d.ultimo_uso_em ? (data(d.ultimo_uso_em.slice(0, 10)) + ' ' + hora(d.ultimo_uso_em)) : 'ainda não usou') + '</div></div>' +
+      '<button class="act ghost" style="width:auto;margin:0;padding:9px 12px;font-size:12px" data-revogar="' + esc(d.dispositivo_id) + '" data-apelido="' + esc(d.apelido || d.dispositivo_id) + '">Revogar</button>' +
+      '</div>';
+    const linhaEncerrado = d => '<div class="linha-item"><span class="ponto muted"></span>' +
+      '<div style="flex:1"><div class="nm">' + esc(d.apelido || d.dispositivo_id) + '</div>' +
+      '<div class="mt">' + (d.estado === 'revogado' ? 'revogado' : 'recusado') +
+        (d.por ? (' por ' + esc(d.por)) : '') + (d.em ? (' em ' + data(String(d.em).slice(0, 10))) : '') + '</div></div>' +
       '</div>';
 
     el.innerHTML =
@@ -378,41 +403,96 @@ export const Rh = {
         '<label class="lb">Código do aparelho</label>' +
         '<input type="text" id="aparelhoCodigo" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="6" style="text-transform:uppercase">' +
         '<button class="act" id="btnLiberarAparelho">Liberar</button>' +
+        '<div id="aparelhoLiberarConf"></div>' +
       '</div>' +
       '<div class="card"><h2>Pedindo liberação <span class="nota">— ' + pendentes.length + '</span></h2>' +
-        (pendentes.length ? pendentes.map(linhaPendente).join('') : '<p class="nota">Nada esperando decisão.</p>') +
+        '<div id="aparelhoPendentesLista">' +
+          (pendentes.length ? pendentes.map(linhaPendente).join('') : '<p class="nota">Nada esperando decisão.</p>') +
+        '</div>' +
       '</div>' +
-      '<div class="card"><h2>Liberados <span class="nota">— ' + aprovados.length + '</span></h2>' +
-        (aprovados.length ? aprovados.map(linhaAprovado).join('') : '<p class="nota">Nenhum aparelho liberado ainda.</p>') +
+      '<div class="card"><h2>Liberados <span class="nota">— ' + ativos.length + '</span></h2>' +
+        '<div id="aparelhoAtivosLista">' +
+          (ativos.length ? ativos.map(linhaAtivo).join('') : '<p class="nota">Nenhum aparelho liberado ainda.</p>') +
+        '</div>' +
         '<div id="aparelhoRevogarConf"></div>' +
-      '</div>';
+      '</div>' +
+      // §1.2: 30 dias de histórico auditável — recusado/revogado não some da
+      // tela, só sai da lista ACIONÁVEL (pendentes/ativos) e vira linha
+      // read-only aqui, sem botão nenhum.
+      (encerrados.length
+        ? '<div class="card"><h2>Encerrados <span class="nota">— últimos 30 dias</span></h2>' + encerrados.map(linhaEncerrado).join('') + '</div>'
+        : '');
 
-    $('btnLiberarAparelho').onclick = async () => {
+    $('btnLiberarAparelho').onclick = () => {
       const codigo = $('aparelhoCodigo').value.trim();
       if (!codigo) { toast('Digite o código mostrado no aparelho', 'warn'); return; }
-      $('btnLiberarAparelho').disabled = true;
-      const r = await ApiRh.aparelho(this.cred, { codigo, acao: 'aprovar' });
-      $('btnLiberarAparelho').disabled = false;
-      if (!r.ok) { toast(r.erro || 'Código inválido', 'bad'); return; }
-      toast('Aparelho liberado', 'ok');
-      await this.recarregar();
+      this.confirmarLiberarAparelho(codigo);
     };
 
     // Recusar não exige código nem confirmação (§1.4: "errar uma recusa não
-    // dá acesso a ninguém"). Revogar é ação de mais peso — tem confirmação
-    // própria, ver confirmarRevogarAparelho().
-    el.querySelectorAll('button[data-aparelho]').forEach(b => {
+    // dá acesso a ninguém"). Revogar e liberar são ações de mais peso — cada
+    // uma tem sua confirmação própria com equipes/texto do contrato.
+    el.querySelectorAll('button[data-pendente]').forEach(b => {
       b.onclick = async () => {
         b.disabled = true;
-        const r = await ApiRh.aparelho(this.cred, { dispositivo_id: b.dataset.aparelho, acao: b.dataset.acao });
-        if (!r.ok) { toast(r.erro || 'Falha', 'bad'); b.disabled = false; return; }
+        const pendenteId = b.dataset.pendente;
+        const rr = await ApiRh.aparelhoRecusar(this.cred, {
+          pendente_id: pendenteId, idempotency_key: 'recusar-' + pendenteId
+        });
+        if (!rr.ok) { toast(rr.erro || 'Falha', 'bad'); b.disabled = false; return; }
         toast('Aparelho recusado', 'ok');
-        await this.recarregar();
+        await this.pintarAparelhos();
       };
     });
     el.querySelectorAll('button[data-revogar]').forEach(b => {
       b.onclick = () => this.confirmarRevogarAparelho(b.dataset.revogar, b.dataset.apelido);
     });
+
+    if (this.aba === 'aparelhos') {
+      this._pollAparelhos = setTimeout(() => this.pintarAparelhos(), 15000);
+    }
+  },
+
+  /**
+   * Tela de escopo do contrato (§1.3), texto fechado com o Designer:
+   * cabeçalho e linha de apoio ao pé da letra, e SEM botão "selecionar
+   * todas" — é o que impede um aparelho perdido de expor a empresa inteira
+   * (Cenário 3, ameacas-v3.md). `equipes_ids` é obrigatório no corpo de
+   * /aparelho/aprovar; até esta tela existir, aprovar liberava para TODAS
+   * as equipes ativas sozinho, sem o RH escolher nada.
+   */
+  confirmarLiberarAparelho(codigo) {
+    const equipesAtivas = (this.dados.equipes || []).filter(e => e.ativo);
+    const linhaEquipe = e => '<label class="linha-item" style="cursor:pointer">' +
+      '<input type="checkbox" value="' + esc(e.equipe_id) + '" style="width:auto;flex:0;margin:0 10px 0 0">' +
+      '<span style="flex:1">' + esc(e.nome) + '<span class="nota"> · ' + esc(e.unidade || '') + '</span></span>' +
+      '</label>';
+    $('aparelhoLiberarConf').innerHTML =
+      '<div class="card" style="margin-top:12px">' +
+        '<h2>Quem bate ponto neste aparelho?</h2>' +
+        '<p class="nota" style="margin:0 0 10px">Marque as equipes que trabalham neste local. Só quem estiver ' +
+          'marcado aqui é reconhecido por este aparelho — se ele for perdido ou roubado, é só isso que fica exposto.</p>' +
+        (equipesAtivas.length ? equipesAtivas.map(linhaEquipe).join('') : '<p class="nota">Nenhuma equipe ativa cadastrada.</p>') +
+        '<div class="row2">' +
+          '<button class="act" id="btnConfirmarLiberar">Liberar</button>' +
+          '<button class="act ghost" id="btnCancelarLiberar">Cancelar</button>' +
+        '</div>' +
+      '</div>';
+    $('btnCancelarLiberar').onclick = () => { $('aparelhoLiberarConf').innerHTML = ''; };
+    $('btnConfirmarLiberar').onclick = async () => {
+      const equipesIds = [...$('aparelhoLiberarConf').querySelectorAll('input[type=checkbox]:checked')].map(i => i.value);
+      if (!equipesIds.length) { toast('Selecione ao menos uma equipe antes de liberar o aparelho.', 'warn'); return; }
+      $('btnConfirmarLiberar').disabled = true;
+      const r = await ApiRh.aparelhoAprovar(this.cred, {
+        codigo, equipes_ids: equipesIds,
+        idempotency_key: 'aprovar-' + codigo + '-' + equipesIds.slice().sort().join(',')
+      });
+      $('btnConfirmarLiberar').disabled = false;
+      if (!r.ok) { toast(r.erro || 'Código inválido', 'bad'); return; }
+      toast('Aparelho liberado', 'ok');
+      $('aparelhoCodigo').value = '';
+      await this.pintarAparelhos();
+    };
   },
 
   /**
@@ -437,12 +517,13 @@ export const Rh = {
     $('btnCancelarRevogar').onclick = () => { $('aparelhoRevogarConf').innerHTML = ''; };
     $('btnConfirmarRevogar').onclick = async () => {
       $('btnConfirmarRevogar').disabled = true;
-      const r = await ApiRh.aparelho(this.cred, {
-        dispositivo_id: dispositivoId, acao: 'revogar', motivo: $('revogarMotivo').value.trim()
+      const r = await ApiRh.aparelhoRevogar(this.cred, {
+        dispositivo_id: dispositivoId, motivo: $('revogarMotivo').value.trim(),
+        idempotency_key: 'revogar-' + dispositivoId
       });
       if (!r.ok) { toast(r.erro || 'Falha', 'bad'); $('btnConfirmarRevogar').disabled = false; return; }
       toast('Aparelho revogado', 'ok');
-      await this.recarregar();
+      await this.pintarAparelhos();
     };
   },
 
