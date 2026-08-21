@@ -64,7 +64,10 @@ Nomeado porque a fase inteira o reencontrou em lugares sem relação nenhuma ent
 | T-E3DBD4 | o `#porta` que nascia visível | tela que aparece por padrão não é evidência de estado nenhum |
 
 Detector que mente é pior que detector ausente, porque desliga a suspeita de quem
-olharia. Todo campo deste contrato que existe para alguém *notar algo* carrega, junto,
+olharia. **E medição que ninguém usa é pior que não medir, porque vira falso conforto** —
+formulação do Biometria, e é o mesmo padrão um passo adiante: `efrat_template.coerencia`
+acumulando sem ninguém olhar (dívida 9) não é neutro, é um "nós medimos isso" que ninguém
+pode sacar. A família toda é uma só: coisa que parece evidência e não é. Todo campo deste contrato que existe para alguém *notar algo* carrega, junto,
 a resposta a "o que faria isto virar constante?".
 
 ---
