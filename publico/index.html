@@ -6,31 +6,42 @@
 <meta name="robots" content="noindex, nofollow">
 <title>Cadastro de rosto</title>
 <style>
-  body { font: 16px/1.5 system-ui, sans-serif; margin: 0; padding: 2rem 1.25rem;
+  :root { color-scheme: light; }
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 0; padding: 1.5rem 1.25rem;
          color: #2e3440; background: #eceff4; }
-  main { max-width: 32rem; margin: 0 auto; }
-  h1 { font-size: 1.25rem; }
+  main { max-width: 26rem; margin: 0 auto; }
+  h1 { font-size: 1.15rem; margin: 0 0 .75rem; }
+  p { margin: 0 0 .75rem; }
+  .cartao { background: #fff; border-radius: 14px; padding: 1.1rem; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .nota { font-size: .85rem; color: #5a6472; }
+  .camwrap { position: relative; aspect-ratio: 3/4; border-radius: 12px; overflow: hidden;
+             background: #0e1729; margin-bottom: .75rem; }
+  .camwrap video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+  .shots { display: flex; gap: 7px; margin-bottom: .75rem; }
+  .shots div { flex: 1; aspect-ratio: 1; border-radius: 9px; background: #e5e9f0;
+               border: 1px dashed #c7ccd4; overflow: hidden; display: flex; align-items: center;
+               justify-content: center; color: #8390a6; font-size: 11px; }
+  .shots img { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+  button.act { display: block; width: 100%; box-sizing: border-box; padding: 12px; margin-top: .6rem;
+               border-radius: 10px; border: none; background: #2d6cdf; color: #fff; font-size: 15px;
+               font-weight: 600; cursor: pointer; }
+  button.act:disabled { opacity: .5; cursor: default; }
+  button.act.ghost { background: transparent; color: #2d6cdf; border: 1px solid #2d6cdf; }
+  .erro { color: #b3261e; font-size: .9rem; margin: .5rem 0 0; }
+  #toast { position: fixed; left: 1rem; right: 1rem; bottom: 1rem; padding: .7rem 1rem;
+           border-radius: 10px; background: #2e3440; color: #fff; font-size: .9rem; text-align: center; }
+  #toast.hide { display: none; }
+  #toast.bad { background: #b3261e; } #toast.ok { background: #1f7a45; }
 </style>
 </head>
 <body>
 <main>
-  <h1>Esta página ainda não está pronta</h1>
-  <p>Se você recebeu um link para cadastrar seu rosto, fale com o RH da sua
-     empresa: o cadastro ainda não está disponível.</p>
+  <div id="tela" class="cartao"><p class="nota">Carregando…</p></div>
+  <video id="video" playsinline muted autoplay style="display:none"></video>
 </main>
-<!--
-  PLACEHOLDER. Existe só para o projeto da Vercel ter o que publicar e para as
-  guardas de CI rodarem contra algo real. A página de verdade é o item D1 de
-  docs/fase3-rh-pessoas.md e é do Full-Stack: substitua este arquivo inteiro.
-
-  O que já está resolvido para você nesta pasta:
-    - CSP, cache, noindex e no-referrer estão em publico/vercel.json.
-    - vendor/face-api.js, vendor/fontes/ e models/ chegam em dist/ pelo
-      copiar-assets.sh; referencie como ./vendor/... e ./models/...
-    - NÃO registre service worker aqui. Página de uso único não ganha nada com
-      offline, e um SW nesta origem seria justamente o fallback-para-shell que
-      a T-600DD4 removeu. Há guarda de CI.
-    - Nenhum asset externo: nada de CDN, nada de Google Fonts. Há guarda de CI.
--->
+<div id="toast" class="hide"></div>
+<script src="./vendor/face-api.js"></script>
+<script src="./js/config-face.js"></script>
+<script type="module" src="./js/pagina.js"></script>
 </body>
 </html>
