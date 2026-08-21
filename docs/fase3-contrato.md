@@ -655,6 +655,19 @@ O campo de motivo substitui o checkbox de confirmação que o desenho anterior t
 checkbox prova que alguém clicou, motivo prova **o quê** — e esta é uma decisão que
 fica registrada e pode ser auditada depois.
 
+`telefone_compartilhado_com` é lista, então tem dois registros de apresentação, e a
+regra é do Designer: **no diálogo, lista completa** ("João Souza, Maria Lima e Pedro
+Santos"), porque ali o RH está decidindo e precisa da informação inteira; **na ficha,
+truncada a partir de três** ("com João Souza, Maria Lima e mais 1"), porque ali é
+leitura de relance e "e mais 1" já sinaliza "não é só uma pessoa".
+
+E os dois motivos de o botão de link ficar indisponível **não compartilham texto**,
+porque as saídas são diferentes: `TELEFONE_COMPARTILHADO_SEM_LINK` manda mudar de
+canal ("Cadastre o rosto pela câmera ou por upload"), `PESSOA_SEM_TELEFONE` manda
+completar o cadastro ("Informe o celular da pessoa antes de enviar o link"). Dois
+códigos distintos no servidor existem exatamente para a tela poder falar dois
+idiomas ali.
+
 **Sem migração de dados.** `telefone` é obrigatório em **escrita** (criação e
 atualização). As linhas antigas do piloto vêm sem telefone; leitura tolera vazio
 e o painel marca "sem telefone". A primeira edição de cada pessoa preenche —
@@ -1366,6 +1379,99 @@ produção, reproduzido localmente. Com isso o e2e consegue afirmar, e não supo
 que a página pública não vê o IndexedDB do app, que o service worker do app não a
 intercepta, e que ela funciona sem nada da origem do app no ar.
 
+### 4.7 Procedência do template: qual modelo gerou cada vetor
+
+**Requisito do Orquestrador, e ele sobe de dívida para critério de aceite:** cada
+template grava a identidade do modelo que o gerou, junto da procedência que §4.3 já
+combinou (`origem`, autor, instante).
+
+O motivo é o modo de falha, não a auditoria por si. Um template é um vetor de 128
+números **amarrado ao modelo que o produziu**. Se os pesos divergirem entre a
+origem pública e a do app, todo template cadastrado pela página pública fica
+sutilmente incompatível com o reconhecimento — **não quebra, degrada, e degrada
+calado**, na direção exata que esta fase existe para evitar. E note que a conferência
+de tamanho de §4.2 (128 números finitos) não pega isso: modelo que muda de
+dimensionalidade é detectado ali; modelo que continua em 128 dimensões e muda o
+espaço de embedding passa inteiro.
+
+Duas perguntas que isso torna respondíveis, e hoje não são:
+
+1. **"Quais templates foram gerados com que modelo?"** — para poder responder no dia
+   em que a guarda falhar, em vez de descobrir por gestor relatando que o
+   reconhecimento piorou.
+2. **Recalibração.** `validacao-biometrica.md:85` avisa que o limiar tem de ser
+   calibrado com dados da própria população da Efrat. Recalibrar sem saber com que
+   modelo cada template foi gerado é chute com aparência de número.
+
+**`modelo_id` não é o `versao` que já existe.** `versao` é contador de template por
+pessoa (`versao: 1`, `2`, `3` conforme recadastra). `modelo_id` identifica o motor.
+São eixos independentes: a mesma pessoa pode ter `versao: 3` com `modelo_id` novo, e
+duas pessoas diferentes têm `versao: 1` com o mesmo `modelo_id`. Nomes distintos de
+propósito.
+
+**Como o `modelo_id` é formado.** Um `models/manifesto.json` servido junto dos pesos,
+gerado pelo mesmo passo que copia (§4.6) e, na árvore do app, no release:
+
+```json
+{ "modelo_id": "m-9f4c1a2b",
+  "gerado_em": "2026-08-21T12:00:00Z",
+  "motor": "face-api.js · tiny_face_detector + face_landmark_68 + face_recognition",
+  "dimensoes": 128,
+  "arquivos": [
+    { "nome": "face_recognition_model.bin", "sha256": "…", "bytes": 6444032 },
+    { "nome": "face_landmark_68_model.bin", "sha256": "…", "bytes": 356480 },
+    { "nome": "tiny_face_detector_model.bin", "sha256": "…", "bytes": 193321 }
+  ] }
+```
+
+`modelo_id` é hash curto sobre os três `sha256` concatenados mais a versão do
+`vendor/face-api.js`. Escolhi hash de conteúdo em vez de versão carimbada à mão
+porque é o que responde à pergunta que interessa: dois deploys com bytes idênticos
+**têm** de dar o mesmo id, e um deploy com peso velho **tem** de dar id diferente
+sem depender de alguém lembrar de incrementar um número.
+
+**A armadilha, e é a mesma de §4.2.** O cliente lê o manifesto e manda `modelo_id`
+no corpo — ou seja, **é o cliente declarando algo sobre si mesmo**, exatamente o
+padrão que este contrato acabou de remover da coerência. Aceito aqui, e a diferença
+precisa estar escrita para não parecer incoerência:
+
+> Na coerência, o número declarado era **a decisão**: o servidor gravava ou recusava
+> com base nele, e mentir mudava o resultado. Aqui o `modelo_id` é **procedência**,
+> não decisão: mentir não faz o servidor aceitar nada que ele recusaria, e quem quer
+> plantar um template ruim adultera o vetor, que é mais fácil e mais eficaz.
+> Declaração é aceitável quando ninguém ganha nada mentindo — e insuficiente quando
+> alguém ganha.
+
+Ainda assim, o servidor não fica de mãos vazias, porque **ele sabe de que origem a
+requisição veio** (a rota diz: `/efrat/face/convite/enviar` é a página pública,
+`/efrat/rh/face/cadastrar` é o painel) e tem o manifesto de cada origem registrado
+em `efrat_modelo`. Com isso ele confere, e o resultado da conferência é o que a fila
+mostra:
+
+| Situação | O que o servidor faz |
+|---|---|
+| `modelo_id` igual ao de **referência** (o que o caminho de reconhecimento usa) | grava normalmente |
+| `modelo_id` conhecido mas **diferente** da referência | **grava** e marca `modelo_divergente: true` |
+| `modelo_id` desconhecido, ou ausente em `/efrat/cadastro` (rota antiga) | **grava** e marca `modelo_desconhecido: true` |
+| ausente nas duas rotas novas | `400 MODELO_AUSENTE` |
+
+**Nunca recusa por divergência de modelo.** Recusar puniria o colaborador por um
+problema de deploy que ele não pode resolver, no meio de um cadastro de rosto — e o
+template do link nasce `pendente` de todo jeito, então há um humano no caminho. O que
+o contrato exige é que a divergência **apareça**: o card da fila de recadastro diz
+"cadastrado com um modelo diferente do que o app usa" antes do botão de aprovar.
+
+`Por quê isso é melhor do que a guarda que eu tinha proposto:` na dívida anterior eu
+sugeri uma guarda comparando periodicamente a versão publicada nas duas origens. Ela
+resolve o futuro e não resolve o passado — e, pior, só dispara quando alguém roda a
+comparação. A conferência acima dispara **no primeiro cadastro real feito com o peso
+errado**, com nome, pessoa e instante, e o histórico fica gravado para trás.
+
+Exigência de C2 aplicada: `modelo_id` é obrigatório nas rotas novas
+(`/efrat/rh/face/cadastrar`, `/efrat/face/convite/enviar`) e tolerado ausente na
+rota antiga `/efrat/cadastro`, para não quebrar o cadastro pelo gestor em campo antes
+de o cliente ser atualizado.
+
 ---
 
 ## 5. Modelo de dados — colunas e tabelas novas
@@ -1389,8 +1495,15 @@ deixa de ser compartilhado.
 `recebido_em` precisa existir separado (§1.6).
 
 `efrat_template` (+): `origem` (`rh_camera` | `rh_upload` | `link` | `gestor`),
-`coerencia` (**calculada pelo servidor**, §4.2), `convite_id`, `descartado_em`.
-`estado` ganha o valor `descartado`.
+`coerencia` (**calculada pelo servidor**, §4.2), `convite_id`, `descartado_em`,
+`modelo_id`, `modelo_divergente`, `modelo_desconhecido` (§4.7). `estado` ganha o
+valor `descartado`. `modelo_id` **não** substitui nem se confunde com `versao`, que
+segue sendo contador de template por pessoa.
+
+`efrat_modelo` (nova): `modelo_id`, `gerado_em`, `motor`, `dimensoes`, `arquivos`
+(JSON com nome/sha256/bytes), `origem_servida` (`app` | `publica`), `referencia`
+(booleano — qual modelo o caminho de reconhecimento usa). Alimentada pelo
+`models/manifesto.json` de cada deploy (§4.7).
 
 `efrat_local`: como o ADR define, sem alteração.
 
@@ -1445,6 +1558,7 @@ acontece por edição (§3.1) e o de `local_id` por edição de equipe (§2.3).
 | `CONVITE_INVALIDO` | 404 | face/convite/abrir, face/convite/enviar |
 | `CONVITE_CONSUMIDO` | 409 | face/convite/enviar |
 | `LIMITE_CONVITE` | 429 | face/convite/abrir |
+| `MODELO_AUSENTE` | 400 | rh/face/cadastrar, face/convite/enviar |
 | `IDEMPOTENCIA_AUSENTE` | 400 | toda rota nova de escrita |
 
 `motivo_codigo` de item de lote (§1.6), que **não** é erro HTTP:
@@ -1543,6 +1657,20 @@ Contrato (servidor falso + workflows):
     - inválido/expirado/revogado/substituído/bloqueado produzem a **mesma**
       mensagem de `404`; `consumido` responde `200 { estado: "consumido" }` sem
       `primeiro_nome`.
+16-A. **Procedência do modelo (§4.7), que subiu de dívida a critério:**
+    - as duas rotas novas sem `modelo_id` → `400 MODELO_AUSENTE`;
+    - `modelo_id` igual ao de referência → grava limpo;
+    - `modelo_id` conhecido e **diferente** da referência → **grava** e marca
+      `modelo_divergente`, e o card da fila diz "cadastrado com um modelo diferente
+      do que o app usa" **antes** do botão de aprovar;
+    - `modelo_id` desconhecido → **grava** e marca `modelo_desconhecido`;
+    - **nunca recusa por divergência de modelo** — o teste afirma que o template
+      existe depois de um envio divergente;
+    - `modelo_id` e `versao` são independentes: recadastro da mesma pessoa com
+      modelo novo dá `versao: 2` com `modelo_id` diferente, e o teste checa os dois
+      campos separados para ninguém colapsar um no outro;
+    - dois deploys com os mesmos bytes de `models/` produzem o **mesmo**
+      `modelo_id`; um deploy com um `.bin` trocado produz outro.
 17. **Template de link é `pendente` mesmo sem template anterior.** Pessoa sem
     biometria nenhuma + envio por link → `template_estado: "pendente"`, e
     `tem_biometria` da pessoa continua falso até a decisão do RH.
@@ -1664,10 +1792,13 @@ Critérios de UI que são contrato, não estética:
    existe quando houver serviço próprio no lugar do n8n.
 7. **A cópia de assets do projeto público é passo de deploy, não de repositório**
    (§4.6). Fonte de verdade única na árvore do app, cópia no build do projeto
-   público. A dívida é o passo poder silenciosamente parar de rodar e o público
-   servir peso velho — precisa de guarda que compare a versão publicada nas duas
-   origens, ou o cadastro de face começa a divergir do reconhecimento sem ninguém
-   perceber.
+   público. O risco de o passo parar de rodar em silêncio **deixou de ser dívida e
+   virou §4.7**: cada template carimba o `modelo_id`, e a divergência aparece no
+   primeiro cadastro real feito com o peso errado, com pessoa e instante — não numa
+   comparação agendada que alguém precisa lembrar de rodar. O que sobra de dívida é
+   menor e honesto: o `modelo_id` é **declarado pelo cliente**, então é procedência
+   e não prova. Fecha junto com a inferência no servidor (dívida 1), que é o mesmo
+   ponto onde o vetor deixa de ser palavra do cliente.
 8. **A exceção de telefone compartilhado é decisão humana sem verificação.** O RH
    autoriza, fica registrado quem autorizou, e ninguém confere se o
    compartilhamento é real. É o desenho certo (recusar sem saída produz número
