@@ -14,24 +14,23 @@
 /sw.js
   Cache-Control: no-cache
 
-# Pagina publica de cadastro de face. MITIGACAO, NAO ISOLAMENTO: a pagina vai
-# para uma origem propria (subdominio), porque IndexedDB e por origem e nao por
-# caminho — ver o comentario em sw.js. Estas regras valem enquanto ela nao
-# estiver mudada, e depois valem no vercel.json da origem nova.
+# Backstop da origem publica. A pagina de cadastro de face vive em origem
+# propria (projeto separado da Vercel, Root Directory publico/) e .vercelignore
+# tira publico/ do deploy do app — entao normalmente nada casa aqui.
 #
-# Link de uso unico e validade curta: servir de cache seria mostrar ao
-# colaborador uma tela que o servidor ja invalidou. no-store vale para o
-# documento e para o JS/CSS dela, que moram no mesmo prefixo — sao poucos KB.
-# no-referrer porque o token viaja no fragmento do link. noindex porque link
-# publico nao entra em buscador.
-# A CSP nao muda: camera, vendor/ e models/ sao da propria origem e ja cabem na
-# politica global — nada a afrouxar.
-/cadastro
+# Estas regras valem para o caso de publico/ escapar para o deploy do app, onde
+# responderia em /publico/*. Link de uso unico servido de cache mostraria ao
+# colaborador uma tela que o servidor ja invalidou; noindex porque link publico
+# nao entra em buscador; no-referrer porque o token viaja no fragmento.
+#
+# A CSP do app nao muda por causa da pagina publica, e nunca mudou: a origem
+# nova tem a sua propria, em publico/vercel.json.
+/publico
   Cache-Control: no-store, must-revalidate
   Referrer-Policy: no-referrer
   X-Robots-Tag: noindex, nofollow
 
-/cadastro/*
+/publico/*
   Cache-Control: no-store, must-revalidate
   Referrer-Policy: no-referrer
   X-Robots-Tag: noindex, nofollow
