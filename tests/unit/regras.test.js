@@ -4,7 +4,8 @@ import {
   tipoDaVez, vereditoPorDistancia, ranquear, precisaRevisao, emCooldown,
   itensParaRemover, agoraCorrigido, calcularDeriva, cargaValida, euclidiana, dia,
   indicadores, espelho, gestorDeveMarcar,
-  presencaPorEquipe, statusPresenca, serieDiaria, pendenciasPorMotivo, LIMIAR_PRESENCA
+  presencaPorEquipe, statusPresenca, serieDiaria, pendenciasPorMotivo, LIMIAR_PRESENCA,
+  separarAparelhos
 } from '../../js/regras.js';
 
 const CFG = { limiarAceite: 0.45, limiarCinza: 0.58 };
@@ -326,4 +327,39 @@ test('pendenciasPorMotivo soma recadastros e ignora nao-pendentes', () => {
   assert.equal(por.gestor, 1);
   assert.equal(por.manual, 0);
   assert.equal(por.recadastro, 1);
+});
+
+/* ---------------------------------------------------- separarAparelhos */
+
+test('separarAparelhos: so pendente e ativo entram, negado e revogado ficam de fora', () => {
+  const { pendentes, aprovados } = separarAparelhos([
+    { dispositivo_id: 'd-pendente', estado: 'pendente', criado_em: '2026-08-10T00:00:00Z' },
+    { dispositivo_id: 'd-ativo', estado: 'ativo', ultimo_uso: '2026-08-19T00:00:00Z' },
+    { dispositivo_id: 'd-negado', estado: 'negado' },
+    { dispositivo_id: 'd-revogado', estado: 'revogado' }
+  ]);
+  assert.deepEqual(pendentes.map(d => d.dispositivo_id), ['d-pendente']);
+  assert.deepEqual(aprovados.map(d => d.dispositivo_id), ['d-ativo']);
+});
+
+test('separarAparelhos: pendentes na ordem de quem espera ha mais tempo', () => {
+  const { pendentes } = separarAparelhos([
+    { dispositivo_id: 'novo', estado: 'pendente', criado_em: '2026-08-19T10:00:00Z' },
+    { dispositivo_id: 'antigo', estado: 'pendente', criado_em: '2026-08-15T10:00:00Z' }
+  ]);
+  assert.deepEqual(pendentes.map(d => d.dispositivo_id), ['antigo', 'novo']);
+});
+
+test('separarAparelhos: aprovados por uso mais recente primeiro, nunca-usado vai pro fim', () => {
+  const { aprovados } = separarAparelhos([
+    { dispositivo_id: 'usado-ha-pouco', estado: 'ativo', ultimo_uso: '2026-08-19T10:00:00Z' },
+    { dispositivo_id: 'nunca-usado', estado: 'ativo', ultimo_uso: null },
+    { dispositivo_id: 'usado-faz-tempo', estado: 'ativo', ultimo_uso: '2026-08-01T10:00:00Z' }
+  ]);
+  assert.deepEqual(aprovados.map(d => d.dispositivo_id), ['usado-ha-pouco', 'usado-faz-tempo', 'nunca-usado']);
+});
+
+test('separarAparelhos: lista vazia ou ausente nao explode', () => {
+  assert.deepEqual(separarAparelhos([]), { pendentes: [], aprovados: [] });
+  assert.deepEqual(separarAparelhos(undefined), { pendentes: [], aprovados: [] });
 });

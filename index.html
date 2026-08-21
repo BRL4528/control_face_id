@@ -30,14 +30,14 @@
      autenticação do RH (usuário + chave PBKDF2) sempre foi independente da
      credencial do aparelho; só o roteamento client-side contrariava isso.
      js/ui.js decide quando mostrar. -->
-<button id="btnAcessar" class="hide">Acessar RH</button>
+<button id="btnAcessar" class="hide">Sou do RH</button>
 
 <!-- ===================== AGUARDANDO LIBERAÇÃO (v3, sem token) ===================== -->
 <div id="aguardando" class="hide" style="max-width:380px;margin:0 auto;padding:14vh 22px 40px;text-align:center">
-  <h1 style="font-size:22px;margin:0 0 10px">Aguardando liberação do RH</h1>
-  <p class="nota" id="aguardandoTexto" style="margin:0 0 22px">Mostre este código para o RH liberar o aparelho.</p>
+  <h1 style="font-size:22px;margin:0 0 10px">Quase lá</h1>
+  <p class="nota" id="aguardandoTexto" style="margin:0 0 22px">Mostre este código para quem cuida do RH — é só isso, você não precisa fazer mais nada agora.</p>
   <div class="mono" id="aguardandoCodigo" style="font-size:38px;font-weight:600;letter-spacing:.06em"></div>
-  <p class="nota" style="margin-top:26px">A tela atualiza sozinha assim que o RH aprovar.</p>
+  <p class="nota" style="margin-top:26px">Assim que for liberado esta tela muda sozinha, sem precisar recarregar. É você que cuida do RH? Toque em "Sou do RH", embaixo.</p>
 </div>
 
 <!-- ===================== FILA (câmera de ponto) ===================== -->
@@ -91,6 +91,7 @@
 
   <nav>
     <button data-aba="painel" class="on">Painel</button>
+    <button data-aba="aparelhos">Aparelhos</button>
     <button data-aba="pendencias">Pendências</button>
     <button data-aba="pessoas">Colaboradores</button>
     <button data-aba="equipes">Equipes</button>
@@ -98,6 +99,7 @@
   </nav>
 
   <section id="rh-painel"></section>
+  <section id="rh-aparelhos" class="hide"></section>
   <section id="rh-pendencias" class="hide"></section>
   <section id="rh-pessoas" class="hide"></section>
   <section id="rh-equipes" class="hide"></section>

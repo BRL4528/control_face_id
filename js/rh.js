@@ -4,7 +4,7 @@ import { Face } from './face.js';
 import { derivar } from './cripto.js';
 import {
   indicadores, espelho, euclidiana,
-  presencaPorEquipe, serieDiaria, pendenciasPorMotivo
+  presencaPorEquipe, serieDiaria, pendenciasPorMotivo, separarAparelhos
 } from './regras.js';
 import { $, esc, mostrar, toast, hora, data } from './ui.js';
 
@@ -71,9 +71,10 @@ export const Rh = {
     this.destruirGraficos();   // troca de aba mata os gráficos da anterior
     $('rhPeriodo').textContent = 'últimos ' + (this.dados.periodo_dias || this.dias) + ' dias';
     document.querySelectorAll('#rh nav button').forEach(b => b.classList.toggle('on', b.dataset.aba === this.aba));
-    ['painel', 'pendencias', 'pessoas', 'equipes', 'registros'].forEach(a =>
+    ['painel', 'aparelhos', 'pendencias', 'pessoas', 'equipes', 'registros'].forEach(a =>
       $('rh-' + a).classList.toggle('hide', a !== this.aba));
     if (this.aba === 'painel') this.pintarPainel();
+    if (this.aba === 'aparelhos') this.pintarAparelhos();
     if (this.aba === 'pendencias') this.pintarPendencias();
     if (this.aba === 'pessoas') this.pintarPessoas();
     if (this.aba === 'equipes') this.pintarEquipes();
@@ -337,6 +338,69 @@ export const Rh = {
         }));
       }
     } else vazio('boxMotivo', 'Nada esperando decisão');
+  },
+
+  /* ----------------------------------------------------- aparelhos */
+
+  // T-87615C: aba que destrava o resto — sem ela, o aparelho gera identidade
+  // própria e fica preso em "Aguardando liberação do RH" pra sempre, porque
+  // não existia rota nem tela onde o RH liberasse (docs/fase3-rh-pessoas.md § A).
+  //
+  // Liberar exige DIGITAR o código que a tela do aparelho mostra — não um
+  // clique em item de lista. É a prova de posse física do ADR (docs/adr-
+  // acesso-v3.md): por isso o código nunca aparece em nenhuma leitura do RH
+  // (nem no card do pendente, nem na rede — servidor-falso.js não devolve
+  // codigo_curto pro RH), e o campo é texto livre, sem datalist/autocomplete,
+  // senão o navegador reconstrói a lista que acabou de ser escondida.
+  pintarAparelhos() {
+    const { pendentes, aprovados } = separarAparelhos(this.dados.dispositivos);
+    const el = $('rh-aparelhos');
+    const linhaAprovado = d => '<div class="linha-item"><span class="ponto ok"></span>' +
+      '<div style="flex:1"><div class="nm">' + esc(d.apelido || d.dispositivo_id) + '</div>' +
+      '<div class="mt">último uso ' + (d.ultimo_uso ? (data(d.ultimo_uso.slice(0, 10)) + ' ' + hora(d.ultimo_uso)) : 'ainda não usou') + '</div></div>' +
+      '<button class="act ghost" style="width:auto;margin:0;padding:9px 12px;font-size:12px" data-aparelho="' + d.dispositivo_id + '" data-acao="revogar">Revogar</button>' +
+      '</div>';
+    const linhaPendente = d => '<div class="linha-item"><span class="ponto muted"></span>' +
+      '<div style="flex:1"><div class="nm">' + esc(d.apelido || d.dispositivo_id) + '</div>' +
+      '<div class="mt">pedindo liberação desde ' + data(String(d.criado_em).slice(0, 10)) + '</div></div>' +
+      '<button class="act ghost" style="width:auto;margin:0;padding:9px 12px;font-size:12px" data-aparelho="' + d.dispositivo_id + '" data-acao="recusar">Recusar</button>' +
+      '</div>';
+
+    el.innerHTML =
+      '<div class="card"><h2>Liberar aparelho</h2>' +
+        '<p class="nota" style="margin:0 0 10px">Peça para a pessoa mostrar o código na tela do aparelho e digite aqui — é a prova de que você está diante do aparelho certo.</p>' +
+        '<label class="lb">Código do aparelho</label>' +
+        '<input type="text" id="aparelhoCodigo" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="6" style="text-transform:uppercase">' +
+        '<button class="act" id="btnLiberarAparelho">Liberar</button>' +
+      '</div>' +
+      '<div class="card"><h2>Pedindo liberação <span class="nota">— ' + pendentes.length + '</span></h2>' +
+        (pendentes.length ? pendentes.map(linhaPendente).join('') : '<p class="nota">Nada esperando decisão.</p>') +
+      '</div>' +
+      '<div class="card"><h2>Liberados <span class="nota">— ' + aprovados.length + '</span></h2>' +
+        (aprovados.length ? aprovados.map(linhaAprovado).join('') : '<p class="nota">Nenhum aparelho liberado ainda.</p>') +
+      '</div>';
+
+    $('btnLiberarAparelho').onclick = async () => {
+      const codigo = $('aparelhoCodigo').value.trim();
+      if (!codigo) { toast('Digite o código mostrado no aparelho', 'warn'); return; }
+      $('btnLiberarAparelho').disabled = true;
+      const r = await ApiRh.aparelho(this.cred, { codigo, acao: 'aprovar' });
+      $('btnLiberarAparelho').disabled = false;
+      if (!r.ok) { toast(r.erro || 'Código inválido', 'bad'); return; }
+      toast('Aparelho liberado', 'ok');
+      await this.recarregar();
+    };
+
+    const rotulo = { recusar: 'Aparelho recusado', revogar: 'Aparelho revogado' };
+    el.querySelectorAll('button[data-aparelho]').forEach(b => {
+      b.onclick = async () => {
+        b.disabled = true;
+        const r = await ApiRh.aparelho(this.cred, { dispositivo_id: b.dataset.aparelho, acao: b.dataset.acao });
+        if (!r.ok) { toast(r.erro || 'Falha', 'bad'); b.disabled = false; return; }
+        toast(rotulo[b.dataset.acao] || 'Atualizado', 'ok');
+        await this.recarregar();
+      };
+    });
   },
 
   /* ----------------------------------------------------- pendências */

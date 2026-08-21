@@ -239,6 +239,23 @@ export function serieDiaria(marcacoes, dias, hoje) {
 }
 
 /**
+ * Aparelhos da aba "Aparelhos" (T-87615C), separados em duas filas e cada uma
+ * ordenada para quem decide primeiro: pendentes do mais antigo para o mais
+ * novo — é quem está esperando há mais tempo — e aprovados do uso mais
+ * recente para o mais antigo, para achar rápido um aparelho esquecido ligado.
+ * Aparelho sem `ultimo_uso` (nunca chamou a API depois de aprovado) vai para
+ * o fim da lista de aprovados, não para o topo.
+ */
+export function separarAparelhos(dispositivos) {
+  const lista = dispositivos || [];
+  const pendentes = lista.filter(d => d && d.estado === 'pendente')
+    .slice().sort((a, b) => String(a.criado_em || '').localeCompare(String(b.criado_em || '')));
+  const aprovados = lista.filter(d => d && d.estado === 'ativo')
+    .slice().sort((a, b) => String(b.ultimo_uso || '').localeCompare(String(a.ultimo_uso || '')));
+  return { pendentes, aprovados };
+}
+
+/**
  * Pendências agrupadas por motivo, para as barras. Uma mesma marcação pode
  * disparar mais de um motivo (manual E relógio fora): conta em cada um, então
  * a soma das barras pode passar do número de pendências. É de propósito — cada
