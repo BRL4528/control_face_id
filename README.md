@@ -197,6 +197,29 @@ Guarda de propriedade sobrevive à refatoração. Guarda de implementação vira
 mentira na primeira limpeza — **e continua verde enquanto mente**, que é o que a
 torna pior que guarda nenhuma.
 
+## Conserto que apaga a prova
+
+O terceiro modo de falha, e ele não é verde falso nem alarme falso: é trocar uma
+assertiva por outra que **parece** equivalente e não prova a mesma coisa. Não
+deixa rastro — o teste continua passando, o diff parece bom, o CI fica verde, e o
+que se perdeu foi a prova que a assertiva antiga carregava.
+
+**A regra prática:** antes de trocar uma assertiva, diga em voz alta **o que a
+antiga provava**, e confirme que a nova prova o mesmo. Se você não consegue
+enunciar o que a antiga provava, ainda não entendeu o que está trocando.
+
+`#aguardando` nasce com `class="hide"` (`index.html:51`), e `mostrar()`
+(`js/ui.js:17`) é quem remove a classe. Então `not.toHaveClass(/hide/)` sobre
+`#aguardando` só passa se o app **ativamente** tirou a classe — a assertiva é
+prova de execução, não de aparência. Trocá-la por algo mais bonito levaria a prova
+embora, com a sensação de estar melhorando o teste.
+
+**E a distinção que impede o padrão:** melhoria sem risco e conserto de defeito
+não são a mesma coisa, e não vão no mesmo cartão. Trocar um `sleep` fixo por uma
+espera por sinal, mantendo a mesma prova, é melhoria legítima — mais rápida, sem
+número arbitrário. Mas se "melhoria" e "conserto" viajam juntas, cria-se o
+precedente de trocar porque *parecia feio*, e a próxima troca leva a prova junto.
+
 ## As guardas de CI, e por que cada uma existe
 
 Guarda sem motivo escrito é guarda que alguém remove por achar burocrática. Cada
