@@ -264,6 +264,8 @@ jobs:
             | grep -vE '^(vendor|models|tests|docs|n8n|\.central-agentes|\.github)/' \
             | grep -v '^package-lock\.json$')
           # publico/ entra de proposito: e a origem publica, o alvo mais exposto.
+          apibase_host=$(grep -oE "apiBase:\s*'https?://[^/']+" js/config.js | grep -oE 'https?://[^/'"'"']+' | head -1)
+          test -n "$apibase_host" || { echo "::error::nao consegui extrair o apiBase de js/config.js"; exit 1; }
           echo "arquivos verificados:"; echo "$publicados" | sed 's/^/  /'
 
           proibidos='cdn\.jsdelivr\.net|unpkg\.com|cdnjs\.cloudflare\.com|fonts\.googleapis\.com|fonts\.gstatic\.com|ajax\.googleapis\.com|code\.jquery\.com|esm\.sh|skypack\.dev|googletagmanager\.com|google-analytics\.com'
@@ -272,12 +274,30 @@ jobs:
             exit 1
           fi
 
-          # Fora do apiBase (js/config.js) e do $schema do vercel.json, nenhum
-          # arquivo publicado tem motivo para citar origem externa.
+          # Fora do apiBase e do $schema do vercel.json, nenhum arquivo publicado
+          # tem motivo para citar origem externa.
+          #
+          # Isentos, e por que cada um: js/config.js e publico/js/config-face.js
+          # sao os arquivos de configuracao de RUNTIME das duas origens — o
+          # apiBase mora neles por desenho, editavel no servidor sem republicar.
+          # vercel.json e publico/vercel.json declaram a CSP, que precisa nomear
+          # o host do apiBase em connect-src.
+          # A isencao e por CAMINHO EXATO, nao por pasta: arquivo novo em
+          # publico/js/ que cite origem externa deve falhar e ser uma decisao,
+          # nao herdar isencao de vizinho.
+          #
+          # E o link do WhatsApp (wa.me) e NAVEGACAO, nao asset: um <a href> nao
+          # carrega script, fonte nem imagem, entao nao e superficie de terceiro.
+          # O contrato preve isso em §4.5 e a nota de la e literalmente para o
+          # DevOps: connect-src e form-action nao se aplicam a navegacao, e nao ha
+          # nada a mudar na CSP. A guarda grepava https?:// sem distinguir asset
+          # de navegacao — o contrato antecipou e a guarda nao sabia.
           sobra=$(grep -nE 'https?://' $publicados \
             | grep -v '^js/config\.js:' \
             | grep -v '^vercel\.json:' \
-            | grep -v '^publico/vercel\.json:' || true)
+            | grep -v '^publico/vercel\.json:' \
+            | grep -vE 'href="https://wa\.me/' \
+            | { grep -v "^publico/js/config-face\.js:.*$apibase_host" || true; } || true)
           if [ -n "$sobra" ]; then
             echo "$sobra"
             echo "::error::origem externa em arquivo publicado — todo asset tem de ser local"
@@ -406,7 +426,17 @@ jobs:
 
           # Nenhuma origem externa. vercel.json e LEIA-ME.md sao excecao: um
           # declara a CSP (que cita o apiBase), o outro e documentacao.
-          if grep -rnE 'https?://' publico/ --include='*.html' --include='*.js' --include='*.css'; then
+          # Isencao por HOST e nao pelo arquivo: config-face.js e a configuracao
+          # de RUNTIME desta origem e o apiBase mora nele por desenho, mas o
+          # RESTO do arquivo nao ganha passe livre. Isentar o arquivo inteiro
+          # deixava passar um fetch para qualquer outro host dentro dele — foi o
+          # que eu fiz primeiro e a sabotagem pegou.
+          # O host permitido sai do proprio js/config.js, entao ha uma fonte so.
+          apibase_host=$(grep -oE "apiBase:\s*'https?://[^/']+" js/config.js | grep -oE 'https?://[^/'"'"']+' | head -1)
+          test -n "$apibase_host" || { echo "::error::nao consegui extrair o apiBase de js/config.js — sem isso a isencao ficaria cega"; exit 1; }
+          echo "host permitido (apiBase de js/config.js): $apibase_host"
+          if grep -rnE 'https?://' publico/ --include='*.html' --include='*.js' --include='*.css' \
+               | grep -vF "$apibase_host"; then
             echo "::error::a origem publica nao pode citar origem externa — motor, fontes e modelos vem do build"
             exit 1
           fi

@@ -126,6 +126,8 @@ publico/                Root Directory de OUTRO projeto da Vercel: a origem
 
 **Não há prova de vida (liveness).** É intencional: foto na tela passa. Serve para justificar liveness certificado ISO/IEC 30107-3 Level 2 no sistema real, onde o adversário é o próprio gestor.
 
+**Estado de UI nunca se distingue só por cor.** Sempre acompanha de conteúdo real — texto ou ícone como caractere, nunca `::before`/CSS puro — pra sobreviver a folha de estilo que não carrega e a leitor de tela. Convenção de traço: vazio/incompleto pede borda tracejada (convite a preencher), falhou/erro pede borda sólida (estado definitivo) — ajuda daltonismo independente de cor.
+
 ## Não inferir de ausência
 
 Leia isto antes de mexer nas guardas, e antes de escrever teste, campo ou
@@ -163,6 +165,11 @@ ser nomes distintos. Trocar um pelo outro ao substituir texto faz as duas origen
 virarem uma, o `IndexedDB` (`js/store.js:10`) volta a ser compartilhado, e **nada
 acende** — a página continua funcionando. A ausência de sintoma seria lida como
 isolamento em pé.
+
+Vale também para o **preparo** de um teste, não só para a assertiva: passo de
+preparo que falha em silêncio — erro engolido por `2>&1`, flag inválida, `cd` que
+não aconteceu — faz o teste medir outra coisa, e o resultado parece legítimo.
+Confira o código de saída do preparo, não só o do alvo.
 
 O corolário que mais custa caro: **detector que mente é pior que detector
 ausente.** Um teste que não existe deixa a pessoa desconfiada; um teste verde que

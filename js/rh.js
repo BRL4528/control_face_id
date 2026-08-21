@@ -835,6 +835,11 @@ export const Rh = {
       (p.ativo
         ? '<div class="card"><h2>Biometria</h2>' +
             '<button class="act ghost" id="btnAbrirBio">' + (p.tem_biometria ? 'Refazer biometria' : 'Cadastrar biometria') + '</button>' +
+            (p.telefone_compartilhado
+              ? '<p class="nota" style="margin-top:8px">Telefone compartilhado — o link não pode ser enviado (não há como saber ' +
+                  'quem vai abrir). Use a câmera ou o upload de fotos acima.</p>'
+              : '<button class="act ghost" id="btnEnviarLink" style="margin-top:8px">Enviar link pro celular</button>') +
+            '<div id="areaLink"></div>' +
             '<div id="areaBio"></div>' +
           '</div>' +
           '<div class="card"><h2>Inativar</h2>' +
@@ -856,6 +861,8 @@ export const Rh = {
     $('btnSalvarPessoa').onclick = () => this.salvarPessoa(p);
     const btnBio = $('btnAbrirBio');
     if (btnBio) btnBio.onclick = () => this.abrirBiometria(p.pessoa_id);
+    const btnLink = $('btnEnviarLink');
+    if (btnLink) btnLink.onclick = () => this.enviarLinkFace(p);
     const campoMotivo = $('motivoInativar');
     const btnInativar = $('btnInativarPessoa');
     if (campoMotivo && btnInativar) {
@@ -1172,6 +1179,35 @@ export const Rh = {
     toast('Fotos enviadas — aguardando aprovação do RH', 'ok');
     $('areaBio').innerHTML = '';
     await this.recarregar();
+  },
+
+  /* -------------------------------------------------- biometria: link */
+
+  /**
+   * Terceiro caminho de cadastro de face (T-D30529, docs/fase3-contrato.md
+   * §4.4/§4.5): emite o convite de uso único e mostra "Abrir no WhatsApp" +
+   * "Copiar link" — o servidor não manda mensagem nesta rodada (§4.5), quem
+   * entrega é o RH, fora de banda.
+   */
+  async enviarLinkFace(p) {
+    $('btnEnviarLink').disabled = true;
+    const r = await ApiRh.faceConvite(this.cred, {
+      pessoa_id: p.pessoa_id, canal: 'copiar', idempotency_key: this.idempotencyKeyNova()
+    });
+    $('btnEnviarLink').disabled = false;
+    if (!r.ok) { toast(r.erro || 'Falha ao gerar link', 'bad'); return; }
+
+    const { url, telefone_mascarado } = r.dados;
+    const digitos = String(p.telefone || '').replace(/\D/g, '');
+    const textoWa = encodeURIComponent('Oi! Segue o link para cadastrar seu rosto no ponto: ' + url);
+    $('areaLink').innerHTML =
+      '<p class="nota" style="margin-top:8px">Link gerado para ' + esc(telefone_mascarado) + ', válido por 30 minutos.</p>' +
+      (digitos ? '<a class="act" href="https://wa.me/' + digitos + '?text=' + textoWa + '" target="_blank" rel="noopener">Abrir no WhatsApp</a>' : '') +
+      '<button class="act ghost" id="btnCopiarLink">Copiar link</button>';
+    $('btnCopiarLink').onclick = async () => {
+      try { await navigator.clipboard.writeText(url); toast('Link copiado', 'ok'); }
+      catch (e) { toast('Não consegui copiar — selecione o link manualmente', 'warn'); }
+    };
   },
 
   /* --------------------------------------------------------- equipes */

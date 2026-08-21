@@ -74,7 +74,14 @@ export const ApiRh = {
   // como RH, não com credencial de aparelho — corrige js/rh.js pegar
   // emprestada a credencial de um dispositivo que pode nem existir num PC que
   // nunca se cadastrou. `dados.idempotency_key` é obrigatório (C2 do contrato).
-  faceCadastrar(cred, dados) { return postRh('/efrat/rh/face/cadastrar', Object.assign({}, cred, dados)); }
+  faceCadastrar(cred, dados) { return postRh('/efrat/rh/face/cadastrar', Object.assign({}, cred, dados)); },
+  // Link de uso único pro celular (T-D30529, §4.4/§4.5) — terceiro caminho de
+  // cadastro de face. `faceConvites` nunca devolve token nem URL (mesma regra
+  // do código curto de aparelho, §1.1); o valor claro só aparece uma vez, na
+  // resposta de `faceConvite`.
+  faceConvite(cred, dados) { return postRh('/efrat/rh/face/convite', Object.assign({}, cred, dados)); },
+  faceConvites(cred) { return postRh('/efrat/rh/face/convites', Object.assign({}, cred)); },
+  faceConviteRevogar(cred, dados) { return postRh('/efrat/rh/face/convite/revogar', Object.assign({}, cred, dados)); }
 };
 
 /**

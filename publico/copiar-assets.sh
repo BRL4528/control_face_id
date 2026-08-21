@@ -17,7 +17,7 @@ test -d "$raiz/vendor" || { echo "ERRO: nao achei ../vendor — ligue 'incluir a
 test -d "$raiz/models" || { echo "ERRO: nao achei ../models — mesma causa"; exit 1; }
 
 rm -rf dist
-mkdir -p dist/vendor dist/models
+mkdir -p dist/vendor dist/models dist/js
 
 # Só o que a pagina publica usa. chart.umd.min.js e do painel do RH e NAO vem:
 # codigo de terceiro que ninguem executa nao tem porque existir numa origem
@@ -26,10 +26,20 @@ cp "$raiz/vendor/face-api.js" dist/vendor/
 cp -r "$raiz/vendor/fontes" dist/vendor/fontes
 cp "$raiz"/models/* dist/models/
 
-# A pagina em si (o que o Full-Stack escreve nesta pasta).
-for f in index.html *.js *.css; do
+# Fecho de import da pagina publica (docs/fase3-contrato.md §4.6): so estes
+# quatro arquivos do app entram, e so eles -- fonte de verdade unica, sem
+# segunda copia commitada. modelo.js entra alem do que o diagrama original de
+# §4.6 previa: js/face.js importa calcularModeloId de la (T-8ADD9C §4.7),
+# dependencia transitiva que nasceu depois do contrato ser escrito.
+for f in face.js regras.js ui.js modelo.js; do
+  cp "$raiz/js/$f" dist/js/
+done
+
+# A pagina em si, e o js dela (o que o Full-Stack escreve nesta pasta).
+for f in index.html *.css; do
   [ -e "$f" ] && cp "$f" dist/ || true
 done
+cp js/*.js dist/js/
 
 echo "dist/ montado:"
 find dist -type f | sed 's/^/  /' | head -40
