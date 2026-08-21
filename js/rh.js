@@ -3,7 +3,7 @@ import { Api, ApiRh } from './api.js';
 import { Face } from './face.js';
 import { derivar } from './cripto.js';
 import {
-  indicadores, espelho, euclidiana,
+  indicadores, espelho,
   presencaPorEquipe, serieDiaria, pendenciasPorMotivo, separarAparelhos
 } from './regras.js';
 import { $, esc, mostrar, toast, hora, data } from './ui.js';
@@ -441,7 +441,12 @@ export const Rh = {
 
     const cartaoFace = (t, ehSubstituicao) => {
       const p = pessoaDe(t);
-      const viaLink = t.origem === 'link';
+      // T-89E18B: os DOIS caminhos sem ninguém do RH acompanhando a captura
+      // precisam do aviso — link (celular do colaborador) E upload (a foto já
+      // existe pronta, é o caminho mais fácil pra foto-de-foto, e é o que o RH
+      // usa justamente quando o colaborador está longe — menos como saber de
+      // onde a imagem veio). Só rh_camera tem RH presente na captura; essa não avisa.
+      const semSupervisao = t.origem === 'link' ? 'link' : (t.origem === 'rh_upload' ? 'upload' : null);
       const gate = 'gate-' + t.template_id;
       return '<div class="pend pendface">' +
         '<div class="top"><div style="flex:1">' +
@@ -458,7 +463,8 @@ export const Rh = {
           // booleano, é ausência mesmo. Continua persistido e devolvido nas
           // rotas de escrita, para auditoria e recalibração (T-8ADD9C).
           '<div class="mt">versão ' + t.versao +
-            (viaLink ? ' · <span class="tag">via link do celular</span>' : '') + '</div>' +
+            (semSupervisao === 'link' ? ' · <span class="tag">via link do celular</span>' : '') +
+            (semSupervisao === 'upload' ? ' · <span class="tag">via upload de fotos</span>' : '') + '</div>' +
         '</div></div>' +
         '<div class="fotos">' +
           (ehSubstituicao
@@ -466,8 +472,13 @@ export const Rh = {
             : '') +
           (t.miniatura ? '<img src="' + t.miniatura + '">' : '<div class="vazio">novo</div>') +
         '</div>' +
-        (viaLink ? '<p class="nota aviso">Confira se é a pessoa certa. Este cadastro veio pelo celular do ' +
+        (semSupervisao === 'link' ? '<p class="nota aviso">Confira se é a pessoa certa. Este cadastro veio pelo celular do ' +
           'colaborador e ninguém do RH acompanhou a captura.</p>' : '') +
+        // Texto fechado com o Designer (750f40fef8, T-89E18B): mesma unidade
+        // estrutural do texto de "via link" — "este cadastro" (evento único),
+        // fecha igual em "ninguém do RH acompanhou a captura".
+        (semSupervisao === 'upload' ? '<p class="nota aviso">Confira se é a pessoa certa. Este cadastro veio de ' +
+          'arquivos já prontos, e ninguém do RH acompanhou a captura.</p>' : '') +
         '<label class="lb gate"><input type="checkbox" id="' + gate + '"> ' +
           (ehSubstituicao ? 'Comparei as duas fotos: é a mesma pessoa.' : 'Conferi a foto: é a pessoa certa.') +
         '</label>' +
@@ -811,10 +822,6 @@ export const Rh = {
 
   async salvarBiometria() {
     const c = this.capturas;
-    const coer = Math.max(
-      euclidiana(c[0].descritor, c[1].descritor),
-      euclidiana(c[0].descritor, c[2].descritor),
-      euclidiana(c[1].descritor, c[2].descritor));
     $('btnSalvarBio').disabled = true;
     const p = this.alvoCadastro;
     // versao_cadastro precisa ir junto (§3.2): sem ela o servidor recusa com
@@ -825,14 +832,16 @@ export const Rh = {
       equipe_id: p.equipe_id, papel: p.papel
     });
     if (!r.ok) { toast(r.erro || 'Falha', 'bad'); $('btnSalvarBio').disabled = false; return; }
+    // T-4B538E: coerência é calculada e decidida no servidor (§4.2 do
+    // contrato) — mandar um número calculado aqui era campo morto que parecia
+    // vivo: o servidor sempre ignorou e recalculou o dele.
     const bio = await Api.cadastrar(this._dispositivo.dispositivo_id, this._dispositivo.credencial, {
       origem: 'rh', pessoa_id: p.pessoa_id, nome: p.nome, matricula: p.matricula,
-      equipe_id: p.equipe_id, vetores: c.map(x => x.descritor),
-      miniatura: c[0].thumb, coerencia: Number(coer.toFixed(4))
+      equipe_id: p.equipe_id, vetores: c.map(x => x.descritor), miniatura: c[0].thumb
     });
     $('btnSalvarBio').disabled = false;
     if (!bio.ok) { toast(bio.erro || 'Falha ao gravar biometria', 'bad'); return; }
-    toast('Biometria salva (coerência ' + coer.toFixed(3) + ')', 'ok');
+    toast('Biometria salva', 'ok');
     this.pararCamCad();
     $('areaBio').innerHTML = '';
     await this.recarregar();
