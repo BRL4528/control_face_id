@@ -15,5 +15,13 @@ ocupado=0
 [ -n "${alvo// /}" ] && { echo "OCUPADO playwright: $alvo"; ocupado=1; }
 [ -n "${chrome// /}" ] && { echo "OCUPADO navegador: $chrome"; ocupado=1; }
 [ -n "${serve// /}" ] && { echo "servidor de serve de pe: $serve (derrube quando terminar)"; }
-[ "$ocupado" = 0 ] && echo "LIVRE  $(date -Is)"
+if [ "$ocupado" = 0 ]; then
+  echo "LIVRE  $(date -Is)"
+  echo
+  echo "  Isto e UMA FOTO deste instante, nao procedencia da sua rodada:"
+  echo "  alguem pode entrar um segundo depois. Vale como CONDICAO DE ENTRADA."
+  echo "  Ao reportar numero, use uma das duas frases:"
+  echo "    - \"janela travada, todos confirmaram parada\"  <- medicao valida"
+  echo "    - \"sem travar janela, pista LIVRE na entrada\"  <- honesta, nao valida"
+fi
 exit 0
