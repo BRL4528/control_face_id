@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Diz se a pista de testes esta livre. Existe porque a versao "todos lembram"
+# falhou no mesmo dia em que foi escrita, com o autor da regra: rodar o pgrep
+# no MESMO comando que o resto do script faz o argv do bash casar com o proprio
+# padrao, e aparece um processo que e voce. Regra que depende de memoria falha
+# exatamente quando a atencao esta em outro lugar, que e sempre que ela importa.
+#
+# Cobre os dois recursos, nao so playwright: o navegador visivel (Chrome da flag
+# NAVEGADOR) compete pelo mesmo CPU e nao aparece num filtro por "playwright".
+set -u
+alvo=$(pgrep -f '[p]laywright test' | tr '\n' ' ')
+chrome=$(pgrep -f '[c]hrome --.*--remote-debugging|[c]hromium.*--headless' | tr '\n' ' ')
+serve=$(pgrep -f '[t]ests/e2e/servir.js' | tr '\n' ' ')
+ocupado=0
+[ -n "${alvo// /}" ] && { echo "OCUPADO playwright: $alvo"; ocupado=1; }
+[ -n "${chrome// /}" ] && { echo "OCUPADO navegador: $chrome"; ocupado=1; }
+[ -n "${serve// /}" ] && { echo "servidor de serve de pe: $serve (derrube quando terminar)"; }
+[ "$ocupado" = 0 ] && echo "LIVRE  $(date -Is)"
+exit 0
