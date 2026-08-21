@@ -28,10 +28,25 @@ async function post(rota, corpo, { credencial, timeoutMs = 30000, idempotencyKey
   }
 }
 
+// Erro de rota RH vem em duas formas: string solta (rotas antigas) ou
+// { codigo, mensagem, campo? } (rotas novas de T-87615C/T-8188C6, via erro()
+// em servidor-falso.js). `erro` sai sempre como texto pronto pro toast;
+// `codigo` sai só quando a forma nova mandou um, pra quem precisa decidir por
+// código (ex.: TELEFONE_DUPLICADO abre o fluxo de autorização em vez de só
+// mostrar a mensagem). `detalhe` é o corpo inteiro do erro, pros campos extra
+// que só a forma nova manda (membros_ativos, pessoa_id/nome do duplicado,
+// registro_atual do CADASTRO_DESATUALIZADO).
 async function postRh(rota, corpo) {
   const r = await post(rota, corpo);
   if (!r.ok || !r.json || !r.json.ok) {
-    return { ok: false, status: r.status, erro: (r.json && r.json.erro) || ('HTTP ' + r.status) };
+    const bruto = r.json && r.json.erro;
+    const objeto = bruto && typeof bruto === 'object';
+    return {
+      ok: false, status: r.status,
+      erro: objeto ? (bruto.mensagem || 'HTTP ' + r.status) : (bruto || 'HTTP ' + r.status),
+      codigo: objeto ? (bruto.codigo || null) : null,
+      detalhe: r.json || null
+    };
   }
   return { ok: true, dados: r.json };
 }
@@ -41,6 +56,10 @@ export const ApiRh = {
   dados(cred, dias) { return postRh('/efrat/rh/dados', Object.assign({ dias: dias || 30 }, cred)); },
   equipe(cred, dados) { return postRh('/efrat/rh/equipe', Object.assign({}, cred, dados)); },
   colaborador(cred, dados) { return postRh('/efrat/rh/colaborador', Object.assign({}, cred, dados)); },
+  // §3.3 do contrato: ligar/desligar pessoa é rota própria, nunca campo do
+  // corpo de /rh/colaborador (ativo ali dá 400 CAMPO_NAO_EDITAVEL).
+  colaboradorInativar(cred, dados) { return postRh('/efrat/rh/colaborador/inativar', Object.assign({}, cred, dados)); },
+  colaboradorReativar(cred, dados) { return postRh('/efrat/rh/colaborador/reativar', Object.assign({}, cred, dados)); },
   decidir(cred, dados) { return postRh('/efrat/rh/decidir', Object.assign({}, cred, dados)); },
   // acao: 'aprovar' | 'recusar' | 'revogar' (T-87615C, docs/fase3-rh-pessoas.md § A).
   aparelho(cred, dados) { return postRh('/efrat/rh/aparelho', Object.assign({}, cred, dados)); }

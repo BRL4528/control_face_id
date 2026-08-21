@@ -400,6 +400,7 @@ test('RH cria equipe e colaborador', async ({ page }) => {
   await page.click('#rh nav button[data-aba="pessoas"]');
   await page.fill('#pNome', 'Novo Colaborador');
   await page.fill('#pMat', '777');
+  await page.fill('#pTelefone', '67998760001');   // T-8188C6: telefone é obrigatório na criação
   await page.click('#btnNovaPessoa');
   await expect(page.locator('#toast')).toContainText('salvo', { timeout: 15000 });
   expect(ctx.estado.colaboradoresCriados).toContain('Novo Colaborador');

@@ -321,15 +321,31 @@ async function boot() {
   });
   setInterval(() => sincronizarFundo(), cfg().syncIntervalMs);
 
-  await verificarDispositivo();
-
+  // #porta não nasce mais visível (era a única das seis telas que nascia —
+  // achado do QA sobre offline.spec.js): sem este catch, uma exceção aqui
+  // (assegurarIdentidade()/Api.estadoDispositivo() fora do que
+  // verificarDispositivo() já trata) deixaria a tela em branco em vez da
+  // porta falsamente utilizável de antes — os dois erram fechado, mas só um
+  // diz ao usuário o que fazer.
+  let falhouIniciar = false;
   try {
-    await Face.carregar('./models');
+    await verificarDispositivo();
   } catch (e) {
-    statusPorta('Falha ao carregar o reconhecimento.', 'badfg');
+    mostrar('falhaBoot');
+    falhouIniciar = true;
   }
-  if (S.dispositivo && S.dispositivo.info) await irParaPorta();
 
+  if (!falhouIniciar) {
+    try {
+      await Face.carregar('./models');
+    } catch (e) {
+      statusPorta('Falha ao carregar o reconhecimento.', 'badfg');
+    }
+    if (S.dispositivo && S.dispositivo.info) await irParaPorta();
+  }
+
+  // Registra mesmo se o boot falhou: é o que dá à próxima visita (depois de
+  // "feche e abra de novo") uma chance melhor de funcionar offline.
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
 }
 

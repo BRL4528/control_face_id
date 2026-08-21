@@ -15,6 +15,8 @@ export const Rh = {
   aoSair: null,
   capturas: [],
   alvoCadastro: null,
+  pessoaAberta: null,   // T-8188C6: ficha da pessoa aberta na aba Colaboradores
+  equipeAberta: null,   // T-8188C6: detalhe da equipe aberto na aba Equipes
   dias: 30,          // período ativo do painel (7 / 30 / 90)
   _charts: [],       // instâncias Chart.js vivas, destruídas ao repintar
   _Chart: null,      // biblioteca carregada sob demanda
@@ -57,7 +59,11 @@ export const Rh = {
     });
     const atu = $('btnAtualizarRh');
     if (atu) atu.onclick = () => this.recarregar();
-    $('btnSairRh').onclick = () => { this.destruirGraficos(); this.cred = null; this.dados = null; this.aoSair(); };
+    $('btnSairRh').onclick = () => {
+      this.destruirGraficos(); this.cred = null; this.dados = null;
+      this.pessoaAberta = null; this.equipeAberta = null;
+      this.aoSair();
+    };
     this.pintar();
   },
 
@@ -441,8 +447,17 @@ export const Rh = {
         '<div class="top"><div style="flex:1">' +
           '<div class="nm"><b>' + (ehSubstituicao ? 'Substituição de biometria' : 'Primeiro cadastro') +
             '</b> · ' + esc(p.nome || t.pessoa_id) + '</div>' +
-          '<div class="mt">versão ' + t.versao + ' · coerência ' +
-            (t.coerencia == null ? '—' : Number(t.coerencia).toFixed(3)) +
+          // Coerência sai da TELA como decimal (correção do Orquestrador) E
+          // sem virar sinal nenhum no lugar: a faixa aceita (abaixo de 0,45) é
+          // ocupada por variação legítima de adorno — boné 0,169, capuz 0,253,
+          // capacete de obra 0,257, óculos escuros 0,422, máscara 0,440, todas
+          // de MESMA pessoa contra template limpo (README). Num cliente de
+          // engenharia, onde capacete é o normal, um corte dentro dessa faixa
+          // acenderia no caso comum — aviso que acende sempre treina o RH a
+          // ignorar. Não há corte que preste; por isso não é número nem
+          // booleano, é ausência mesmo. Continua persistido e devolvido nas
+          // rotas de escrita, para auditoria e recalibração (T-8ADD9C).
+          '<div class="mt">versão ' + t.versao +
             (viaLink ? ' · <span class="tag">via link do celular</span>' : '') + '</div>' +
         '</div></div>' +
         '<div class="fotos">' +
@@ -517,45 +532,223 @@ export const Rh = {
 
   /* ---------------------------------------------------- colaboradores */
 
+  // T-8188C6: linha da lista é um botão só (mesmo padrão de .linha-item que
+  // a aba Aparelhos já usa) — abre a ficha da pessoa, onde vivem edição,
+  // inativar/reativar e biometria juntos. Sem nada clicável dentro de
+  // clicável: nunca dá pra aninhar <button>.
+  linhaPessoa(p) {
+    return '<button type="button" class="linha-item" data-pessoa="' + p.pessoa_id + '">' +
+      (p.miniatura ? '<img src="' + p.miniatura + '">' : '<span class="ponto ' + (p.ativo ? 'muted' : 'bad') + '"></span>') +
+      '<div style="flex:1;text-align:left"><div class="nm">' + esc(p.nome) +
+        (p.papel === 'gestor' ? ' <span class="tag">gestor</span>' : '') +
+        (p.ativo ? '' : ' <span class="tag">inativo</span>') +
+        (p.telefone_compartilhado ? ' <span class="tag">telefone compartilhado</span>' : '') + '</div>' +
+      '<div class="mt">' + esc(p.matricula) + ' · ' + esc(this.nomeEquipe(p.equipe_id)) +
+        (p.tem_biometria ? '' : ' · <span class="warnfg">sem biometria</span>') + '</div></div>' +
+      '</button>';
+  },
+
   pintarPessoas() {
-    const eqs = this.dados.equipes || [];
+    if (this.pessoaAberta) return this.pintarPessoaDetalhe();
+    const eqs = (this.dados.equipes || []).filter(e => e.ativo);
     const lista = (this.dados.pessoas || []).slice().sort((a, b) => a.nome.localeCompare(b.nome));
     $('rh-pessoas').innerHTML =
       '<div class="card"><h2>Novo colaborador</h2>' +
         '<label class="lb">Nome</label><input type="text" id="pNome">' +
         '<label class="lb">Matrícula</label><input type="text" id="pMat">' +
-        '<label class="lb">Equipe</label><select id="pEquipe">' +
+        '<label class="lb">Telefone (celular)</label><input type="text" id="pTelefone" placeholder="(67) 99876-5432">' +
+        '<label class="lb">Equipe</label><select id="pEquipe"><option value="">Sem equipe</option>' +
           eqs.map(e => '<option value="' + e.equipe_id + '">' + esc(e.nome) + '</option>').join('') + '</select>' +
         '<label class="lb">Papel</label><select id="pPapel">' +
           '<option value="colaborador">Colaborador</option><option value="gestor">Gestor</option></select>' +
-        '<button class="act" id="btnNovaPessoa">Salvar</button></div>' +
-      '<div class="card"><h2>Cadastrados <span class="nota">— ' + lista.length + '</span></h2>' +
-        lista.map(p =>
-          '<div class="linha-item">' +
-          (p.miniatura ? '<img src="' + p.miniatura + '">' : '<span class="ponto ' + (p.ativo ? 'muted' : 'bad') + '"></span>') +
-          '<div style="flex:1"><div class="nm">' + esc(p.nome) +
-            (p.papel === 'gestor' ? ' <span class="tag">gestor</span>' : '') +
-            (p.ativo ? '' : ' <span class="tag">inativo</span>') + '</div>' +
-          '<div class="mt">' + esc(p.matricula) + ' · ' + esc(this.nomeEquipe(p.equipe_id)) +
-            (p.tem_biometria ? '' : ' · <span class="warnfg">sem biometria</span>') + '</div></div>' +
-          '<button class="act ghost" style="width:auto;margin:0;padding:9px 12px;font-size:12px" data-bio="' + p.pessoa_id + '">' +
-            (p.tem_biometria ? 'Refazer' : 'Biometria') + '</button>' +
-          '</div>').join('') +
+        '<button class="act" id="btnNovaPessoa">Salvar</button>' +
+        '<div id="pConflito"></div>' +
       '</div>' +
-      '<div id="areaBio"></div>';
+      '<div class="card"><h2>Cadastrados <span class="nota">— ' + lista.length + '</span></h2>' +
+        lista.map(p => this.linhaPessoa(p)).join('') +
+      '</div>';
 
-    $('btnNovaPessoa').onclick = async () => {
-      const r = await ApiRh.colaborador(this.cred, {
-        nome: $('pNome').value.trim(), matricula: $('pMat').value.trim(),
-        equipe_id: $('pEquipe').value, papel: $('pPapel').value
-      });
-      if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
-      toast('Colaborador salvo', 'ok');
-      await this.recarregar();
-    };
-    $('rh-pessoas').querySelectorAll('button[data-bio]').forEach(b => {
-      b.onclick = () => this.abrirBiometria(b.dataset.bio);
+    $('btnNovaPessoa').onclick = () => this.criarPessoa();
+    $('rh-pessoas').querySelectorAll('button[data-pessoa]').forEach(b => {
+      b.onclick = () => { this.pessoaAberta = b.dataset.pessoa; this.pintar(); };
     });
+  },
+
+  async criarPessoa(autorizacao) {
+    const dados = Object.assign({
+      nome: $('pNome').value.trim(), matricula: $('pMat').value.trim(),
+      telefone: $('pTelefone').value.trim(),
+      equipe_id: $('pEquipe').value || null, papel: $('pPapel').value
+    }, autorizacao || {});
+    $('btnNovaPessoa').disabled = true;
+    const r = await ApiRh.colaborador(this.cred, dados);
+    $('btnNovaPessoa').disabled = false;
+    if (!r.ok) {
+      if (r.codigo === 'TELEFONE_DUPLICADO') { this.pedirAutorizacaoTelefone('pConflito', r, a => this.criarPessoa(Object.assign({}, dados, a))); return; }
+      toast(r.erro || 'Falha', 'bad');
+      return;
+    }
+    $('pConflito').innerHTML = '';
+    toast('Colaborador salvo', 'ok');
+    await this.recarregar();
+  },
+
+  /**
+   * Diálogo de autorização de telefone duplicado (§3.1, texto fechado com o
+   * Designer): nomeia quem já usa o número, exige motivo de 10-200
+   * caracteres, botão só destrava com 10+. `aoConfirmar(autorizacao)` recebe
+   * `{ autorizar_telefone_duplicado: true, motivo_telefone_duplicado }`.
+   */
+  pedirAutorizacaoTelefone(elId, respostaErro, aoConfirmar) {
+    const nome = respostaErro.detalhe && respostaErro.detalhe.nome;
+    $(elId).innerHTML =
+      '<div class="card" style="margin-top:12px;border-color:var(--ambar)">' +
+        '<p class="nota" style="margin:0 0 10px">Autorizando, esta pessoa fica cadastrada com o mesmo celular de <b>' +
+          esc(nome || 'outra pessoa') + '</b> — e não vai poder receber o link de cadastro de face enquanto o número ' +
+          'for compartilhado. O rosto dela terá de ser cadastrado aqui, pela câmera do computador ou por upload de fotos.</p>' +
+        '<label class="lb">Por que autorizar mesmo assim?</label>' +
+        '<textarea id="motivoTelDup" rows="2" placeholder="ex.: pai e filho no mesmo canteiro, um celular só" style="width:100%;box-sizing:border-box"></textarea>' +
+        '<button class="act" id="btnAutorizarTelDup" disabled style="margin-top:10px">Salvar mesmo assim</button>' +
+      '</div>';
+    const campo = $('motivoTelDup');
+    const botao = $('btnAutorizarTelDup');
+    campo.oninput = () => { botao.disabled = campo.value.trim().length < 10; };
+    botao.onclick = () => aoConfirmar({ autorizar_telefone_duplicado: true, motivo_telefone_duplicado: campo.value.trim() });
+  },
+
+  /* -------------------------------------------------------- ficha da pessoa */
+
+  pintarPessoaDetalhe() {
+    const p = (this.dados.pessoas || []).find(x => x.pessoa_id === this.pessoaAberta);
+    if (!p) { this.pessoaAberta = null; return this.pintarPessoas(); }
+    const eqs = (this.dados.equipes || []).filter(e => e.ativo || e.equipe_id === p.equipe_id);
+    $('rh-pessoas').innerHTML =
+      '<button type="button" class="act ghost" id="btnVoltarPessoas" style="width:auto;margin-bottom:12px">← Colaboradores</button>' +
+      '<div class="card"><h2>' + esc(p.nome) + (p.ativo ? '' : ' <span class="tag">inativo</span>') + '</h2>' +
+        (p.telefone_compartilhado
+          ? '<p class="nota" style="margin:0 0 10px">Telefone compartilhado com <b>' +
+              p.telefone_compartilhado_com.map(o => esc(o.nome)).join(', ') + '</b>.</p>'
+          : '') +
+        '<label class="lb">Nome</label><input type="text" id="pdNome" value="' + esc(p.nome) + '">' +
+        '<label class="lb">Matrícula</label><input type="text" id="pdMat" value="' + esc(p.matricula) + '">' +
+        '<label class="lb">Telefone (celular)</label><input type="text" id="pdTelefone" value="' + esc(p.telefone || '') + '">' +
+        '<label class="lb">Equipe</label><select id="pdEquipe"><option value="">Sem equipe</option>' +
+          eqs.map(e => '<option value="' + e.equipe_id + '"' + (e.equipe_id === p.equipe_id ? ' selected' : '') + '>' + esc(e.nome) + '</option>').join('') + '</select>' +
+        '<label class="lb">Papel</label><select id="pdPapel">' +
+          '<option value="colaborador"' + (p.papel === 'colaborador' ? ' selected' : '') + '>Colaborador</option>' +
+          '<option value="gestor"' + (p.papel === 'gestor' ? ' selected' : '') + '>Gestor</option></select>' +
+        '<button class="act" id="btnSalvarPessoa">Salvar</button>' +
+        '<div id="pdConflito"></div>' +
+      '</div>' +
+      (p.ativo
+        ? '<div class="card"><h2>Biometria</h2>' +
+            '<button class="act ghost" id="btnAbrirBio">' + (p.tem_biometria ? 'Refazer biometria' : 'Cadastrar biometria') + '</button>' +
+            '<div id="areaBio"></div>' +
+          '</div>' +
+          '<div class="card"><h2>Inativar</h2>' +
+            '<p class="nota" style="margin:0 0 10px">A pessoa sai da carga e para de bater ponto. O histórico continua ' +
+              'intacto. Reativar exige cadastrar o rosto de novo.</p>' +
+            '<label class="lb">Por quê?</label>' +
+            '<textarea id="motivoInativar" rows="2" placeholder="motivo do desligamento ou afastamento" style="width:100%;box-sizing:border-box"></textarea>' +
+            '<button class="act danger" id="btnInativarPessoa" disabled style="margin-top:10px">Inativar</button>' +
+          '</div>'
+        : '<div class="card"><h2>Reativar</h2>' +
+            '<p class="nota" style="margin:0 0 10px">Volta a poder bater ponto, mas sem biometria — cadastre o rosto de ' +
+              'novo depois de reativar.</p>' +
+            '<label class="lb">Telefone (celular)</label><input type="text" id="reativarTelefone" value="' + esc(p.telefone || '') + '">' +
+            '<button class="act" id="btnReativarPessoa">Reativar</button>' +
+            '<div id="reativarConflito"></div>' +
+          '</div>');
+
+    $('btnVoltarPessoas').onclick = () => { this.pessoaAberta = null; this.pintar(); };
+    $('btnSalvarPessoa').onclick = () => this.salvarPessoa(p);
+    const btnBio = $('btnAbrirBio');
+    if (btnBio) btnBio.onclick = () => this.abrirBiometria(p.pessoa_id);
+    const campoMotivo = $('motivoInativar');
+    const btnInativar = $('btnInativarPessoa');
+    if (campoMotivo && btnInativar) {
+      campoMotivo.oninput = () => { btnInativar.disabled = campoMotivo.value.trim().length < 10; };
+      btnInativar.onclick = () => this.inativarPessoa(p, campoMotivo.value.trim());
+    }
+    const btnReativar = $('btnReativarPessoa');
+    if (btnReativar) btnReativar.onclick = () => this.reativarPessoa(p);
+  },
+
+  async salvarPessoa(p) {
+    const dados = {
+      pessoa_id: p.pessoa_id, versao_cadastro: p.versao_cadastro,
+      nome: $('pdNome').value.trim(), matricula: $('pdMat').value.trim(), telefone: $('pdTelefone').value.trim(),
+      equipe_id: $('pdEquipe').value || null, papel: $('pdPapel').value
+    };
+    $('btnSalvarPessoa').disabled = true;
+    const r = await ApiRh.colaborador(this.cred, dados);
+    $('btnSalvarPessoa').disabled = false;
+    if (!r.ok) {
+      if (r.codigo === 'TELEFONE_DUPLICADO') {
+        this.pedirAutorizacaoTelefone('pdConflito', r, a => {
+          this.pessoaAberta = p.pessoa_id;
+          return this.salvarPessoaComAutorizacao(dados, a);
+        });
+        return;
+      }
+      if (r.codigo === 'CADASTRO_DESATUALIZADO') {
+        toast('Alguém alterou esta pessoa enquanto você editava. Recarregando.', 'warn');
+        await this.recarregar();
+        return;
+      }
+      toast(r.erro || 'Falha', 'bad');
+      return;
+    }
+    toast('Colaborador salvo', 'ok');
+    await this.recarregar();
+  },
+
+  async salvarPessoaComAutorizacao(dados, autorizacao) {
+    const r = await ApiRh.colaborador(this.cred, Object.assign({}, dados, autorizacao));
+    if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+    toast('Colaborador salvo', 'ok');
+    await this.recarregar();
+  },
+
+  async inativarPessoa(p, motivo) {
+    $('btnInativarPessoa').disabled = true;
+    const r = await ApiRh.colaboradorInativar(this.cred, {
+      pessoa_id: p.pessoa_id, versao_cadastro: p.versao_cadastro, motivo,
+      idempotency_key: 'inativar-' + p.pessoa_id + '-' + p.versao_cadastro
+    });
+    if (!r.ok) { toast(r.erro || 'Falha', 'bad'); $('btnInativarPessoa').disabled = false; return; }
+    toast('Colaborador inativado', 'ok');
+    await this.recarregar();
+  },
+
+  async reativarPessoa(p) {
+    const telefone = $('reativarTelefone').value.trim();
+    $('btnReativarPessoa').disabled = true;
+    const r = await ApiRh.colaboradorReativar(this.cred, {
+      pessoa_id: p.pessoa_id, versao_cadastro: p.versao_cadastro, telefone,
+      idempotency_key: 'reativar-' + p.pessoa_id + '-' + p.versao_cadastro
+    });
+    $('btnReativarPessoa').disabled = false;
+    if (!r.ok) {
+      if (r.codigo === 'TELEFONE_DUPLICADO') {
+        this.pedirAutorizacaoTelefone('reativarConflito', r, a => this.reativarPessoaComAutorizacao(p, telefone, a));
+        return;
+      }
+      toast(r.erro || 'Falha', 'bad');
+      return;
+    }
+    toast('Colaborador reativado', 'ok');
+    await this.recarregar();
+  },
+
+  async reativarPessoaComAutorizacao(p, telefone, autorizacao) {
+    const r = await ApiRh.colaboradorReativar(this.cred, Object.assign({
+      pessoa_id: p.pessoa_id, versao_cadastro: p.versao_cadastro, telefone,
+      idempotency_key: 'reativar-' + p.pessoa_id + '-' + p.versao_cadastro
+    }, autorizacao));
+    if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+    toast('Colaborador reativado', 'ok');
+    await this.recarregar();
   },
 
   async abrirBiometria(pessoaId) {
@@ -622,12 +815,13 @@ export const Rh = {
       euclidiana(c[0].descritor, c[1].descritor),
       euclidiana(c[0].descritor, c[2].descritor),
       euclidiana(c[1].descritor, c[2].descritor));
-    if (coer > 0.55 && !confirm('As 3 capturas estão pouco parecidas entre si (' + coer.toFixed(3) +
-      ').\n\nIsso costuma virar falso negativo depois. Salvar assim mesmo?')) return;
     $('btnSalvarBio').disabled = true;
     const p = this.alvoCadastro;
+    // versao_cadastro precisa ir junto (§3.2): sem ela o servidor recusa com
+    // CADASTRO_DESATUALIZADO — esta chamada não muda nada na pessoa, mas é a
+    // MESMA rota de edição, então segue a mesma pré-condição.
     const r = await ApiRh.colaborador(this.cred, {
-      pessoa_id: p.pessoa_id, nome: p.nome, matricula: p.matricula,
+      pessoa_id: p.pessoa_id, versao_cadastro: p.versao_cadastro, nome: p.nome, matricula: p.matricula,
       equipe_id: p.equipe_id, papel: p.papel
     });
     if (!r.ok) { toast(r.erro || 'Falha', 'bad'); $('btnSalvarBio').disabled = false; return; }
@@ -647,6 +841,7 @@ export const Rh = {
   /* --------------------------------------------------------- equipes */
 
   pintarEquipes() {
+    if (this.equipeAberta) return this.pintarEquipeDetalhe();
     const eqs = (this.dados.equipes || []).slice().sort((a, b) => a.nome.localeCompare(b.nome));
     const cont = {};
     for (const p of (this.dados.pessoas || [])) if (p.ativo) cont[p.equipe_id] = (cont[p.equipe_id] || 0) + 1;
@@ -658,9 +853,10 @@ export const Rh = {
         '<p class="nota" style="margin-top:8px">Equipes da mesma unidade compartilham a carga — é isso que permite marcar um colaborador remanejado sem cair em registro manual.</p></div>' +
       '<div class="card"><h2>Equipes</h2>' +
         (eqs.length ? eqs.map(e =>
-          '<div class="linha-item"><span class="ponto ' + (e.ativo ? 'ok' : 'bad') + '"></span>' +
-          '<div style="flex:1"><div class="nm">' + esc(e.nome) + '</div>' +
-          '<div class="mt">' + esc(e.unidade) + ' · ' + (cont[e.equipe_id] || 0) + ' pessoas</div></div></div>').join('')
+          '<button type="button" class="linha-item" data-equipe="' + e.equipe_id + '">' +
+          '<span class="ponto ' + (e.ativo ? 'ok' : 'bad') + '"></span>' +
+          '<div style="flex:1;text-align:left"><div class="nm">' + esc(e.nome) + (e.ativo ? '' : ' <span class="tag">inativa</span>') + '</div>' +
+          '<div class="mt">' + esc(e.unidade || '—') + ' · ' + (cont[e.equipe_id] || 0) + ' pessoas</div></div></button>').join('')
           : '<p class="nota">Nenhuma equipe.</p>') +
       '</div>';
     $('btnNovaEquipe').onclick = async () => {
@@ -669,6 +865,100 @@ export const Rh = {
       });
       if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
       toast('Equipe criada', 'ok');
+      await this.recarregar();
+    };
+    $('rh-equipes').querySelectorAll('button[data-equipe]').forEach(b => {
+      b.onclick = () => { this.equipeAberta = b.dataset.equipe; this.pintar(); };
+    });
+  },
+
+  /**
+   * §2.1 do contrato: "sem rota de membro" não é "sem gestão de membro" — a
+   * tela abre a equipe, mostra os membros, adiciona e remove de dentro dela.
+   * Por baixo é sempre /rh/colaborador escrevendo equipe_id da PESSOA; não
+   * existe /rh/equipe/membro. Mandar o RH trocar um <select> na aba de
+   * pessoas não cumpriria o pedido, mesmo sendo a mesma escrita.
+   */
+  pintarEquipeDetalhe() {
+    const equipe = (this.dados.equipes || []).find(e => e.equipe_id === this.equipeAberta);
+    if (!equipe) { this.equipeAberta = null; return this.pintarEquipes(); }
+    const membros = (this.dados.pessoas || []).filter(p => p.equipe_id === equipe.equipe_id && p.ativo)
+      .sort((a, b) => a.nome.localeCompare(b.nome));
+    const foraDaEquipe = (this.dados.pessoas || []).filter(p => p.ativo && p.equipe_id !== equipe.equipe_id)
+      .sort((a, b) => a.nome.localeCompare(b.nome));
+
+    $('rh-equipes').innerHTML =
+      '<button type="button" class="act ghost" id="btnVoltarEquipes" style="width:auto;margin-bottom:12px">← Equipes</button>' +
+      '<div class="card"><h2>' + esc(equipe.nome) + (equipe.ativo ? '' : ' <span class="tag">inativa</span>') + '</h2>' +
+        '<label class="lb">Nome</label><input type="text" id="eDetNome" value="' + esc(equipe.nome) + '">' +
+        '<label class="lb">Unidade</label><input type="text" id="eDetUnidade" value="' + esc(equipe.unidade || '') + '">' +
+        '<button class="act" id="btnSalvarEquipe">Salvar</button>' +
+        (equipe.ativo
+          ? '<button class="act danger ghost" id="btnInativarEquipe" style="margin-top:8px">Inativar equipe</button>'
+          : '<button class="act ghost" id="btnReativarEquipe" style="margin-top:8px">Reativar equipe</button>') +
+      '</div>' +
+      '<div class="card"><h2>Membros <span class="nota">— ' + membros.length + '</span></h2>' +
+        (membros.length ? membros.map(p =>
+          '<div class="linha-item"><div style="flex:1"><div class="nm">' + esc(p.nome) + '</div>' +
+          '<div class="mt">' + esc(p.matricula) + '</div></div>' +
+          '<button class="act ghost" style="width:auto;margin:0;padding:9px 12px;font-size:12px" data-remover="' + p.pessoa_id + '">Remover</button></div>').join('')
+          : '<p class="nota">Nenhum membro.</p>') +
+      '</div>' +
+      '<div class="card"><h2>Adicionar membro</h2>' +
+        (foraDaEquipe.length
+          ? '<select id="eAdicionarSelect">' + foraDaEquipe.map(p =>
+              '<option value="' + p.pessoa_id + '">' + esc(p.nome) +
+              (p.equipe_id ? ' (' + esc(this.nomeEquipe(p.equipe_id)) + ')' : ' (sem equipe)') + '</option>').join('') +
+            '</select><button class="act" id="btnAdicionarMembro" style="margin-top:8px">Adicionar</button>'
+          : '<p class="nota">Todo mundo ativo já está nesta equipe.</p>') +
+      '</div>';
+
+    $('btnVoltarEquipes').onclick = () => { this.equipeAberta = null; this.pintar(); };
+    $('btnSalvarEquipe').onclick = async () => {
+      const r = await ApiRh.equipe(this.cred, {
+        equipe_id: equipe.equipe_id, nome: $('eDetNome').value.trim(), unidade: $('eDetUnidade').value.trim()
+      });
+      if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+      toast('Equipe atualizada', 'ok');
+      await this.recarregar();
+    };
+    const btnInativar = $('btnInativarEquipe');
+    if (btnInativar) btnInativar.onclick = async () => {
+      const r = await ApiRh.equipe(this.cred, { equipe_id: equipe.equipe_id, nome: equipe.nome, unidade: equipe.unidade, ativo: false });
+      if (!r.ok) {
+        toast(r.codigo === 'EQUIPE_COM_MEMBROS'
+          ? 'Inative os ' + ((r.detalhe && r.detalhe.membros_ativos) || '') + ' membros ativos antes de inativar a equipe'
+          : (r.erro || 'Falha'), 'bad');
+        return;
+      }
+      toast('Equipe inativada', 'ok');
+      await this.recarregar();
+    };
+    const btnReativar = $('btnReativarEquipe');
+    if (btnReativar) btnReativar.onclick = async () => {
+      const r = await ApiRh.equipe(this.cred, { equipe_id: equipe.equipe_id, nome: equipe.nome, unidade: equipe.unidade, ativo: true });
+      if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+      toast('Equipe reativada', 'ok');
+      await this.recarregar();
+    };
+    $('rh-equipes').querySelectorAll('button[data-remover]').forEach(b => {
+      b.onclick = async () => {
+        const pessoa = membros.find(p => p.pessoa_id === b.dataset.remover);
+        b.disabled = true;
+        const r = await ApiRh.colaborador(this.cred, { pessoa_id: pessoa.pessoa_id, versao_cadastro: pessoa.versao_cadastro, equipe_id: null });
+        if (!r.ok) { toast(r.erro || 'Falha', 'bad'); b.disabled = false; return; }
+        toast('Removido da equipe', 'ok');
+        await this.recarregar();
+      };
+    });
+    const btnAdicionar = $('btnAdicionarMembro');
+    if (btnAdicionar) btnAdicionar.onclick = async () => {
+      const pessoaId = $('eAdicionarSelect').value;
+      const pessoa = foraDaEquipe.find(p => p.pessoa_id === pessoaId);
+      btnAdicionar.disabled = true;
+      const r = await ApiRh.colaborador(this.cred, { pessoa_id: pessoa.pessoa_id, versao_cadastro: pessoa.versao_cadastro, equipe_id: equipe.equipe_id });
+      if (!r.ok) { toast(r.erro || 'Falha', 'bad'); btnAdicionar.disabled = false; return; }
+      toast('Adicionado à equipe', 'ok');
       await this.recarregar();
     };
   },

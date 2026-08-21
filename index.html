@@ -17,11 +17,26 @@
 <body>
 
 <!-- ===================== PORTA ===================== -->
-<div id="porta">
+<!-- #porta era a única das cinco telas do rodízio de mostrar() que nascia
+     visível — qualquer asserção positiva sobre ela no boot passava pelo
+     flash de um quadro antes de verificarDispositivo() resolver de verdade
+     (é como offline.spec.js ficou verde por motivo errado; achado do QA).
+     hide por padrão: boot() sempre termina em irParaPorta(), mostrarAguardando()
+     ou mostrarBloqueado(), então nenhuma tela fica sem dono. -->
+<div id="porta" class="hide">
   <h1>Ponto Facial</h1>
   <div class="sub" id="portaSub">Efrat</div>
-  <button class="act big" id="btnPonto">REGISTRAR PONTO</button>
+  <button class="act big" id="btnPonto" disabled>REGISTRAR PONTO</button>
   <p class="nota" id="portaStatus" style="margin-top:20px"></p>
+</div>
+
+<!-- Falha ANTES do rodízio de mostrar() decidir qualquer tela (erro em
+     assegurarIdentidade()/Api.estadoDispositivo() fora do que verificarDispositivo()
+     já trata). Sem isso, esconder #porta por padrão trocaria "porta falsamente
+     usável" por tela em branco — as duas erram fechado do jeito errado. -->
+<div id="falhaBoot" class="hide" style="max-width:380px;margin:0 auto;padding:14vh 22px 40px;text-align:center">
+  <h1 style="font-size:22px;margin:0 0 10px">Não foi possível iniciar</h1>
+  <p class="nota">Feche e abra o aplicativo de novo. Se continuar assim, fale com o RH.</p>
 </div>
 
 <!-- Acesso do RH (T-E3DBD4): fica FORA do rodízio exclusivo de mostrar()
