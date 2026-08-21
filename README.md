@@ -126,6 +126,50 @@ publico/                Root Directory de OUTRO projeto da Vercel: a origem
 
 **Não há prova de vida (liveness).** É intencional: foto na tela passa. Serve para justificar liveness certificado ISO/IEC 30107-3 Level 2 no sistema real, onde o adversário é o próprio gestor.
 
+## Não inferir de ausência
+
+Leia isto antes de mexer nas guardas, e antes de escrever teste, campo ou
+protocolo novo. É o único princípio que explica todos os defeitos que esta fase
+encontrou, e eles apareceram em código, em teste, em infraestrutura, em documento
+e no nosso próprio canal de conversa.
+
+**O princípio:** falta de dado não é resultado. Quando algo está ausente — um
+atributo, uma base de comparação, um sintoma, uma resposta — o código quase sempre
+escolhe o lado otimista sozinho, e ninguém percebe, porque o otimista é o lado
+silencioso.
+
+**A regra prática:** todo campo, teste ou protocolo que trate falta de dado como
+resultado tem de **dizer qual dos dois lados a falta significa**. Se não disser,
+alguém vai ler a ausência como confirmação.
+
+O que reconhecer, com três exemplos de formas diferentes:
+
+**No código.** `#btnPonto` (`index.html:29`) nascia sem `disabled`, e só
+`irParaPorta()` (`js/app.js:53`, alcançável apenas com aparelho **ativo**) o
+desabilita. `toBeEnabled()` então passava com aparelho pendente, com aparelho
+aprovado, e antes de a página decidir coisa alguma — era o sinal de aceite de
+aprovação de aparelho em sete pontos, e não verificava nada. A ausência do
+atributo foi lida como "está habilitado porque pode".
+
+**Dentro do próprio detector**, que é o caso que fecha o argumento. A guarda de
+conteúdo do `sw.js` (`.github/workflows/ci.yml:119`) tratava "não há base para
+comparar" como "nada a verificar" e saía **verde**. Ou seja: a comparação podia
+parar de acontecer e a guarda continuaria dizendo que estava tudo bem. Hoje a
+ausência de base só é aceitável no evento que legitimamente não tem base, e nos
+outros ela **falha dizendo qual evento era**.
+
+**Num documento operacional.** Os dois hostnames (`publico/LEIA-ME.md`) precisam
+ser nomes distintos. Trocar um pelo outro ao substituir texto faz as duas origens
+virarem uma, o `IndexedDB` (`js/store.js:10`) volta a ser compartilhado, e **nada
+acende** — a página continua funcionando. A ausência de sintoma seria lida como
+isolamento em pé.
+
+O corolário que mais custa caro: **detector que mente é pior que detector
+ausente.** Um teste que não existe deixa a pessoa desconfiada; um teste verde que
+não mede nada compra confiança que não foi ganha. Vale igual para um hash
+calculado sobre bytes que o aparelho nunca recebeu, e para uma linha de conversa
+onde silêncio significou "está tudo bem".
+
 ## As guardas de CI, e por que cada uma existe
 
 Guarda sem motivo escrito é guarda que alguém remove por achar burocrática. Cada
