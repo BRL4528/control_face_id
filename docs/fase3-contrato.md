@@ -1028,6 +1028,17 @@ Note o que esse aviso **não** é: não é dúvida sobre o resultado. Abaixo de 
 partir de `0,45` já é recusa, então quem chega à fila passou. O aviso diz "olhe as
 fotos com mais atenção antes de aprovar", não "talvez esteja errado".
 
+**O risco desse aviso não é ser inútil, é ser constante** — e por isso o corte tem
+teste, não vigilância. Aviso que aparece em todo cadastro treina o RH a ignorar, e o
+que ele degradaria é justamente a **conferência humana que este contrato assumiu como
+compensação pela ausência de liveness** no cadastro (§4.3, dívida 1). Ou seja: um
+`0,30` mal escolhido não produz um aviso chato, produz a erosão do único controle que
+sustenta os caminhos `link` e `rh_upload`.
+Amarrado em §7, item 14: o lote **normal** não acende a flag. O fixture de mesma
+pessoa do QA mede `0,133` — se `0,133` não acender, o corte está ao menos do lado
+certo. É evidência fina (uma medição a mais), e é a que existe; o teste transforma
+"eu confio no meu juízo" em "o juízo está verificado contra o único dado disponível".
+
 ⚠ **Muda o que existe hoje:** `js/rh.js:508` usa `coer > 0.55` + `confirm()`
 ("Salvar assim mesmo?"). Fica superado — 0,45 é recusa dura e não existe opção de
 seguir. O `confirm` sai. `js/rh.js:520` e `js/fila.js:262` param de mandar
@@ -1872,6 +1883,12 @@ Contrato (servidor falso + workflows):
       trazem **o booleano e não o decimal** — asserção de que a chave `coerencia`
       não existe naquele payload, porque é o caminho pelo qual o número voltaria à
       tela;
+    - **o lote normal não acende a flag:** o fixture de mesma pessoa do QA, que mede
+      `0,133`, grava com `coerencia_no_limite: false`. É a asserção que protege
+      contra o modo de falha que interessa — aviso constante treina o RH a ignorar, e
+      erode a conferência humana que compensa a falta de liveness no cadastro (§4.2).
+      Se um dia esse teste virar vermelho por causa de fixture novo mais parecido com
+      a realidade, **o corte está errado, não o teste**;
     - `EFRAT_CFG.limiarAceite` e a constante do workflow valem **o mesmo número**.
 15. Inativar apaga `vetores` e `miniatura` dos templates, revoga convite vivo, e
     mantém as marcações — contadas antes e depois.
