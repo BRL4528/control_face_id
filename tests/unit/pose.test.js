@@ -44,7 +44,7 @@ import path from 'node:path';
  * conheca o numero. Por isso aqui o valor e arbitrario de proposito: se o gate
  * honrar este, honra o de produção.
  */
-const cfg = (over = {}) => ({ maxYaw: 0.30, maxPitch: 0.25, ...over });
+const cfg = (over = {}) => ({ maxYaw: 0.30, maxPitch: 0.25, maxInconsistenciaPose: 0.08, ...over });
 
 /** O texto de js/config.js, para afirmar que o campo EXISTE lá de verdade. */
 const textoConfig = fs.readFileSync(
@@ -88,73 +88,22 @@ test('yaw() mora no módulo puro, senão não há como afirmar nada sobre pose',
     'em Node porque o módulo faz document.createElement no topo');
 });
 
-// A forma exata da função de pose é decisão do contrato (T-5EC67B: UMA função
-// devolvendo os dois eixos, limiares separados na config). Se o nome ou o
-// formato mudarem, muda AQUI e em nada mais do arquivo — e o primeiro teste
-// falha alto se o adaptador não casar, para a troca não falhar calada. Perdi
-// tempo hoje com uma substituição de constante que falhou em silêncio.
-const NOME_POSE = 'avaliarPose';   // esperado: (landmarks, cfg) -> { yaw, pitch, ok }
+/* O GATE ABSOLUTO DE PITCH FOI CANCELADO — e os testes que o guiavam saíram
+daqui, de propósito, em vez de ficarem vermelhos esperando.
 
-test('a função de pose existe e devolve os dois eixos num único decisor', () => {
-  assert.equal(typeof regras[NOME_POSE], 'function',
-    `${NOME_POSE} precisa existir em js/regras.js. Um decisor só, devolvendo yaw ` +
-    'e pitch juntos: com duas checagens no chamador, alguém implementa ou remove ' +
-    'metade e o gate passa a cobrir um eixo só.');
-  const r = regras[NOME_POSE](base(), cfg());
-  for (const campo of ['yaw', 'pitch', 'ok']) {
-    assert.ok(campo in r, `a pose devolvida precisa ter '${campo}'`);
-  }
-});
+Eles existiram e fizeram o trabalho: guiaram até a descoberta de que pitch
+absoluto em 2D exige assumir uma razão antropométrica, e que assumir anatomia no
+GATE produz viés demográfico (o matcher errado manda para revisão humana; o gate
+errado nem tenta). A decisão foi não entrar — não é adiamento, é
+não-respondível-sem-viés. Fica a cegueira uniforme, que é o defeito justo.
 
-test('PROPRIEDADE 1 (estrutural): a pose RESPONDE a queixo baixo — monotônica, sem número cravado', () => {
-  // Esta assertiva SUBSTITUI a anterior, que afirmava o oposto: que o gate era
-  // cego a pitch (yaw() lê só x, então queixo baixo dava 0,0000 em qualquer
-  // ângulo). Aquela era verdadeira e mediu a lacuna; esta trava o conserto.
-  // A troca é o que a mensagem de falha daquela mandava fazer quando a
-  // percepção de pitch chegasse — ela chegou.
-  //
-  // MONOTONICIDADE e não valor: não temos medição de pitch de mesma pessoa em
-  // população real, então cravar um corte aqui repetiria o 0,30 da coerência —
-  // juízo virando teste, e depois o teste defendendo o juízo. O que sabemos com
-  // certeza é a direção: mais queixo baixo, mais pitch.
-  const graus = [0, 10, 20, 30, 40];
-  const pitches = graus.map(g => Math.abs(regras[NOME_POSE](queixoBaixo(g), cfg()).pitch));
+Manter os três vermelhos aqui seria pior que inútil: guiariam alguém a
+implementar exatamente o que foi decidido não construir, e vermelho que fica
+vermelho por dias vira ruído atrás do qual a próxima regressão se esconde.
+O que substitui está abaixo — o eixo relativo, que responde a pergunta possível.
 
-  for (let i = 1; i < pitches.length; i++) {
-    assert.ok(pitches[i] > pitches[i - 1],
-      `pitch a ${graus[i]}° (${pitches[i]}) tem de ser maior que a ${graus[i - 1]}° ` +
-      `(${pitches[i - 1]}) — se empatar, a métrica não está lendo o eixo vertical`);
-  }
-});
-
-test('PROPRIEDADE 1b (comportamental): o gate vira no limiar DA CONFIG, não num literal', () => {
-  // Não afirma QUANTO vale o limiar — afirma que a decisão é coerente com ele.
-  // Assim recalibrar é mexer na config, não no teste, e o teste não mente sobre
-  // ter medido uma população que ninguém mediu.
-  // Duas afirmações separadas, e a distinção importa: que o campo EXISTE na
-  // config de produção (leitura do arquivo real), e que o gate HONRA o valor
-  // que recebe (comportamental, com um número arbitrário). Nenhuma das duas
-  // crava quanto maxPitch deve valer — não temos medição de pitch de mesma
-  // pessoa em população real, e cravar agora repetiria o 0,30 da coerência.
-  assert.match(textoConfig, /maxPitch\s*:/,
-    'js/config.js precisa declarar maxPitch, separado de maxYaw: virar a cabeça e ' +
-    'abaixar o queixo são movimentos diferentes e não há razão para compartilhar tolerância');
-
-  const c = cfg();
-
-  let reprovouEm = null, anterior = null;
-  for (let g = 0; g <= 80 && reprovouEm === null; g += 2) {
-    const r = regras[NOME_POSE](queixoBaixo(g), c);
-    if (!r.ok) reprovouEm = { g, pitch: Math.abs(r.pitch) };
-    else anterior = { g, pitch: Math.abs(r.pitch) };
-  }
-
-  assert.ok(reprovouEm, 'algum ângulo de queixo baixo tem de reprovar — senão o gate não gateia');
-  assert.ok(reprovouEm.pitch >= c.maxPitch,
-    'reprovou com pitch abaixo do limiar da config: a decisão não está lendo maxPitch');
-  assert.ok(anterior && anterior.pitch < c.maxPitch,
-    'o último ângulo aceito tinha pitch acima do limiar: o gate está reprovando tarde demais');
-});
+Sobrevive desta rodada a asserção de yaw, que continua válida e não depende de
+nada disto. */
 
 test('PROPRIEDADE 2 (indicativa): o gate de yaw só reprova perto de perfil', () => {
   // Ao contrário da 1, esta depende da geometria assumida (profundidade do
@@ -166,4 +115,103 @@ test('PROPRIEDADE 2 (indicativa): o gate de yaw só reprova perto de perfil', ()
     '45° de cabeça virada passam pelo gate hoje — é o achado, não o defeito do teste');
   assert.ok(Math.abs(regras.yaw(cabecaVirada(60))) > LIMIAR,
     '60° reprovam: o gate existe, só está longe demais para servir ao enrollment');
+});
+
+/* ═══════════════ Consistência de pose ENTRE as 3 fotos do lote (T-5EC67B)
+
+Substitui o gate absoluto, que não entra: pitch absoluto em 2D exige assumir
+anatomia, e assumir anatomia no gate produz viés demográfico não testável.
+Diferença entre fotos da MESMA pessoa cancela o deslocamento anatômico
+exatamente — foi isso que a medição mostrou (zero exato em duas anatomias
+diferentes), e é o que torna este eixo utilizável e o absoluto não.
+
+E note o que isso destrava: esta é a primeira propriedade de pose que a gente
+CONSEGUE testar contra viés. As asserções do gate absoluto não conseguiam —
+passavam verdes com qualquer fórmula enviesada. Aqui a ausência de viés é uma
+asserção, não uma esperança. */
+
+const NOME_LOTE = 'avaliarPoseLote';  // esperado: (landmarksPorFoto[], cfg) -> { inconsistencia, ok }
+
+/** Mesma pessoa com anatomia própria: nariz e queixo em alturas diferentes. */
+function pessoaCom({ nariz, queixo }) {
+  return graus => {
+    const r = graus * Math.PI / 180, c = Math.cos(r), s = Math.sin(r), o = [];
+    const p = [];
+    p[36] = { x: 100, y: 150, z: 0 };
+    p[45] = { x: 200, y: 150, z: 0 };
+    p[30] = { x: 150, y: nariz, z: 20 };
+    p[8]  = { x: 150, y: queixo, z: 5 };
+    for (const i of [36, 45, 30, 8]) {
+      o[i] = { x: p[i].x, y: p[i].y * c - p[i].z * s, z: p[i].y * s + p[i].z * c };
+    }
+    return { positions: o };
+  };
+}
+
+const ANA = pessoaCom({ nariz: 190, queixo: 255 });
+const BRUNO = pessoaCom({ nariz: 175, queixo: 265 });   // anatomia bem diferente
+
+test('avaliarPoseLote existe e recebe o lote inteiro, não uma foto por vez', () => {
+  assert.equal(typeof regras[NOME_LOTE], 'function',
+    `${NOME_LOTE} precisa existir em js/regras.js. Recebe o LOTE porque a ` +
+    'grandeza é uma diferença: uma foto sozinha não tem contra o que ser comparada.');
+  const r = regras[NOME_LOTE]([ANA(0), ANA(0), ANA(0)], cfg());
+  for (const campo of ['inconsistencia', 'ok']) {
+    assert.ok(campo in r, `o retorno precisa ter '${campo}'`);
+  }
+});
+
+test('ANTI-VIÉS: mesmas poses em anatomias diferentes dão a MESMA leitura', () => {
+  // A asserção que o gate absoluto nunca poderia passar. Medido: em pose
+  // idêntica, a leitura absoluta difere por fator ~2 entre estas duas
+  // anatomias (0,6154 contra 0,2778); a diferença entre fotos cancela isso.
+  // Se esta falhar, a fórmula voltou a depender de anatomia e o viés voltou
+  // junto — não ajuste o limiar, troque a fórmula.
+  const poses = [0, 15, 30];
+  const daAna = regras[NOME_LOTE](poses.map(ANA), cfg()).inconsistencia;
+  const doBruno = regras[NOME_LOTE](poses.map(BRUNO), cfg()).inconsistencia;
+
+  assert.ok(Math.abs(daAna - doBruno) < 1e-9,
+    `mesmas poses tinham de dar a mesma inconsistência: Ana ${daAna}, Bruno ${doBruno}`);
+});
+
+test('três fotos na mesma pose têm inconsistência exatamente zero', () => {
+  // Zero EXATO, não aproximado: é diferença de uma grandeza contra ela mesma.
+  // Vale nas duas anatomias, que é o ponto.
+  for (const [nome, pessoa] of [['Ana', ANA], ['Bruno', BRUNO]]) {
+    const r = regras[NOME_LOTE]([pessoa(20), pessoa(20), pessoa(20)], cfg());
+    assert.equal(r.inconsistencia, 0, `${nome}: mesma pose três vezes não é inconsistência`);
+    assert.equal(r.ok, true, `${nome}: lote consistente não pode ser recusado`);
+  }
+});
+
+test('quanto mais as poses divergem, maior a inconsistência', () => {
+  // Monotonicidade, sem número: o caso real do upload é uma das três fotos com
+  // a pessoa olhando para baixo, e o que importa é a ordem, não a escala.
+  const leituras = [0, 10, 25, 40].map(desvio =>
+    regras[NOME_LOTE]([ANA(0), ANA(0), ANA(desvio)], cfg()).inconsistencia);
+
+  for (let i = 1; i < leituras.length; i++) {
+    assert.ok(leituras[i] > leituras[i - 1],
+      `desvio maior tinha de dar inconsistência maior: ${leituras[i - 1]} -> ${leituras[i]}`);
+  }
+});
+
+test('o lote é recusado quando a inconsistência passa do limiar DA CONFIG', () => {
+  // Mesmo padrão do resto do arquivo: não afirma QUANTO vale o corte, afirma
+  // que a decisão é coerente com o que recebeu. Recalibrar é mexer na config.
+  assert.match(textoConfig, /maxInconsistenciaPose\s*:/,
+    'js/config.js precisa declarar o limiar de inconsistência de pose');
+
+  const c = cfg();
+  let recusou = null, ultimoAceito = null;
+  for (let d = 0; d <= 80 && recusou === null; d += 2) {
+    const r = regras[NOME_LOTE]([ANA(0), ANA(0), ANA(d)], c);
+    if (!r.ok) recusou = r.inconsistencia; else ultimoAceito = r.inconsistencia;
+  }
+
+  assert.ok(recusou !== null, 'algum desvio tem de recusar — senão a checagem não checa');
+  assert.ok(recusou >= c.maxInconsistenciaPose, 'recusou abaixo do limiar recebido');
+  assert.ok(ultimoAceito !== null && ultimoAceito < c.maxInconsistenciaPose,
+    'aceitou acima do limiar recebido');
 });
