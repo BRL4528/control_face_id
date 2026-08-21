@@ -214,3 +214,21 @@ câmera do PC. É o único requisito do cliente sem conferência de olho.
 (`servidor-falso.js:428,444,464`) e `js/app.js:207` reagenda com esse valor. Baixar para
 1-2 s nesse cenário faz o único vermelho suspeito da suíte deixar de existir, sem tocar
 na prova. T-9C35B7 com o QA.
+
+## Medição final do dia · janela travada
+
+`integra/v3-r3` em d000718: **98 unitários + 130 e2e passando, 1 armado, zero falhas.**
+Procedência: janela travada por anúncio, os seis confirmaram parada, `pgrep` 0 no fim.
+Substitui as medições anteriores minha e do DevOps — as duas tinham observação parcial.
+
+`pgrep` antes/depois só pega sobreposição que **começou** antes da entrada e ainda
+estava viva no fim; não pega a que começa e termina entre as duas fotos, que é o caso
+mais provável porque spec isolado dura segundos. O instrumento erra na sobreposição mais
+comum. Janela travada não tem esse buraco porque não depende de detectar nada.
+
+**Entregue e medido:** liberação de aparelho · equipes com membros · colaborador com
+telefone, edição e inativar/reativar · cadastro de face pela **câmera do PC** e por
+**upload de 3 fotos** · marcação de aparelho revogado (retida na mesa do RH, nunca
+descartada; os quatro status soltam a fila).
+
+**Falta:** link do celular (hostname do cliente) · T-C20AD3, a fatia de segurança da §1.
