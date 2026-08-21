@@ -898,6 +898,59 @@ regressão e alguém "consertaria" o produto de volta.
 **Regra:** todo teste cuja asserção descreve um defeito aceito carrega, na
 mensagem, a instrução para o dia em que o defeito morrer.
 
+### 0. Por que os outros existem: aviso escrito não intercepta gesto natural
+
+**Aviso escrito não protege contra defeito cujo erro parece certo enquanto você o
+comete.** Os três padrões abaixo não são disciplina — são desenho, e é isso que os
+faz sobreviver a nós.
+
+A prova saiu de dois casos do mesmo dia, e o segundo é o forte:
+
+- O autor da regra "rode o `pgrep` em chamada separada, senão o `argv` do próprio
+  script casa com o filtro" violou-a horas depois, num comando de rotina. Dá para
+  atribuir a memória.
+- Quem estava **consertando** a ferramenta reintroduziu o mesmo defeito no arquivo
+  que o documenta, sobre a linha que estava editando, com o comentário na tela.
+  Isso não é memória nem leitura: `pgrep -f` com a string é o gesto natural, e o
+  defeito só existe no *resultado*. Nenhuma quantidade de aviso intercepta um gesto
+  que parece correto no momento de fazer.
+
+O conserto que funcionou não foi um aviso melhor — foi tirar a linha de comando do
+caminho (filtrar por `/proc/PID/comm`), e fazer a saída do comando carregar o
+próprio limite. Nenhum dos dois exige que alguém esteja prestando atenção.
+
+Um terceiro caso, e o mais desconfortável: horas depois de escrever este texto, o
+autor dele comparou duas medições de instantes diferentes — o erro descrito na
+seção 2 — para concluir que a pista estava livre. **Não esqueceu a regra: não a viu
+aplicável**, porque *"estava livre há pouco"* se apresenta como conhecimento e não
+como suposição. É a mesma forma dos dois anteriores: o gesto não parece um gesto.
+
+**Corolário sobre explicações alheias.** Uma causa plausível dada por outra pessoa
+suprime investigação com a mesma eficácia de um aviso — e mais, quando vem de quem
+coordena. Aconteceu aqui: a explicação de um flicker de pista era verdadeira *para a
+observação de quem a deu* e não cobria uma segunda observação de origem diferente,
+que apontava um defeito real. O que impediu o defeito de sumir sob a explicação não
+foi desconfiança — foi a **procedência** da segunda medição: ela vinha do
+instrumento, não de improviso, então a explicação não encaixava nela. Medir com
+instrumento não protege só contra o próprio erro; protege contra a explicação de
+outro absorver o seu dado. Quando você explicar um sintoma, diga que a explicação
+cobre o caso que **você** viu.
+
+**Corolário sobre consertar.** Se um sintoma volta depois de você consertar a
+causa, a pergunta seguinte não é *"qual é a próxima causa"* — é **se as causas
+anteriores eram exclusivas ou somáveis**. Três versões seguidas de uma ferramenta
+erraram no mesmo ponto por três causas diferentes (não filtrar, truncar em 15
+caracteres, casar nome exato contra lista incompleta), porque cada conserto atacou
+a causa *visível naquela rodada* e elas coexistiam. O que resolveu não foi um
+conserto melhor: foi juntar duas ideias que estavam competindo, em vez de trocar
+uma pela outra. É o irmão pelo avesso do critério de raiz — lá o contorno antigo
+sobra depois do conserto; aqui sobra a causa.
+
+É o mesmo movimento nos três padrões seguintes: a **confiança mora dentro da
+asserção** (igualdade exata para o algébrico, faixa para o indicativo), a
+**contraprova vem antes da negação**, e o **limite mora dentro do instrumento**.
+Em todos, a propriedade sobrevive a quem a esqueceu.
+
 ### 2. Não inferir de ausência
 
 Afirmar que algo **não** aconteceu só vale se algo positivo provar que o caminho

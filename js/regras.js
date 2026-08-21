@@ -405,3 +405,69 @@ export function yaw(landmarks) {
   const vao = Math.abs(re.x - le.x) || 1;
   return (nariz.x - meio) / vao;
 }
+
+/**
+ * Sinal de pitch de UMA foto, adimensional e sem constante antropométrica
+ * própria — razão entre dois segmentos verticais do MESMO rosto (olho→nariz
+ * sobre nariz→queixo). Não tem zero natural (ninguém está "de frente" com
+ * razão 0) e não serve sozinho: varia por anatomia (T-5EC67B, medido pelo QA
+ * — duas pessoas de frente, mesma pose real, razões 0,6154 e 0,2778). Só
+ * ganha sentido em DIFERENÇA contra outra foto da mesma pessoa — é por isso
+ * que só `avaliarPoseLote` é exportada, nunca esta função sozinha.
+ */
+function pitchRelativo(landmarks) {
+  const p = landmarks.positions;
+  const le = p[36], re = p[45], nariz = p[30], queixo = p[8];
+  const meioY = (le.y + re.y) / 2;
+  const superior = nariz.y - meioY;
+  const inferior = queixo.y - nariz.y;
+  return superior / inferior;
+}
+
+/**
+ * SÓ RODA NO CLIENTE — não mande landmarks ao servidor para chamar esta
+ * função lá. Três razões, e a 2ª decide:
+ * 1. os landmarks já estão no cliente no instante da captura; mandá-los ao
+ *    servidor para ele devolver o que o cliente já pode calcular muda o
+ *    formato de quatro arquivos (face.js, rh.js, pagina.js, servidor) sem
+ *    ganhar nada;
+ * 2. geometria facial é dado novo a transmitir — o produto promete "nenhuma
+ *    imagem armazenada, só o template", e hoje só descritor sai do aparelho.
+ *    Landmark não é imagem, mas é geometria de rosto de uma pessoa
+ *    específica, e o que trafega pode ser logado — ampliar isso para rodar
+ *    um gate de QUALIDADE é desproporcional;
+ * 3. NÃO é o mesmo caso da coerência de vetores (T-8ADD9C), que teve de ir
+ *    pro servidor porque o cliente podia MENTIR com consequência PERMANENTE
+ *    (template de duas pessoas gravado). Aqui, burlar só deixa passar uma
+ *    foto de queixo baixo DA PESSOA CERTA — a coerência no servidor continua
+ *    pegando o caso grave (pessoa errada). Gate de qualidade contornável é
+ *    aceitável; gate de identidade contornável não era. Não repita a lição
+ *    de um onde ela não vale.
+ *
+ * Consistência de pose ENTRE as fotos de um lote de cadastro (T-5EC67B) — não
+ * pitch absoluto. Um gate absoluto de pitch em 2D exigiria assumir uma razão
+ * antropométrica pra saber o que conta como "de frente", e essa razão varia
+ * por anatomia, ancestralidade e idade: assumi-la no GATE (que nem tenta,
+ * diferente do matcher que manda pra revisão) produz recusa concentrada em
+ * quem foge da razão assumida — viés demográfico documentado em
+ * docs/validacao-biometrica.md:101 (NIST NISTIR 8429). Por isso o gate
+ * absoluto não entra; fica a cegueira uniforme, que é o defeito justo.
+ *
+ * O que SOBRA sem constante: a DIFERENÇA de `pitchRelativo` entre fotos da
+ * MESMA pessoa cancela o deslocamento anatômico (offset), mas não a
+ * SENSIBILIDADE — medido: mesma variação de pose lê ~1,65x mais forte numa
+ * anatomia que noutra. O resíduo cai do lado PERMISSIVO (zero é exato pra
+ * qualquer anatomia, então pose consistente nunca é recusada; o que varia é
+ * quanto desvio REAL algumas pessoas precisam pra reprovar) — é a direção
+ * suportável num portão de cadastro: falso aceite vira template um pouco
+ * pior, que a coerência e a fila humana ainda pegam; falso rejeite tranca a
+ * pessoa fora, todo dia, sem ela ter feito nada de errado.
+ *
+ * `maxInconsistenciaPose` mora na config, não aqui: não há medição de pitch
+ * de mesma pessoa em população real pra cravar o corte.
+ */
+export function avaliarPoseLote(landmarksPorFoto, cfg) {
+  const leituras = landmarksPorFoto.map(pitchRelativo);
+  const inconsistencia = Math.max(...leituras) - Math.min(...leituras);
+  return { inconsistencia, ok: inconsistencia < cfg.maxInconsistenciaPose };
+}

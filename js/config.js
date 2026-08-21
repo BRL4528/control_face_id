@@ -34,6 +34,21 @@ window.EFRAT_CFG = Object.assign({
   maxBright: 215,
   maxYaw: 0.30,
 
+  // 0,12 é juízo e não medição -- não há distribuição de pose de mesma pessoa
+  // em população real. Medido NESTE fixture, com este valor: um lote é recusado
+  // a partir de ~16 graus de desvio para uma anatomia e ~26 para outra. A regra
+  // é a mesma; a diferença é anatômica.
+  //
+  // O VIÉS CAI NO LADO PERMISSIVO: o zero é exato para qualquer anatomia, então
+  // ninguém em pose consistente é recusado. Algumas pessoas conseguem aprovar um
+  // lote um pouco mais inconsistente que outras -- template pior, não serviço
+  // negado.
+  //
+  // MEXER NESTE VALOR NÃO CORRIGE O VIÉS. Ele move os dois limites juntos e não
+  // fecha a distância entre eles; fechar exige outra FÓRMULA, não outro corte.
+  // Quem calibrar aqui está ajustando sensibilidade, não equidade.
+  maxInconsistenciaPose: 0.12,
+
   inputSize: 416,       // resolução do detector no quadro inteiro
   roiInputSize: 224,    // resolução do detector no recorte rastreado
 
