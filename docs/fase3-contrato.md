@@ -1308,7 +1308,13 @@ qualquer comparação. Duas consequências, e elas são diferentes entre si:
   Logo: **"esta pessoa está de queixo baixo?" não é respondível em 2D sem constante
   antropométrica, e portanto não é respondível sem viés.** Fica a cegueira uniforme, que é
   o defeito justo — e vai ao cliente como **limite conhecido e nomeado**, não como peça
-  pendente. A frase do Designer deixa de ser bengala e passa a ser o que existe.
+  pendente.
+  **Status desta seção, na formulação do Designer: fechada — "permanece instrução sem
+  verificação, por limite de método, não por falta de dado".** A distinção é o que impede
+  alguém de reabrir isto juntando mais medições: não falta dado, falta uma pergunta
+  respondível em 2D. A frase dele deixa de ser bengala à espera de gate e passa a ser
+  **bengala permanente**: continua no produto porque é zero-mãos, não pede remoção de EPI e
+  é o teto do que se pede sem medir nada; só deixa de ser candidata a virar verificação.
   A frase de biometria do produto hoje (`js/rh.js`, área de cadastro) lista "boné, óculos
   escuros ou máscara" e **não menciona capacete** — justamente o item que todo mundo usa.
   A parte da distância, por contraste, é folgada: `0,257` contra um limiar de `0,45`
