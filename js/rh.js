@@ -4,7 +4,7 @@ import { Face } from './face.js';
 import { derivar } from './cripto.js';
 import {
   indicadores, espelho,
-  presencaPorEquipe, serieDiaria, pendenciasPorMotivo, separarAparelhos
+  presencaPorEquipe, serieDiaria, pendenciasPorMotivo, separarAparelhos, retidasPorAparelho
 } from './regras.js';
 import { $, esc, mostrar, toast, hora, data } from './ui.js';
 
@@ -364,7 +364,7 @@ export const Rh = {
     const linhaAprovado = d => '<div class="linha-item"><span class="ponto ok"></span>' +
       '<div style="flex:1"><div class="nm">' + esc(d.apelido || d.dispositivo_id) + '</div>' +
       '<div class="mt">último uso ' + (d.ultimo_uso ? (data(d.ultimo_uso.slice(0, 10)) + ' ' + hora(d.ultimo_uso)) : 'ainda não usou') + '</div></div>' +
-      '<button class="act ghost" style="width:auto;margin:0;padding:9px 12px;font-size:12px" data-aparelho="' + d.dispositivo_id + '" data-acao="revogar">Revogar</button>' +
+      '<button class="act ghost" style="width:auto;margin:0;padding:9px 12px;font-size:12px" data-revogar="' + d.dispositivo_id + '" data-apelido="' + esc(d.apelido || d.dispositivo_id) + '">Revogar</button>' +
       '</div>';
     const linhaPendente = d => '<div class="linha-item"><span class="ponto muted"></span>' +
       '<div style="flex:1"><div class="nm">' + esc(d.apelido || d.dispositivo_id) + '</div>' +
@@ -384,6 +384,7 @@ export const Rh = {
       '</div>' +
       '<div class="card"><h2>Liberados <span class="nota">— ' + aprovados.length + '</span></h2>' +
         (aprovados.length ? aprovados.map(linhaAprovado).join('') : '<p class="nota">Nenhum aparelho liberado ainda.</p>') +
+        '<div id="aparelhoRevogarConf"></div>' +
       '</div>';
 
     $('btnLiberarAparelho').onclick = async () => {
@@ -397,16 +398,52 @@ export const Rh = {
       await this.recarregar();
     };
 
-    const rotulo = { recusar: 'Aparelho recusado', revogar: 'Aparelho revogado' };
+    // Recusar não exige código nem confirmação (§1.4: "errar uma recusa não
+    // dá acesso a ninguém"). Revogar é ação de mais peso — tem confirmação
+    // própria, ver confirmarRevogarAparelho().
     el.querySelectorAll('button[data-aparelho]').forEach(b => {
       b.onclick = async () => {
         b.disabled = true;
         const r = await ApiRh.aparelho(this.cred, { dispositivo_id: b.dataset.aparelho, acao: b.dataset.acao });
         if (!r.ok) { toast(r.erro || 'Falha', 'bad'); b.disabled = false; return; }
-        toast(rotulo[b.dataset.acao] || 'Atualizado', 'ok');
+        toast('Aparelho recusado', 'ok');
         await this.recarregar();
       };
     });
+    el.querySelectorAll('button[data-revogar]').forEach(b => {
+      b.onclick = () => this.confirmarRevogarAparelho(b.dataset.revogar, b.dataset.apelido);
+    });
+  },
+
+  /**
+   * Confirmação de revogar — texto fechado no contrato (§1.6): revogar não
+   * apaga ponto não enviado, ele ainda chega e vira pendência pro RH. Sem
+   * confirm() nativo (T-4B538E/T-8ADD9C já tiraram os últimos): mesmo padrão
+   * inline de pedirAutorizacaoTelefone, motivo opcional porque §1.5 não exige.
+   */
+  confirmarRevogarAparelho(dispositivoId, apelido) {
+    $('aparelhoRevogarConf').innerHTML =
+      '<div class="card" style="margin-top:12px;border-color:var(--ambar)">' +
+        '<p class="nota" style="margin:0 0 10px"><b>Revogar ' + esc(apelido) + '?</b> Se este aparelho tiver ponto ' +
+          'não enviado, ele ainda entrega — e cada marcação vai cair na sua mesa para conferência, com a hora da ' +
+          'batida e a hora em que chegou.</p>' +
+        '<label class="lb">Por quê? (opcional)</label>' +
+        '<input type="text" id="revogarMotivo" placeholder="ex.: aparelho extraviado">' +
+        '<div class="row2">' +
+          '<button class="act danger" id="btnConfirmarRevogar">Confirmar revogação</button>' +
+          '<button class="act ghost" id="btnCancelarRevogar">Cancelar</button>' +
+        '</div>' +
+      '</div>';
+    $('btnCancelarRevogar').onclick = () => { $('aparelhoRevogarConf').innerHTML = ''; };
+    $('btnConfirmarRevogar').onclick = async () => {
+      $('btnConfirmarRevogar').disabled = true;
+      const r = await ApiRh.aparelho(this.cred, {
+        dispositivo_id: dispositivoId, acao: 'revogar', motivo: $('revogarMotivo').value.trim()
+      });
+      if (!r.ok) { toast(r.erro || 'Falha', 'bad'); $('btnConfirmarRevogar').disabled = false; return; }
+      toast('Aparelho revogado', 'ok');
+      await this.recarregar();
+    };
   },
 
   /* ----------------------------------------------------- pendências */
@@ -427,6 +464,15 @@ export const Rh = {
       el.innerHTML = '<div class="card"><p class="nota">Nada esperando decisão. 🎉</p></div>';
       return;
     }
+
+    // T-D00CE0 (§1.6 do contrato): marcação retida por aparelho revogado sai
+    // da lista normal de pendências e vira card agrupado por aparelho — sem
+    // a contagem visível o RH não percebe inflação da fila mesmo quando cada
+    // linha isolada parece plausível. Pessoa inativa é problema de PESSOA,
+    // não de aparelho: continua na lista normal, um item por vez.
+    const msAparelho = ms.filter(m => m.motivo_codigo === 'aparelho_revogado');
+    const msIndividuais = ms.filter(m => m.motivo_codigo !== 'aparelho_revogado');
+    const gruposAparelho = retidasPorAparelho(msAparelho);
 
     const pessoaDe = t => (this.dados.pessoas || []).find(x => x.pessoa_id === t.pessoa_id) || {};
     // Sem miniatura/biometria anterior == primeiro cadastro; com == substituição
@@ -499,26 +545,11 @@ export const Rh = {
         ? '<h3 class="secaopend">Primeiro cadastro <span class="nota">— ' + primeiroCadastro.length + '</span></h3>' +
           primeiroCadastro.map(t => cartaoFace(t, false)).join('')
         : '') +
-      ms.map(m => {
-        const p = (this.dados.pessoas || []).find(x => x.pessoa_id === m.pessoa_id) || {};
-        const motivos = [];
-        if (m.origem === 'manual') motivos.push('registro manual');
-        if (m.veredito === 'revisar') motivos.push('zona cinzenta');
-        if (p.papel === 'gestor') motivos.push('ponto do próprio gestor');
-        if (Math.abs(Number(m.deriva_relogio_ms) || 0) > 120000) motivos.push('relógio divergente');
-        return '<div class="pend"><div class="top"><div style="flex:1">' +
-          '<div class="nm"><b>' + esc(p.nome || m.pessoa_id) + '</b> · ' +
-            (m.tipo === 'entrada' ? 'entrada' : 'saída') + ' ' + hora(m.marcado_em) + '</div>' +
-          '<div class="mt">' + esc(this.nomeEquipe(m.equipe_id)) + ' · ' + motivos.join(' · ') +
-            (m.motivo ? ' · "' + esc(m.motivo) + '"' : '') + '</div>' +
-          '</div></div>' +
-          '<div class="fotos">' +
-            (p.miniatura ? '<img src="' + p.miniatura + '">' : '<div class="vazio">cadastro</div>') +
-            (m.foto_auditoria ? '<img src="' + m.foto_auditoria + '">' : '<div class="vazio">sem foto</div>') +
-          '</div>' +
-          '<div class="row2"><button class="act" data-tipo="marcacao" data-id="' + m.id_cliente + '" data-acao="aprovar">Aprovar</button>' +
-          '<button class="act danger" data-tipo="marcacao" data-id="' + m.id_cliente + '" data-acao="rejeitar">Rejeitar</button></div></div>';
-      }).join('');
+      (gruposAparelho.length
+        ? '<h3 class="secaopend">Aparelho revogado <span class="nota">— ' + gruposAparelho.length + '</span></h3>' +
+          gruposAparelho.map(g => this.cardGrupoAparelho(g)).join('')
+        : '') +
+      msIndividuais.map(m => this.cartaoMarcacao(m)).join('');
 
     // O checkbox de conferência é dono do habilitar/desabilitar do próprio
     // "Aprovar" — nunca dos outros cards, e nunca de um "aprovar todos".
@@ -539,6 +570,75 @@ export const Rh = {
         await this.recarregar();
       };
     });
+
+    // T-D00CE0: "RH decide em bloco ou uma por uma" (§1.6) — o bloco chama a
+    // MESMA rota /rh/decidir, um item de cada vez, em sequência; não é uma
+    // rota nova de lote, é o mesmo caminho individual repetido.
+    el.querySelectorAll('button[data-grupo]').forEach(b => {
+      b.onclick = async () => {
+        const grupo = gruposAparelho.find(g => g.dispositivo_id === b.dataset.grupo);
+        if (!grupo) return;
+        b.disabled = true;
+        let falhas = 0;
+        for (const m of grupo.itens) {
+          const r = await ApiRh.decidir(this.cred, {
+            tipo: 'marcacao', id: m.id_cliente, acao: b.dataset.grupoAcao, motivo: ''
+          });
+          if (!r.ok) falhas++;
+        }
+        if (falhas) toast(falhas + ' de ' + grupo.itens.length + ' não puderam ser decididas', 'bad');
+        else toast(grupo.itens.length + ' marcações decididas', 'ok');
+        await this.recarregar();
+      };
+    });
+  },
+
+  /** Card de uma marcação pendente, individual — usado na lista normal e
+   * dentro do "ver uma por uma" de um grupo de aparelho revogado. */
+  cartaoMarcacao(m) {
+    const p = (this.dados.pessoas || []).find(x => x.pessoa_id === m.pessoa_id) || {};
+    const motivos = [];
+    if (m.origem === 'manual') motivos.push('registro manual');
+    if (m.veredito === 'revisar') motivos.push('zona cinzenta');
+    if (p.papel === 'gestor') motivos.push('ponto do próprio gestor');
+    if (Math.abs(Number(m.deriva_relogio_ms) || 0) > 120000) motivos.push('relógio divergente');
+    // T-D00CE0: motivo_codigo é o que /efrat/marcacoes manda pronto pra
+    // marcação retida (§1.6/§3.3) — o cliente só escolhe a frase pelo
+    // código, nunca reconstrói o motivo a partir de outros campos.
+    if (m.motivo_codigo === 'pessoa_inativa_no_envio') motivos.push('colaborador foi inativado depois desta marcação');
+    return '<div class="pend"><div class="top"><div style="flex:1">' +
+      '<div class="nm"><b>' + esc(p.nome || m.pessoa_id) + '</b> · ' +
+        (m.tipo === 'entrada' ? 'entrada' : 'saída') + ' ' + hora(m.marcado_em) + '</div>' +
+      '<div class="mt">' + esc(this.nomeEquipe(m.equipe_id)) + ' · ' + motivos.join(' · ') +
+        (m.motivo ? ' · "' + esc(m.motivo) + '"' : '') + '</div>' +
+      '</div></div>' +
+      '<div class="fotos">' +
+        (p.miniatura ? '<img src="' + p.miniatura + '">' : '<div class="vazio">cadastro</div>') +
+        (m.foto_auditoria ? '<img src="' + m.foto_auditoria + '">' : '<div class="vazio">sem foto</div>') +
+      '</div>' +
+      '<div class="row2"><button class="act" data-tipo="marcacao" data-id="' + m.id_cliente + '" data-acao="aprovar">Aprovar</button>' +
+      '<button class="act danger" data-tipo="marcacao" data-id="' + m.id_cliente + '" data-acao="rejeitar">Rejeitar</button></div></div>';
+  },
+
+  /** Card agrupado de marcações retidas por UM aparelho revogado — contagem
+   * e faixa de horário visíveis, decisão em bloco ou uma por uma (§1.6). */
+  cardGrupoAparelho(g) {
+    const dataDe = iso => iso ? data(String(iso).slice(0, 10)) + ' ' + hora(iso) : '—';
+    return '<div class="pend"><div class="top"><div style="flex:1">' +
+        '<div class="nm"><b>' + esc(g.apelido) + '</b> · aparelho revogado</div>' +
+        '<div class="mt">revogado em ' + dataDe(g.revogado_em) + ' · <b>' + g.total +
+          '</b> marcaç' + (g.total === 1 ? 'ão recebida' : 'ões recebidas') +
+          (g.recebido_max ? ' até ' + dataDe(g.recebido_max) : '') +
+          ', batidas entre ' + dataDe(g.batida_min) + ' e ' + dataDe(g.batida_max) + '</div>' +
+      '</div></div>' +
+      '<div class="row2">' +
+        '<button class="act" data-grupo="' + esc(g.dispositivo_id) + '" data-grupo-acao="aprovar">Aprovar todas</button>' +
+        '<button class="act danger" data-grupo="' + esc(g.dispositivo_id) + '" data-grupo-acao="rejeitar">Rejeitar todas</button>' +
+      '</div>' +
+      '<details style="margin-top:10px"><summary class="nota" style="cursor:pointer">Ver uma por uma</summary>' +
+        g.itens.map(m => this.cartaoMarcacao(m)).join('') +
+      '</details>' +
+    '</div>';
   },
 
   /* ---------------------------------------------------- colaboradores */
