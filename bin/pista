@@ -33,4 +33,8 @@ if [ "$ocupado" = 0 ]; then
   echo "    - \"janela travada, todos confirmaram parada\"  <- medicao valida"
   echo "    - \"sem travar janela, pista LIVRE na entrada\"  <- honesta, nao valida"
 fi
-exit 0
+# exit reflete o achado, senao `npm run pista && npx playwright test` e um portao
+# que nunca fecha -- e a ferramenta volta a depender de alguem LER a saida, que e
+# a dependencia de atencao que ela existe para remover. Achado do DevOps.
+# Servidor de serve esquecido continua AVISO e nao bloqueio: nao disputa navegador.
+exit "$ocupado"
