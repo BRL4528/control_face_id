@@ -12,6 +12,14 @@
 // Object.assign preserva o que ja tiver sido definido antes deste arquivo — e
 // assim que o ambiente de teste, ou um deploy especifico, troca a apiBase sem
 // precisar editar nada.
+//
+// A ORDEM DOS ARGUMENTOS AQUI E LOAD-BEARING. O default de producao vai no
+// primeiro argumento e o window.EFRAT_CFG existente no ultimo, de proposito:
+// e assim que tests/e2e/servir.js sobrepoe a apiBase sem editar este arquivo.
+// Trocar por objeto literal ou inverter a ordem faz todo `npm run serve`
+// apontar para o n8n de PRODUCAO, sem erro nenhum na tela — a guarda de CI
+// pega (T-F1E72A), mas só depois. Decisão e motivo em docs/fase3-contrato.md
+// § Restrição de arquitetura, item 1.
 window.EFRAT_CFG = Object.assign({
   apiBase: 'https://n8n.samasc.com.br/webhook', // se alterar o domínio, atualize connect-src em _headers e vercel.json
 

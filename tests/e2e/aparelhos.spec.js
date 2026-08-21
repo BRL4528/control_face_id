@@ -171,11 +171,32 @@ test('RH revoga aparelho já liberado: sai da lista de liberados e o aparelho pe
   const dispositivoId = [...ctx.estado.dispositivos.values()][0].dispositivo_id;
   const linhaAprovado = page.locator('.linha-item', { hasText: dispositivoId.slice(0, 8) });
   await expect(linhaAprovado).toBeVisible({ timeout: 8000 });
+  // T-D00CE0: revogar ganhou confirmação inline própria (§1.6 — não apaga
+  // ponto não enviado, avisa que ele ainda chega) — não é mais um clique só.
   await linhaAprovado.getByRole('button', { name: 'Revogar' }).click();
+  await expect(page.locator('#btnConfirmarRevogar')).toBeVisible({ timeout: 8000 });
+  await page.click('#btnConfirmarRevogar');
   await expect(page.locator('#toast')).toContainText('revogado', { timeout: 8000 });
   await expect(page.locator('.linha-item', { hasText: dispositivoId.slice(0, 8) })).toHaveCount(0, { timeout: 8000 });
 
   expect(ctx.estado.dispositivos.get(dispositivoId).estado).toBe('revogado');
+});
+
+test('confirmação de revogar mostra o texto do contrato e cancelar não muda nada', async ({ page }) => {
+  await abrir(page, ctx.url, 'p-ana');
+  const codigo = await page.textContent('#aguardandoCodigo');
+  await logarRh(page);
+  await abrirAbaAparelhos(page);
+  await digitarCodigo(page, codigo);
+  await expect(page.locator('#toast')).toContainText('liberado', { timeout: 8000 });
+
+  const dispositivoId = [...ctx.estado.dispositivos.values()][0].dispositivo_id;
+  await page.locator('.linha-item', { hasText: dispositivoId.slice(0, 8) }).getByRole('button', { name: 'Revogar' }).click();
+  await expect(page.locator('#aparelhoRevogarConf')).toContainText('ainda entrega');
+  await expect(page.locator('#aparelhoRevogarConf')).toContainText('cair na sua mesa para conferência');
+  await page.click('#btnCancelarRevogar');
+  await expect(page.locator('#btnConfirmarRevogar')).toHaveCount(0);
+  expect(ctx.estado.dispositivos.get(dispositivoId).estado).toBe('ativo');
 });
 
 test('código pendente expira em 24h: aparelho recebe um novo sozinho e o antigo para de resolver no RH', async ({ page }) => {

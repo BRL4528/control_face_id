@@ -54,8 +54,56 @@ export function emCooldown(pessoaId, marcacoesDoDia, agoraMs, cooldownMs) {
  */
 export function itensParaRemover(resultados) {
   return (resultados || [])
-    .filter(r => r && (r.status === 'aceito' || r.status === 'duplicado'))
+    .filter(r => r && (r.status === 'aceito' || r.status === 'duplicado' || r.status === 'retido'))
     .map(r => r.id_cliente);
+}
+
+/**
+ * `rejeitado` também sai da fila de envio — retentar um lote fabricado ou de
+ * pessoa desconhecida nunca vira aceito — mas não é ponto: vai para uma
+ * coleção própria (§1.6/§3.3 do contrato), visível, nunca reenviada e nunca
+ * apagada sozinha. Separado de `itensParaRemover` porque os dois arquivam em
+ * lugares diferentes (enviadas vs. recusadas).
+ */
+export function itensRecusados(resultados) {
+  return (resultados || [])
+    .filter(r => r && r.status === 'rejeitado')
+    .map(r => r.id_cliente);
+}
+
+/**
+ * Marcações retidas por aparelho revogado, agrupadas para a mesa do RH —
+ * §1.6 do contrato: "Tablet obra norte · revogado em 20/08 18:00 · 14
+ * marcações recebidas em 21/08 14:20, batidas entre 20/08 07:02 e
+ * 20/08 17:40". Sem a contagem visível o RH não percebe inflação da fila
+ * mesmo quando cada linha isolada parece plausível (ameacas-v3.md § Novo 3).
+ * Só agrupa `motivo_codigo === 'aparelho_revogado'` — outros motivos
+ * (pessoa inativa, por exemplo) são problema de pessoa, não de aparelho, e
+ * continuam na lista normal de pendências, um item por vez.
+ */
+export function retidasPorAparelho(marcacoes) {
+  const grupos = {};
+  for (const m of (marcacoes || [])) {
+    if (!m || !m.pendente || m.motivo_codigo !== 'aparelho_revogado') continue;
+    const id = m.aparelho_dispositivo_id || 'desconhecido';
+    if (!grupos[id]) {
+      grupos[id] = {
+        dispositivo_id: id, apelido: m.aparelho_apelido || id,
+        revogado_em: m.aparelho_revogado_em || null, itens: []
+      };
+    }
+    grupos[id].itens.push(m);
+  }
+  return Object.values(grupos).map(g => {
+    const batidas = g.itens.map(m => m.marcado_em).filter(Boolean).sort();
+    const recebidas = g.itens.map(m => m.recebido_em).filter(Boolean).sort();
+    return Object.assign(g, {
+      total: g.itens.length,
+      batida_min: batidas[0] || null,
+      batida_max: batidas[batidas.length - 1] || null,
+      recebido_max: recebidas[recebidas.length - 1] || null
+    });
+  }).sort((a, b) => b.total - a.total);
 }
 
 /** Hora do aparelho corrigida pela diferença medida contra o servidor. */

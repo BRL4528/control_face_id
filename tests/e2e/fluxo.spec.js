@@ -342,23 +342,51 @@ test('envio unico em voo: nunca ha dois lotes simultaneos', async ({ page }) => 
   expect(ctx.estado.maxLotesSimultaneos).toBe(1);
 });
 
-test('colaborador inativo e rejeitado e a marcacao fica retida', async ({ page }) => {
+// T-D00CE0 (§1.6/§3.3 do contrato): a regra separa QUANDO a marcação
+// aconteceu de QUANDO ela subiu. As duas próximas provam os dois lados —
+// substituem o teste antigo, que checava um `_erro` preso na fila pra
+// sempre (o bug que este contrato fecha: rejeitado nunca saía da fila).
+test('marcacao batida ANTES da pessoa ser inativada fica retida — sai da fila, ainda nao e ponto', async ({ page }) => {
   await abrir(page, ctx.url, 'p-ana');
   await aprovarDispositivo(page, ctx);
   await primeCarga(page);
   ctx.estado.fora = true;
   await abrirPonto(page);
   await marcar(page, 'p-ana');
+  const pessoa = ctx.pessoas.find(p => p.pessoa_id === 'p-ana');
   ctx.estado.inativos.add('p-ana');
+  pessoa.inativado_em = new Date().toISOString();
   ctx.estado.fora = false;
 
   await page.evaluate(() => window.__EFRAT.Fila.sincronizar());
-  await page.waitForFunction(async () => {
-    const f = await window.__EFRAT.Store.fila();
-    return f.some(m => m._erro);
-  }, null, { timeout: 25000 });
-  const fila = await page.evaluate(() => window.__EFRAT.Store.fila());
-  expect(fila.find(m => m._erro)._erro).toContain('inativo');
+  await page.waitForFunction(async () => (await window.__EFRAT.Store.fila()).length === 0, null, { timeout: 25000 });
+
+  const enviadas = await page.evaluate(() => window.__EFRAT.Store.enviadas());
+  expect(enviadas.some(m => m.pessoa_id === 'p-ana')).toBe(true);
+  const marcacaoServidor = [...ctx.estado.marcacoes.values()].find(m => m.pessoa_id === 'p-ana');
+  expect(marcacaoServidor.motivo_codigo).toBe('pessoa_inativa_no_envio');
+  expect(marcacaoServidor.requer_revisao).toBe(true);
+});
+
+test('marcacao batida DEPOIS da pessoa ja estar inativa e rejeitada — nunca e ponto, nunca e reenviada', async ({ page }) => {
+  await abrir(page, ctx.url, 'p-ana');
+  await aprovarDispositivo(page, ctx);
+  await primeCarga(page);
+  const pessoa = ctx.pessoas.find(p => p.pessoa_id === 'p-ana');
+  ctx.estado.inativos.add('p-ana');
+  pessoa.inativado_em = new Date(Date.now() - 60_000).toISOString();
+  ctx.estado.fora = true;
+  await abrirPonto(page);
+  await marcar(page, 'p-ana');
+  ctx.estado.fora = false;
+
+  await page.evaluate(() => window.__EFRAT.Fila.sincronizar());
+  await page.waitForFunction(async () => (await window.__EFRAT.Store.recusadas()).length > 0, null, { timeout: 25000 });
+
+  expect(await page.evaluate(() => window.__EFRAT.Store.fila())).toHaveLength(0);
+  const recusadas = await page.evaluate(() => window.__EFRAT.Store.recusadas());
+  expect(recusadas[0].motivo_codigo).toBe('pessoa_inativa');
+  expect([...ctx.estado.marcacoes.values()].some(m => m.pessoa_id === 'p-ana')).toBe(false);
 });
 
 // Comportamento correto e defensavel (nao e o mesmo cenario dos tres acima):

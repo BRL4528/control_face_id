@@ -152,8 +152,11 @@ frente do n8n (a resposta "nenhum" muda a recomendação de rate limit).
 
 ## Atualização 4 · fecho do dia (medido, não reportado)
 
-`integra/v3-r3` em 6151115: **93 unitários + 95 e2e passando, 5 armados, zero falhas**,
-medido no meu worktree com Playwright instalado — parei de somar relato de terceiro.
+**Medição válida: 93 unitários + 106 e2e passando, 5 armados, zero falhas** (mais 16
+etapas de higiene), medida pelo DevOps em 9341dc9 com procedência declarada — anúncio
+de pista mais observação no fim. Substitui a minha medição anterior (95 e2e em 6151115),
+que teve um vermelho não explicado e portanto procedência contendida: reconferir só o
+vermelho responde se *ele* era real, não se a rodada era confiável.
 
 **Concluído** (10): liberação de aparelho por código digitado · coerência calculada no
 servidor com recusa em 0,45 · equipes com membros, telefone obrigatório e edição ·
@@ -185,3 +188,29 @@ resultado tem de **dizer** qual dos dois lados a falta significa.
 E o meu: o quadro derivou porque eu integrava sem mover cartão, e derivou para o lado
 otimista — a conferência do Arquiteto produziu garantia falsa. `[PRONTO]` nesse CLI é
 *ready*, não *terminado*.
+
+## Atualização 5 · o que falta, e de quem depende
+
+**Entregue dos quatro pedidos do cliente:** equipes com membros geridos de dentro da
+equipe · colaborador com telefone obrigatório, edição e inativar/reativar por rota
+própria · liberação de aparelho por código digitado (a causa do app nascer trancado) ·
+cadastro de face pela **câmera do PC** — que consertou um defeito existente: `js/rh.js`
+usava a credencial do *aparelho*, então a câmera não funcionava em PC de RH nunca
+registrado.
+
+**Em construção:** upload de 3 fotos (T-92D567, Biometria, dono da região da biometria
+em `js/rh.js`) · marcação de aparelho revogado (T-D00CE0) · fatia de segurança da §1
+(T-C20AD3, fora do backlog de propósito — sua ausência é invisível).
+
+**Espera o cliente:** link do celular (hostname) · resposta ao capacete (quatro fotos,
+com e sem, duas poses) · Parte 1 na Vercel (recomendada).
+
+**Não verificado visualmente:** oito das dez telas. Prints pedidos ao QA — equipe
+aberta com membros, ficha do colaborador com telefone, diálogo de telefone duplicado,
+câmera do PC. É o único requisito do cliente sem conferência de olho.
+
+**Achado aberto com conserto pronto:** `aparelhos.spec.js:102` gasta um ciclo de poll
+(15,7 s contra teto de 30) porque o servidor falso responde `consultar_apos_s` 10/15
+(`servidor-falso.js:428,444,464`) e `js/app.js:207` reagenda com esse valor. Baixar para
+1-2 s nesse cenário faz o único vermelho suspeito da suíte deixar de existir, sem tocar
+na prova. T-9C35B7 com o QA.
