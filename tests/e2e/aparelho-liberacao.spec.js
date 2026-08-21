@@ -224,29 +224,58 @@ test('T-87615C · um código só serve uma vez', async ({ request }) => {
 
 /* 2.1e — tentativa de código errado é limitada e contada */
 
-// AINDA ARMADO, e agora por lacuna medida e não por rota ausente: a rota de
-// aprovação existe e resolve pelo código, mas não conta nem limita tentativa
-// errada — `tentativas` só é escrito no registro do aparelho e nunca
-// incrementado no caminho de aprovação. Sem isso, 31^6 vira força bruta viável
-// contra um pendente legítimo que esteja na fila. Cartão próprio (2.1e).
-test.fixme('T-87615C · tentativas de código errado são limitadas e ficam visíveis', async ({ request }) => {
+// 2.1e — limite de tentativa de código errado.
+//
+// A ASSERÇÃO ANTERIOR DESTE TESTE ERA VACUOSA E QUEM ACHOU FOI O 508cd44fd2.
+// Ela fazia `expect(textoDeRhDados).toContain('tentativas')` para provar
+// "visibilidade das tentativas erradas" — mas `tentativas` já existe na linha
+// do aparelho por outro motivo inteiramente diferente (contagem de rotação de
+// pedido de um pendente, contrato §1.2), e é serializado no payload do RH de
+// qualquer jeito. Passaria sempre, com ou sem contagem de código errado.
+// Mesma família do resto da fase, desta vez na minha própria mão.
+//
+// O que sobra depois de tirar a parte vacuosa é o que de fato para o ataque: o
+// limite. A "visibilidade" não vira teste aqui porque não existe campo para
+// ela no contrato — e inventar um campo para satisfazer um teste seria deixar
+// o teste dirigir o desenho. Fica registrado como lacuna aberta em
+// docs/fase3-seguranca.md, não como asserção fingida.
+test.fixme('T-C20AD3 · código errado esbarra em limite, e o limite segura até o código certo', async ({ request }) => {
   const a = await registrar(request);
 
-  let bloqueou = false;
-  for (let i = 0; i < 12; i++) {
-    const r = await aprovar(request, { dispositivo_id: a.dispositivo_id, codigo: 'ZZZZZZ' });
-    if (r.status() === 429) { bloqueou = true; break; }
+  let bloqueou = null;
+  for (let i = 0; i < 12 && !bloqueou; i++) {
+    const r = await aprovar(request, { codigo: 'ZZZZZZ' });
+    if (r.status() === 429) bloqueou = r;
   }
-  expect(bloqueou, 'força bruta de código precisa esbarrar em limite').toBe(true);
+  expect(bloqueou, 'força bruta de código precisa esbarrar em limite').not.toBeNull();
+  expect(bloqueou.headers()['retry-after'],
+    'sem Retry-After o cliente não sabe quando voltar').toBeTruthy();
 
-  // E o RH tem de conseguir ver que houve tentativa — é o sinal de que alguém
-  // está tentando aprovar um aparelho que não está na frente dele.
-  const { texto } = await leituraRh(request);
-  expect(texto).toContain('tentativas');
-
-  // Mesmo bloqueado, o código certo não pode passar dentro da janela.
-  const comCerto = await aprovar(request, { dispositivo_id: a.dispositivo_id, codigo: a.codigo });
+  // A parte que prova que o limite é limite: dentro da janela, nem o código
+  // CERTO passa. Sem isto, "bloqueou" poderia ser só uma mensagem diferente.
+  const comCerto = await aprovar(request, { codigo: a.codigo });
   expect(comCerto.status()).toBe(429);
+  expect(await estadoDoAparelho(request, a)).toBe('pendente');
+});
+
+test.fixme('T-C20AD3 · o limite é contado depois de autenticar, não antes', async ({ request }) => {
+  // Se a contagem vier ANTES da checagem de usuário/chave, quem souber só o
+  // nome do usuário de RH derruba a aprovação de aparelhos por 5 minutos sem
+  // ter credencial nenhuma — vira negação de serviço contra o próprio RH,
+  // usando a defesa como arma. Credencial errada tem de ser 401 e não pode
+  // consumir cota.
+  for (let i = 0; i < 12; i++) {
+    const r = await request.post(`${ctx.base}${ROTA_APROVAR}`, {
+      data: { usuario: RH.usuario, chave: 'chave-errada',
+              idempotency_key: crypto.randomUUID(), codigo: 'ZZZZZZ', equipes_ids: ['eq-1'] },
+      failOnStatusCode: false
+    });
+    expect(r.status(), 'credencial errada é 401, nunca 429').toBe(401);
+  }
+
+  // E o RH legítimo continua podendo aprovar: a cota dele não foi gasta.
+  const a = await registrar(request);
+  expect((await aprovar(request, { codigo: a.codigo })).status()).toBe(200);
 });
 
 /* 2.1f — pendente expira sozinho */
