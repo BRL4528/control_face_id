@@ -65,21 +65,23 @@ async function ligarCamera() {
 }
 function pararCamera() {
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  $('camwrap').classList.add('hide');
 }
 
 function telaCaptura(erro) {
+  // #camwrap é persistente (fora de #tela, ver index.html) — só troca de
+  // visibilidade, nunca é recriado, senão o <video> morreria na próxima
+  // repintura de #tela e a foto seguinte ficaria muda.
+  $('camwrap').classList.remove('hide');
   tela(
     '<h1>Vamos tirar 3 fotos do seu rosto</h1>' +
     '<p>Fique num lugar com boa luz, sem óculos escuros, boné, capacete ou máscara — o sistema reconhece ' +
       'pelo formato do rosto, e se estiver coberto, ele simplesmente não encontra.</p>' +
     '<p>Tire uma foto de cada vez, mexendo um pouco a cabeça entre elas.</p>' +
-    '<div class="camwrap" id="camwrap"></div>' +
     pintarSlotsHtml() +
     (erro ? '<p class="erro">' + esc(erro) + '</p>' : '') +
     '<button class="act" id="btnTirar">Tirar foto ' + (capturas.length + 1) + ' de 3</button>'
   );
-  $('camwrap').appendChild($('video')); // move o <video> persistente pro slot atual
-  $('video').style.display = 'block';
   $('btnTirar').onclick = tirarFoto;
 }
 

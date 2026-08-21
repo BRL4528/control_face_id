@@ -14,8 +14,9 @@
   p { margin: 0 0 .75rem; }
   .cartao { background: #fff; border-radius: 14px; padding: 1.1rem; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
   .nota { font-size: .85rem; color: #5a6472; }
-  .camwrap { position: relative; aspect-ratio: 3/4; border-radius: 12px; overflow: hidden;
-             background: #0e1729; margin-bottom: .75rem; }
+  .camwrap { max-width: 26rem; margin: 0 auto .75rem; position: relative; aspect-ratio: 3/4;
+             border-radius: 12px; overflow: hidden; background: #0e1729; }
+  .camwrap.hide { display: none; }
   .camwrap video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
   .shots { display: flex; gap: 7px; margin-bottom: .75rem; }
   .shots div { flex: 1; aspect-ratio: 1; border-radius: 9px; background: #e5e9f0;
@@ -36,8 +37,12 @@
 </head>
 <body>
 <main>
+  <!-- #camwrap fica FORA de #tela de propósito: #tela.innerHTML é reescrito a
+       cada foto, e um <video> movido para dentro dele seria destruído na
+       repintura seguinte (achado real, não só de teste — a 2ª captura ficava
+       muda porque o botão recriado nunca reganhava onclick). -->
+  <div id="camwrap" class="camwrap hide"><video id="video" playsinline muted autoplay></video></div>
   <div id="tela" class="cartao"><p class="nota">Carregando…</p></div>
-  <video id="video" playsinline muted autoplay style="display:none"></video>
 </main>
 <div id="toast" class="hide"></div>
 <script src="./vendor/face-api.js"></script>

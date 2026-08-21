@@ -26,6 +26,20 @@ test.afterEach(async () => {
   await new Promise(r => publico.servidor.close(r));
 });
 
+/**
+ * Três vetores coerentes (distância pequena, não zero) — mesma construção
+ * ortogonal usada em rh-biometria.spec.js/tests/unit/coerencia.test.js. Sem
+ * isto, as 3 capturas fingidas saem byte-idênticas (a semente é só o nome
+ * da pessoa) e o servidor recusa como FOTOS_IGUAIS, corretamente.
+ */
+function loteCoerente() {
+  const DIM = 128;
+  const a = new Array(DIM).fill(0);
+  const b = a.slice(); b[0] = 0.094;
+  const c = a.slice(); c[1] = 0.094;
+  return [a, b, c];
+}
+
 async function emitirLink(request) {
   const r = await request.post(`${ctx.base}/efrat/rh/face/convite`, {
     data: { usuario: 'rh', chave: 'CHAVE-DE-TESTE', idempotency_key: crypto.randomUUID(), pessoa_id: 'p-ana', canal: 'copiar' }
@@ -89,11 +103,17 @@ test('fluxo feliz: saudação, 3 fotos, envio, sucesso — nunca sobrescreve tem
   // Espera cada captura terminar (o slot ganhar a miniatura) antes da
   // próxima: `#btnTirar` é recriado a cada repintura de `#tela`, então
   // clicar de novo antes do handler assíncrono anterior terminar pode
-  // disparar duas capturas sobrepostas.
-  for (let i = 0; i < 3; i++) {
+  // disparar duas capturas sobrepostas. Só as 2 primeiras têm essa tela pra
+  // esperar — a 3ª dispara o envio na hora (`tirarFoto`), e a tela de
+  // "Vamos tirar 3 fotos" já não existe mais quando o envio responde.
+  const lote = loteCoerente();
+  for (let i = 0; i < 2; i++) {
+    await page.evaluate(v => { window.__EFRAT_FAKE_FACE.descritor = v; }, lote[i]);
     await page.click('#btnTirar');
     await expect(page.locator('.shots img')).toHaveCount(i + 1, { timeout: 10000 });
   }
+  await page.evaluate(v => { window.__EFRAT_FAKE_FACE.descritor = v; }, lote[2]);
+  await page.click('#btnTirar');
 
   await expect(page.locator('h1')).toContainText('Pronto', { timeout: 20000 });
   await expect(page.locator('main')).toContainText('fechar esta página');
@@ -153,12 +173,23 @@ test('reabrir depois de enviado mostra "já recebemos", não erro', async ({ pag
   // próxima: `#btnTirar` é recriado a cada repintura de `#tela`, então
   // clicar de novo antes do handler assíncrono anterior terminar pode
   // disparar duas capturas sobrepostas.
-  for (let i = 0; i < 3; i++) {
+  const lote = loteCoerente();
+  for (let i = 0; i < 2; i++) {
+    await page.evaluate(v => { window.__EFRAT_FAKE_FACE.descritor = v; }, lote[i]);
     await page.click('#btnTirar');
     await expect(page.locator('.shots img')).toHaveCount(i + 1, { timeout: 10000 });
   }
+  await page.evaluate(v => { window.__EFRAT_FAKE_FACE.descritor = v; }, lote[2]);
+  await page.click('#btnTirar');
   await expect(page.locator('h1')).toContainText('Pronto', { timeout: 20000 });
 
+  // Reabrir de verdade: pagina.js tira o fragmento da URL com replaceState
+  // logo na 1ª carga (§4.4), então um 2º goto() pro MESMO link, sem o
+  // fragmento sobrando na URL atual, é só diferença de fragmento aos olhos
+  // do navegador — navegação same-document, sem recarregar o documento nem
+  // rodar `iniciar()` de novo. Um clique real no link (outra aba, ou depois
+  // de fechar) sempre recarrega do zero; about:blank simula isso aqui.
+  await page.goto('about:blank');
   await abrirPagina(page, token);
   await expect(page.locator('main')).toContainText('Já recebemos suas fotos');
 });
