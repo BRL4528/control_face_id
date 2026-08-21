@@ -193,6 +193,23 @@ O mesmo par aparece na guarda do `apiBase`: ela não verifica que existe um
 no arquivo é o estado normal e correto, então presença de string não diz nada; o
 que importa é qual sobrevive.
 
+**Duas ressalvas, e as duas impedem "consertos" errados nesta direção.**
+
+*Mecanismo é relativo à propriedade.* Quando a propriedade **é** textual — o
+mesmo prefixo tendo de aparecer nos três arquivos que precisam concordar —
+conferir texto **é** conferir resultado, e a guarda está certa. Onde o texto é só
+um retrato da propriedade, aí é proxy: a guarda do HTML inicial lê atributo em vez
+de observar o boot, e está declarada como proxy de propósito. Proxy declarado
+como proxy é aceitável; proxy passando por resultado não é — e a diferença entre
+os dois é só alguém ter escrito qual dos dois é.
+
+*Guarda de resultado exige contraprova, senão passa por vacuidade.* Afirmar só o
+que a coisa **não** faz deixa passar o caso em que ela não faz **nada**: um
+`sw.js` sem handler de fetch satisfaz "não assume os caminhos públicos". Por isso
+a guarda também exige que ele **assuma** `/index.html` e os modelos. Generalizando:
+toda assertiva de ausência precisa de uma assertiva de presença ao lado, no mesmo
+teste, ou a ausência pode vir de o mecanismo não ter rodado.
+
 Guarda de propriedade sobrevive à refatoração. Guarda de implementação vira
 mentira na primeira limpeza — **e continua verde enquanto mente**, que é o que a
 torna pior que guarda nenhuma.
