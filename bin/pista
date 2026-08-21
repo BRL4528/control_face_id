@@ -27,7 +27,12 @@ set -u
 so_exe() {
   for p in $1; do
     b=$(basename "$(readlink -f "/proc/$p/exe" 2>/dev/null)" 2>/dev/null) || continue
-    case " $2 " in *" $b "*) printf '%s ' "$p";; esac
+    # PREFIXO e nao nome exato: o binario padrao do playwright headless e
+    # chrome-headless-shell, e tres versoes seguidas desta ferramenta nao o viam
+    # -- a primeira nao filtrava, a segunda cortava comm em 15 chars, a terceira
+    # casava nome exato contra lista incompleta. exe resolve a truncagem;
+    # prefixo resolve a lista. As duas juntas, nao uma no lugar da outra.
+    for pref in $2; do case "$b" in "$pref"*) printf '%s ' "$p"; break;; esac; done
   done
 }
 
@@ -42,7 +47,7 @@ alvo=$(so_exe    "$(pgrep -f 'playwright test')" "node")
 # pista fica PERMANENTEMENTE OCUPADA, e portao que sempre barra treina a pessoa
 # a contornar o portao. Seria o defeito mais caro desta ferramenta: mataria o
 # uso dela, nao so a leitura. Preserve o filtro por argv. (Achado do QA.)
-chrome=$(so_exe  "$(pgrep -f 'remote-debugging|--headless')" "chrome chromium headless_shell chrome_crashpad_handler chromium-browser")
+chrome=$(so_exe  "$(pgrep -f 'remote-debugging|--headless')" "chrome chromium headless")
 serve=$(so_exe   "$(pgrep -f '(tests/e2e/servir\.js|(visual|proxy|servir)[^/]*\.(mjs|cjs|js))')" "node")
 
 ocupado=0
