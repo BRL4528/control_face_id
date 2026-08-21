@@ -86,6 +86,12 @@ export function semearPendencia(estado, pendencia) {
   return estado.correcoes.at(-1);
 }
 
+export function semearRecadastro(estado, recadastro) {
+  if (!recadastro || !recadastro.template_id) throw new Error('seed de recadastro exige template_id');
+  estado.recadastros.push(Object.assign({ versao: 1 }, recadastro));
+  return estado.recadastros.at(-1);
+}
+
 export function criarServidor(opts = {}) {
   const estado = {
     token: opts.token || 'TOKEN-TESTE',
@@ -112,6 +118,7 @@ export function criarServidor(opts = {}) {
 
   for (const marcacao of (opts.marcacoes || [])) semearMarcacao(estado, marcacao);
   for (const pendencia of (opts.pendencias || [])) semearPendencia(estado, pendencia);
+  for (const recadastro of (opts.recadastros || [])) semearRecadastro(estado, recadastro);
 
   const rhUsuario = opts.rhUsuario || {
     usuario: 'rh', nome: 'RH Teste',
@@ -545,7 +552,7 @@ export function criarServidor(opts = {}) {
             pessoas: pessoas.map(p => ({
               pessoa_id: p.pessoa_id, matricula: p.matricula, nome: p.nome,
               equipe_id: p.equipe_id, papel: p.papel, ativo: !estado.inativos.has(p.pessoa_id),
-              equipes_geridas: '', tem_biometria: true, miniatura: null
+              equipes_geridas: '', tem_biometria: !!(p.vetores && p.vetores.length), miniatura: p.miniatura || null
             })),
             marcacoes: marcs, recadastros: estado.recadastros,
             servidor_hora: new Date().toISOString()
