@@ -50,7 +50,9 @@ export function emCooldown(pessoaId, marcacoesDoDia, agoraMs, cooldownMs) {
 /**
  * Quais itens saem da fila local depois da resposta do servidor.
  * `aceito` e `duplicado` significam que o servidor tem o registro — some.
- * `rejeitado` fica retido: é problema que precisa de gente.
+ * `retido` também sai daqui: o servidor já gravou (§1.6), só falta revisão
+ * do RH — retentar localmente reenviaria pra sempre um item que o servidor
+ * não vai aceitar de novo. `rejeitado` é tratado à parte, por `itensRecusados`.
  */
 export function itensParaRemover(resultados) {
   return (resultados || [])
