@@ -936,6 +936,16 @@ instrumento não protege só contra o próprio erro; protege contra a explicaç�
 outro absorver o seu dado. Quando você explicar um sintoma, diga que a explicação
 cobre o caso que **você** viu.
 
+**Corolário sobre consertar.** Se um sintoma volta depois de você consertar a
+causa, a pergunta seguinte não é *"qual é a próxima causa"* — é **se as causas
+anteriores eram exclusivas ou somáveis**. Três versões seguidas de uma ferramenta
+erraram no mesmo ponto por três causas diferentes (não filtrar, truncar em 15
+caracteres, casar nome exato contra lista incompleta), porque cada conserto atacou
+a causa *visível naquela rodada* e elas coexistiam. O que resolveu não foi um
+conserto melhor: foi juntar duas ideias que estavam competindo, em vez de trocar
+uma pela outra. É o irmão pelo avesso do critério de raiz — lá o contorno antigo
+sobra depois do conserto; aqui sobra a causa.
+
 É o mesmo movimento nos três padrões seguintes: a **confiança mora dentro da
 asserção** (igualdade exata para o algébrico, faixa para o indicativo), a
 **contraprova vem antes da negação**, e o **limite mora dentro do instrumento**.
