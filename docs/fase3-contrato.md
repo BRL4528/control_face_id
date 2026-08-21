@@ -1458,8 +1458,32 @@ mostra:
 **Nunca recusa por divergência de modelo.** Recusar puniria o colaborador por um
 problema de deploy que ele não pode resolver, no meio de um cadastro de rosto — e o
 template do link nasce `pendente` de todo jeito, então há um humano no caminho. O que
-o contrato exige é que a divergência **apareça**: o card da fila de recadastro diz
-"cadastrado com um modelo diferente do que o app usa" antes do botão de aprovar.
+o contrato exige é que a divergência **apareça antes da decisão**, não depois.
+
+**Texto, fechado com o Designer.** Reusa o bloco de aviso que o card já tem (o
+"via link do celular"), mesma posição, antes da conferência e do botão Aprovar, e
+**sem gate novo**:
+
+> "Este cadastro foi feito com uma versão diferente do reconhecimento facial.
+> Aprovando, o rosto dela pode não ser reconhecido depois — se acontecer, basta
+> recadastrar de novo."
+
+Três coisas que esse texto acerta e que valem escritas, porque uma reescrita futura
+pode perder qualquer uma delas: nomeia o problema **sem** "modelo" ou "versão do
+sistema" (o RH não precisa saber que existe um modelo, só que aquela peça está fora
+do padrão); diz a consequência **concreta** — "não ser reconhecido" é vocabulário
+que o RH já vê nas pendências, não conceito novo; e fecha com a **saída**, que
+existe e é barata, para não soar como problema grave ou culpa de alguém.
+
+Nada de gate adicional, e a razão é boa: a conferência que `53136b3` já exige é
+**confirmação de identidade** ("é a pessoa certa"), e isto é **informação para a
+decisão**. São eixos diferentes; somar mais um checkbox treinaria o RH a clicar em
+checkbox, que é justamente o que a fila separada existe para evitar.
+
+Avisos coincidentes **empilham, não fundem**: um cadastro que veio por link *e* tem
+divergência de modelo mostra os dois blocos, um embaixo do outro. Cada um cobre um
+risco diferente — quem capturou versus com que motor — e texto fundido esconderia
+um dos dois.
 
 `Por quê isso é melhor do que a guarda que eu tinha proposto:` na dívida anterior eu
 sugeri uma guarda comparando periodicamente a versão publicada nas duas origens. Ela
@@ -1661,8 +1685,10 @@ Contrato (servidor falso + workflows):
     - as duas rotas novas sem `modelo_id` → `400 MODELO_AUSENTE`;
     - `modelo_id` igual ao de referência → grava limpo;
     - `modelo_id` conhecido e **diferente** da referência → **grava** e marca
-      `modelo_divergente`, e o card da fila diz "cadastrado com um modelo diferente
-      do que o app usa" **antes** do botão de aprovar;
+      `modelo_divergente`, e o card da fila mostra o aviso de §4.7 **antes** da
+      conferência e do botão Aprovar, sem gate adicional;
+    - card com as duas condições (veio por link **e** modelo divergente) mostra os
+      **dois** avisos empilhados, não um texto fundido;
     - `modelo_id` desconhecido → **grava** e marca `modelo_desconhecido`;
     - **nunca recusa por divergência de modelo** — o teste afirma que o template
       existe depois de um envio divergente;
