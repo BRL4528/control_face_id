@@ -103,6 +103,12 @@ export function criarServidor(opts = {}) {
     for (let i = 0; i < 6; i++) codigo += alfabetoCodigo[crypto.randomInt(alfabetoCodigo.length)];
     return codigo;
   };
+  // T-87615C: código pendente não fica prova de posse válida pra sempre —
+  // depois de 24h o aparelho recebe um novo na próxima consulta de estado
+  // (mostrarAparelhosCodigoExpirado) e o antigo para de resolver no /rh/aparelho.
+  const EXPIRA_PENDENTE_MS = opts.expiraPendenteMs || 24 * 60 * 60 * 1000;
+  const codigoExpirado = dispositivo =>
+    !dispositivo.criado_em || (Date.now() - Date.parse(dispositivo.criado_em)) > EXPIRA_PENDENTE_MS;
   const novoCodigoUnico = () => {
     for (let tentativa = 0; tentativa < 3; tentativa++) {
       const codigo = codigoAleatorio();
@@ -110,10 +116,13 @@ export function criarServidor(opts = {}) {
     }
     return null;
   };
+  // Toda chamada autenticada de aparelho conta como "uso" — é o que a aba
+  // Aparelhos do RH mostra como "último uso" nos aprovados (T-87615C).
   const dispositivoAutenticado = (req, dispositivoId) => {
     const dispositivo = estado.dispositivos.get(dispositivoId);
     const credencial = bearer(req);
     if (!dispositivo || !credencial || dispositivo.credencial_hash !== hashCredencial(credencial)) return null;
+    dispositivo.ultimo_uso = new Date().toISOString();
     return dispositivo;
   };
 
@@ -219,7 +228,8 @@ export function criarServidor(opts = {}) {
             estado: 'ativo', codigo_curto: null, apelido: body.apelido, ua: body.ua,
             geo: body.geo || null, tentativas: 1, local_id: 'local-piloto',
             equipes_ids: ['eq-1'], configuracao_versao: 1,
-            aprovado_por: 'migracao-v3', aprovado_em: new Date().toISOString()
+            aprovado_por: 'migracao-v3', aprovado_em: new Date().toISOString(),
+            criado_em: new Date().toISOString(), ultimo_uso: null
           };
           estado.dispositivos.set(body.dispositivo_id, migrado);
           estado.tokenLegadoConsumido = true;
@@ -244,7 +254,8 @@ export function criarServidor(opts = {}) {
           dispositivo_id: body.dispositivo_id, credencial_hash: body.credencial_publica,
           estado: 'pendente', codigo_curto: codigo, apelido: body.apelido, ua: body.ua,
           geo: body.geo || null, tentativas: 1, local_id: null, equipes_ids: [],
-          configuracao_versao: 0, aprovado_por: null, aprovado_em: null
+          configuracao_versao: 0, aprovado_por: null, aprovado_em: null,
+          criado_em: new Date().toISOString(), ultimo_uso: null
         };
         estado.dispositivos.set(body.dispositivo_id, dispositivo);
         estado.codigosPendentes.set(codigo, body.dispositivo_id);
@@ -259,6 +270,15 @@ export function criarServidor(opts = {}) {
         const dispositivo = dispositivoAutenticado(req, body.dispositivo_id);
         if (!dispositivo) return responder(401, erro('CREDENCIAL_INVALIDA', 'credencial invalida'));
         if (dispositivo.estado === 'pendente') {
+          if (codigoExpirado(dispositivo)) {
+            estado.codigosPendentes.delete(dispositivo.codigo_curto);
+            const novo = novoCodigoUnico();
+            if (novo) {
+              dispositivo.codigo_curto = novo;
+              dispositivo.criado_em = new Date().toISOString();
+              estado.codigosPendentes.set(novo, dispositivo.dispositivo_id);
+            }
+          }
           return responder(200, {
             ok: true, estado: 'pendente', codigo_curto: dispositivo.codigo_curto,
             consultar_apos_s: 15, request_id: requestId()
@@ -509,6 +529,14 @@ export function criarServidor(opts = {}) {
               equipes_geridas: '', tem_biometria: true, miniatura: null
             })),
             marcacoes: marcs, recadastros: estado.recadastros,
+            // Aba Aparelhos (T-87615C): codigo_curto NUNCA sai daqui — é prova
+            // de posse física do aparelho. Se aparecesse numa leitura do RH,
+            // deixaria de provar que alguém está olhando a tela de verdade e
+            // viraria só enfeite; quem aprova tem que digitar o código lido lá.
+            dispositivos: [...estado.dispositivos.values()].map(d => ({
+              dispositivo_id: d.dispositivo_id, apelido: d.apelido, estado: d.estado,
+              criado_em: d.criado_em, ultimo_uso: d.ultimo_uso
+            })),
             servidor_hora: new Date().toISOString()
           });
         }
@@ -534,6 +562,49 @@ export function criarServidor(opts = {}) {
             if (m) { m.veredito = 'aceito'; m.origem = 'biometria'; m.requer_revisao = false; }
           }
           return responder(200, { ok: true, alvo_tipo: body.tipo, alvo_id: body.id, acao: body.acao });
+        }
+        if (url.pathname.endsWith('/aparelho')) {
+          // 'aprovar' e o unico caminho que ATIVA um aparelho, e resolve
+          // SOMENTE pelo codigo digitado — nunca por dispositivo_id. E a prova
+          // de posse fisica (docs/adr-acesso-v3.md): quem aprova tem que estar
+          // vendo a tela do aparelho, nao so clicando num item de lista.
+          if (body.acao === 'aprovar') {
+            const codigo = String(body.codigo || '').trim().toUpperCase();
+            if (!codigo) return responder(422, { ok: false, erro: 'digite o codigo mostrado no aparelho' });
+            const dispositivoId = estado.codigosPendentes.get(codigo);
+            const dispositivo = dispositivoId && estado.dispositivos.get(dispositivoId);
+            if (!dispositivo || dispositivo.estado !== 'pendente' || codigoExpirado(dispositivo)) {
+              return responder(422, { ok: false, erro: 'codigo invalido ou expirado' });
+            }
+            estado.codigosPendentes.delete(codigo);
+            dispositivo.estado = 'ativo';
+            // Sem tela de equipes/local ainda nesta fase (docs/fase3-rh-pessoas.md
+            // § B, fora do escopo de T-87615C): aprovar libera para todas as
+            // equipes conhecidas, senão o aparelho fica ativo e sem escopo —
+            // /efrat/carga devolveria DISPOSITIVO_SEM_ESCOPO e o deadlock so mudaria de lugar.
+            dispositivo.equipes_ids = ['eq-1', 'eq-2'];
+            dispositivo.configuracao_versao = 1;
+            dispositivo.aprovado_por = rhUsuario.usuario;
+            dispositivo.aprovado_em = new Date().toISOString();
+            return responder(200, { ok: true, dispositivo_id: dispositivo.dispositivo_id, estado: dispositivo.estado });
+          }
+          // Recusar e revogar nao ativam nada — não exigem prova de posse,
+          // então continuam endereçáveis por dispositivo_id (linha da lista).
+          if (!body.dispositivo_id) return responder(422, { ok: false, erro: 'dispositivo_id obrigatorio' });
+          const dispositivo = estado.dispositivos.get(body.dispositivo_id);
+          if (!dispositivo) return responder(404, { ok: false, erro: 'aparelho nao encontrado' });
+          if (body.acao === 'recusar') {
+            if (dispositivo.estado !== 'pendente') return responder(422, { ok: false, erro: 'aparelho nao esta pendente' });
+            estado.codigosPendentes.delete(dispositivo.codigo_curto);
+            dispositivo.estado = 'negado';
+          } else if (body.acao === 'revogar') {
+            if (dispositivo.estado !== 'ativo') return responder(422, { ok: false, erro: 'aparelho nao esta ativo' });
+            dispositivo.estado = 'revogado';
+            dispositivo.equipes_ids = [];
+          } else {
+            return responder(422, { ok: false, erro: 'acao desconhecida' });
+          }
+          return responder(200, { ok: true, dispositivo_id: dispositivo.dispositivo_id, estado: dispositivo.estado });
         }
         return responder(404, { ok: false, erro: 'rota rh desconhecida' });
       }

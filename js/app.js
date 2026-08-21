@@ -139,8 +139,8 @@ function mostrarAguardando(codigo) {
     limparCodigoAguardando();
   }
   $('aguardandoTexto').textContent = codigo
-    ? 'Mostre este código para o RH liberar o aparelho.'
-    : 'O RH ainda não liberou este aparelho.';
+    ? 'Mostre este código para quem cuida do RH — é só isso, você não precisa fazer mais nada agora.'
+    : 'Quem cuida do RH ainda não liberou este aparelho.';
 }
 
 function mostrarBloqueado(msg) {
@@ -207,9 +207,13 @@ async function verificarDispositivo(forcado) {
     S.pollTimer = setTimeout(verificarDispositivo, (info.consultar_apos_s || 15) * 1000);
     return;
   }
-  mostrarBloqueado(info.estado === 'revogado'
-    ? 'Este aparelho teve o acesso revogado. Fale com o RH.'
-    : 'O RH ainda não liberou este aparelho.');
+  // 'negado' (T-87615C: RH ganhou o botão "Recusar" e este ramo virou
+  // alcançável de verdade) precisa de mensagem própria — "ainda não liberou"
+  // seria enganoso pra quem já foi recusado, não só esquecido na fila.
+  mostrarBloqueado(
+    info.estado === 'revogado' ? 'Este aparelho teve o acesso revogado. Fale com quem cuida do RH.' :
+    info.estado === 'negado' ? 'Este aparelho não foi liberado. Fale com quem cuida do RH.' :
+    'Quem cuida do RH ainda não liberou este aparelho.');
   S.pollTimer = setTimeout(verificarDispositivo, 30000);
 }
 
@@ -268,6 +272,11 @@ function abrirLoginRh() {
   // T-E3DBD4: alcançável com o aparelho pendente. Suspende o poll de fundo
   // até sair — ver o comentário de verificarDispositivo().
   S.emRh = true;
+  // T-87615C: o código só prova posse física enquanto ninguém além de quem
+  // está vendo a tela do aparelho pode lê-lo — inclusive se essa mesma tela
+  // apertar "Sou do RH". #aguardando fica escondido daqui pra frente, mas
+  // hide não apaga: sem isso o código continuaria no HTML da página.
+  limparCodigoAguardando();
   mostrar('loginRh');
   $('rhSenha').value = '';
   setTimeout(() => $('rhUsuario').focus(), 100);

@@ -41,7 +41,9 @@ export const ApiRh = {
   dados(cred, dias) { return postRh('/efrat/rh/dados', Object.assign({ dias: dias || 30 }, cred)); },
   equipe(cred, dados) { return postRh('/efrat/rh/equipe', Object.assign({}, cred, dados)); },
   colaborador(cred, dados) { return postRh('/efrat/rh/colaborador', Object.assign({}, cred, dados)); },
-  decidir(cred, dados) { return postRh('/efrat/rh/decidir', Object.assign({}, cred, dados)); }
+  decidir(cred, dados) { return postRh('/efrat/rh/decidir', Object.assign({}, cred, dados)); },
+  // acao: 'aprovar' | 'recusar' | 'revogar' (T-87615C, docs/fase3-rh-pessoas.md § A).
+  aparelho(cred, dados) { return postRh('/efrat/rh/aparelho', Object.assign({}, cred, dados)); }
 };
 
 /**
