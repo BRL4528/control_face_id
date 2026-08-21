@@ -425,6 +425,25 @@ function pitchRelativo(landmarks) {
 }
 
 /**
+ * SÓ RODA NO CLIENTE — não mande landmarks ao servidor para chamar esta
+ * função lá. Três razões, e a 2ª decide:
+ * 1. os landmarks já estão no cliente no instante da captura; mandá-los ao
+ *    servidor para ele devolver o que o cliente já pode calcular muda o
+ *    formato de quatro arquivos (face.js, rh.js, pagina.js, servidor) sem
+ *    ganhar nada;
+ * 2. geometria facial é dado novo a transmitir — o produto promete "nenhuma
+ *    imagem armazenada, só o template", e hoje só descritor sai do aparelho.
+ *    Landmark não é imagem, mas é geometria de rosto de uma pessoa
+ *    específica, e o que trafega pode ser logado — ampliar isso para rodar
+ *    um gate de QUALIDADE é desproporcional;
+ * 3. NÃO é o mesmo caso da coerência de vetores (T-8ADD9C), que teve de ir
+ *    pro servidor porque o cliente podia MENTIR com consequência PERMANENTE
+ *    (template de duas pessoas gravado). Aqui, burlar só deixa passar uma
+ *    foto de queixo baixo DA PESSOA CERTA — a coerência no servidor continua
+ *    pegando o caso grave (pessoa errada). Gate de qualidade contornável é
+ *    aceitável; gate de identidade contornável não era. Não repita a lição
+ *    de um onde ela não vale.
+ *
  * Consistência de pose ENTRE as fotos de um lote de cadastro (T-5EC67B) — não
  * pitch absoluto. Um gate absoluto de pitch em 2D exigiria assumir uma razão
  * antropométrica pra saber o que conta como "de frente", e essa razão varia
