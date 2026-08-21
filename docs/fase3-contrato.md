@@ -70,6 +70,54 @@ acumulando sem ninguém olhar (dívida 9) não é neutro, é um "nós medimos is
 pode sacar. A família toda é uma só: coisa que parece evidência e não é. Todo campo deste contrato que existe para alguém *notar algo* carrega, junto,
 a resposta a "o que faria isto virar constante?".
 
+## Convenção de nomes: a força de uma afirmação vai no nome dela
+
+Varredura de nomes pedida pelo Orquestrador, irmã da tabela de procedência de §4.2 — lá o
+risco era número construído lido como medido; aqui é **afirmação fraca lida como forte**.
+
+O achado não foi o que eu previ. Eu esperava encontrar nomes ambíguos (`verificado`,
+`confirmado`); o documento **não tem** esses campos. O que ele tem é uma convenção que eu
+mesmo criei e apliquei **pela metade**: `apelido_declarado`, `geo_declarada` e
+`origem_observada` carregam a força no nome, e campos da mesma natureza não carregam.
+Convenção aplicada pela metade é pior que convenção ausente, porque a presença do sufixo
+em alguns campos faz a ausência nos outros parecer significado.
+
+| Sufixo | Força | O que é |
+|---|---|---|
+| `_declarado` | **nenhuma** | o cliente afirmou, ninguém checou |
+| `_observado` | fato do servidor | o servidor viu acontecer |
+| `_calculado` | aritmética sobre entrada não verificada | o servidor computou; os insumos vieram do cliente |
+| `_provado` | posse verificada | confere contra hash/credencial |
+| `_autorizado_por`, `_decidido_por` | responsabilidade humana | alguém assumiu; nenhuma checagem técnica |
+
+**Onde o sufixo é obrigatório:** quando o mesmo campo poderia plausivelmente ser de outra
+força. `pedidos_da_mesma_rede_1h` não precisa — contagem só pode ser observada. `modelo_id`
+**precisa**, porque poderia ser verificado e não é. Essa é a regra que impede a convenção de
+inflar todo nome do sistema.
+
+Os dois casos que a varredura encontrou:
+
+- **`modelo_id` é declarado pelo cliente** (§4.7) e não diz isso no nome, enquanto
+  `apelido_declarado`, que é da mesma natureza, diz. Nome honesto:
+  **`modelo_id_declarado`**. Feio e honesto vale mais que elegante e ambíguo.
+- **A "conferência" do RH na fila de recadastro** (`53136b3`) é um clique de humano, e a
+  palavra sugere verificação. Na prosa e na tela: **declaração de que conferiu**, não
+  conferência. O que o sistema sabe é que alguém marcou uma caixa; o que aconteceu antes de
+  marcar, ele não sabe.
+
+E por que isso não é preciosismo: a compensação que este contrato oferece pela **ausência de
+liveness** nos caminhos `link` e `rh_upload` é exatamente a conferência humana (§4.3). Se
+"conferência" e "verificado" forem lidos com a mesma confiança, perde-se a distinção que
+sustenta essa compensação — e ela é a única que sustenta dois dos três caminhos de cadastro.
+
+**Quando aplicar, e é a parte que importa mais que a proposta.** `modelo_id` está sendo
+implementado agora (T-8ADD9C). Renomear campo em voo custa mais do que compra, e um contrato
+que muda nome de campo no meio da implementação vira o defeito que ele estava tentando
+evitar. Recomendação: o sufixo vale **para nome que ainda não está em código**; para
+`modelo_id`, a força fica registrada na descrição do campo e a renomeação espera uma passada
+única e coordenada, **depois** de os três caminhos de cadastro estarem entregues. O cliente
+está esperando funcionalidade, não vocabulário.
+
 ---
 
 ## 0. Convenções

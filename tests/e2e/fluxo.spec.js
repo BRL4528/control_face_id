@@ -464,6 +464,11 @@ test('fila de recadastro separa substituicao de primeiro cadastro e trava aprova
   expect(ctx.estado.decisoes).toContainEqual({ tipo: 'template', id: 't-sub-ana', acao: 'aprovar' });
 });
 
+// T-89E18B: cobertura de "aviso aparece em link e upload, nunca na câmera do
+// RH" mora em tests/e2e/aviso-liveness.spec.js — teste dedicado que o QA já
+// tinha escrito (nasceu vermelho contra o bug real: viaLink só cobria 'link').
+// Puxado pra este ramo em vez de duplicado aqui.
+
 test('espelho de ponto mostra as marcacoes do colaborador', async ({ page }) => {
   semearMarcacao(ctx.estado, {
     id_cliente: 'seed-marc-ana', pessoa_id: 'p-ana', equipe_id: 'eq-1',
