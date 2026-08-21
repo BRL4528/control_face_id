@@ -1,5 +1,5 @@
 import { Store } from './store.js';
-import { itensParaRemover, calcularDeriva } from './regras.js';
+import { itensParaRemover, itensRecusados, calcularDeriva } from './regras.js';
 
 const cfg = () => window.EFRAT_CFG;
 
@@ -168,8 +168,13 @@ export const Api = {
    * 1. Envio único em voo. Data Table não tem índice único, então a
    *    deduplicação depende de nunca haver dois lotes simultâneos do mesmo
    *    aparelho. Este é o cadeado.
-   * 2. Só sai da fila o que o servidor confirmou (aceito ou duplicado).
-   * 3. Rejeitado fica retido e visível — é problema que precisa de gente.
+   * 2. TODO status sai da fila — aceito, duplicado, retido e rejeitado (§1.6
+   *    do contrato). Retentar o que o servidor já decidiu, aceito ou não,
+   *    não muda a decisão — só enche o lote seguinte de lixo.
+   * 3. Aceito/duplicado/retido arquivam em `enviadas` (o servidor tem o
+   *    registro, mesmo quando ainda não conta como ponto). Rejeitado nunca
+   *    é ponto e nunca é reenviado: vai para `recusadas`, visível pro
+   *    operador — é problema que precisa de gente, não retentativa muda.
    */
   _emVoo: null,
 
@@ -191,14 +196,7 @@ export const Api = {
     if (!pendentes.length) return { ok: true, nada: true };
 
     try {
-      const lote = pendentes
-        .filter(m => !m._erroPermanente)
-        .slice(0, cfg().loteMax)
-        .map(m => {
-          const copia = Object.assign({}, m);
-          delete copia._erro; delete copia._tentativas; delete copia._erroPermanente;
-          return copia;
-        });
+      const lote = pendentes.slice(0, cfg().loteMax);
       if (!lote.length) return { ok: true, nada: true };
 
       const r = await post('/efrat/marcacoes', { dispositivo_id: dispositivoId, marcacoes: lote }, { credencial });
@@ -208,16 +206,22 @@ export const Api = {
       }
 
       const resultados = r.json.resultados || [];
-      const remover = itensParaRemover(resultados);
-      for (const id of remover) {
+      for (const id of itensParaRemover(resultados)) {
         const original = lote.find(x => x.id_cliente === id);
         if (original) await Store.confirmar(original);
         await Store.tirarDaFila(id);
       }
-      for (const res of resultados) {
-        if (res.status === 'rejeitado') {
-          await Store.marcarErro(res.id_cliente, res.motivo || 'rejeitado pelo servidor');
+      for (const id of itensRecusados(resultados)) {
+        const original = lote.find(x => x.id_cliente === id);
+        const res = resultados.find(x => x.id_cliente === id);
+        if (original) {
+          await Store.recusar(Object.assign({}, original, {
+            recusado_em: new Date().toISOString(),
+            motivo_codigo: res.motivo_codigo || null,
+            motivo: res.motivo || 'rejeitado pelo servidor'
+          }));
         }
+        await Store.tirarDaFila(id);
       }
       await Store.registrar('sync', r.json.resumo);
       return { ok: true, resumo: r.json.resumo, resultados };

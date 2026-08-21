@@ -47,24 +47,37 @@ function statusPorta(txt, classe) {
   $('portaStatus').className = 'nota ' + (classe || '');
 }
 
+/**
+ * T-D00CE0 (§1.6): recusada nunca mais é reenviada nem some sozinha — "visível"
+ * é parte da regra, não só o "nunca reenviada". Recusada tem prioridade sobre
+ * fila pendente porque é o caso que exige gente, não só tempo: a fila pendente
+ * se resolve sozinha na próxima sincronização, a recusada nunca vai se resolver
+ * sozinha.
+ */
+async function statusFila() {
+  const [fila, recusadas] = await Promise.all([Store.fila(), Store.recusadas()]);
+  if (recusadas.length) {
+    statusPorta(recusadas.length + ' marcação(ões) recusada(s) pelo servidor — fale com o RH.', 'badfg');
+  } else if (fila.length) {
+    statusPorta(fila.length + ' marcação(ões) esperando envio.', 'warnfg');
+  } else {
+    statusPorta('');
+  }
+}
+
 async function irParaPorta() {
   mostrar('porta');
   limparCodigoAguardando();
   $('btnPonto').disabled = !Face.pronto;
-  const fila = await Store.fila();
   if (!Face.pronto) statusPorta('Carregando o reconhecimento…');
-  else if (fila.length) statusPorta(fila.length + ' marcação(ões) esperando envio.', 'warnfg');
-  else statusPorta('');
+  else await statusFila();
   if (navigator.onLine) sincronizarFundo();
 }
 
 async function sincronizarFundo() {
   if (!S.dispositivo) return;
   await Api.sincronizar(S.dispositivo.dispositivo_id, S.dispositivo.credencial);
-  const fila = await Store.fila();
-  if (!$('porta').classList.contains('hide')) {
-    statusPorta(fila.length ? fila.length + ' marcação(ões) esperando envio.' : '', fila.length ? 'warnfg' : '');
-  }
+  if (!$('porta').classList.contains('hide')) await statusFila();
 }
 
 /* --------------------------------------------------- identidade v3 */

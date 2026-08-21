@@ -19,6 +19,65 @@ export function extrairCspDeHeaders() {
   return match ? match[1].trim() : '';
 }
 
+// T-D00CE0 (docs/fase3-contrato.md §1.6 e §3.3.3): decisão de servidor sobre
+// se uma marcação entra, fica retida ou é rejeitada — pura, sem estado além
+// do que recebe, testável em Node. Mora aqui e não em js/regras.js de
+// propósito: o cliente nunca decide isso, só lê o `status`/`motivo_codigo`
+// que a rota devolve (mesmo raciocínio da coerência — número/decisão sem
+// função no cliente não deve viajar no bundle).
+export const JANELA_DRENAGEM_MS = 30 * 24 * 3600 * 1000;
+export const TETO_RETIDAS_POS_REVOGACAO = 500;
+
+/** null = segue o fluxo normal (aparelho ativo). Senão, {status, motivo_codigo}. */
+export function resultadoPorEstadoAparelho(dispositivo, agoraMs) {
+  if (!dispositivo || dispositivo.estado === 'pendente' || dispositivo.estado === 'negado') {
+    return { status: 'rejeitado', motivo_codigo: 'aparelho_nunca_liberado' };
+  }
+  if (dispositivo.estado === 'ativo') return null;
+  if (dispositivo.estado === 'revogado') {
+    const desde = Date.parse(dispositivo.revogado_em);
+    if (isFinite(desde) && (agoraMs - desde) > JANELA_DRENAGEM_MS) {
+      return { status: 'rejeitado', motivo_codigo: 'janela_de_drenagem_encerrada' };
+    }
+    if ((dispositivo.retidasPosRevogacao || 0) >= TETO_RETIDAS_POS_REVOGACAO) {
+      return { status: 'rejeitado', motivo_codigo: 'limite_pos_revogacao' };
+    }
+    return { status: 'retido', motivo_codigo: 'aparelho_revogado' };
+  }
+  return { status: 'rejeitado', motivo_codigo: 'aparelho_nunca_liberado' };
+}
+
+/**
+ * null = segue o fluxo normal (pessoa ativa e conhecida). `pessoa` precisa
+ * trazer `.ativo` e `.inativado_em` já resolvidos — a função não sabe de
+ * `estado.inativos`, só decide a partir do que recebe.
+ */
+export function resultadoPorEstadoPessoa(pessoa, marcadoEmIso) {
+  if (!pessoa) return { status: 'rejeitado', motivo_codigo: 'pessoa_desconhecida' };
+  if (pessoa.ativo === false) {
+    const inativadoEm = Date.parse(pessoa.inativado_em);
+    const marcadoEm = Date.parse(marcadoEmIso);
+    if (isFinite(inativadoEm) && isFinite(marcadoEm) && marcadoEm < inativadoEm) {
+      return { status: 'retido', motivo_codigo: 'pessoa_inativa_no_envio' };
+    }
+    return { status: 'rejeitado', motivo_codigo: 'pessoa_inativa' };
+  }
+  return null;
+}
+
+// Frase de gente pra cada motivo_codigo — o cliente escolhe por código
+// (§1.6), isto aqui é só o texto que a rota falsa devolve pronto, igual o
+// servidor real faria.
+export const FRASES_MOTIVO = {
+  aparelho_revogado: 'Aparelho revogado: o RH vai conferir esta marcação.',
+  janela_de_drenagem_encerrada: 'Aparelho revogado há mais de 30 dias: este ponto não é mais aceito.',
+  limite_pos_revogacao: 'Muitas marcações deste aparelho depois da revogação: este ponto não é mais aceito.',
+  aparelho_nunca_liberado: 'Este aparelho nunca foi liberado pelo RH.',
+  pessoa_inativa_no_envio: 'Colaborador foi inativado depois desta marcação: o RH vai conferir.',
+  pessoa_inativa: 'Colaborador está inativo: este ponto não é aceito.',
+  pessoa_desconhecida: 'Colaborador não encontrado no cadastro.'
+};
+
 // _headers e a fonte unica da politica de borda. A CSP ja vinha de la; cache
 // tambem tem de vir, senao o E2E valida um cache que nao existe em producao —
 // o caso que importa e a pagina publica de uso unico, que nao pode ser servida
@@ -654,33 +713,85 @@ export function criarServidor(opts = {}) {
         estado.lotesSimultaneos++;
         estado.maxLotesSimultaneos = Math.max(estado.maxLotesSimultaneos, estado.lotesSimultaneos);
         await new Promise(r => setTimeout(r, opts.latenciaMs || 60));
+
+        // T-D00CE0 (§1.6): /efrat/marcacoes NUNCA responde 403 por estado de
+        // aparelho — sempre 200 item a item, que é o único formato em que o
+        // cliente consegue soltar da fila o que já foi resolvido. O gate
+        // genérico lá em cima (linha ~319) já garantiu que a credencial
+        // resolve para ALGUM aparelho conhecido (ou 401 antes de chegar
+        // aqui); aqui só falta olhar o ESTADO desse aparelho.
+        const dispositivoDoLote = estado.dispositivos.get(body.dispositivo_id);
+        const agoraMs = Date.now();
+        const agoraIso = new Date(agoraMs).toISOString();
         const resultados = [];
         for (const m of (body.marcacoes || [])) {
           if (!m || !m.id_cliente || !m.pessoa_id || !m.marcado_em) {
             resultados.push({ id_cliente: m && m.id_cliente, status: 'rejeitado', motivo: 'campos obrigatorios ausentes' });
-          } else if (estado.marcacoes.has(m.id_cliente)) {
-            resultados.push({ id_cliente: m.id_cliente, status: 'duplicado', motivo: null });
-          } else if (estado.inativos.has(m.pessoa_id) || !pessoas.some(p => p.pessoa_id === m.pessoa_id)) {
-            resultados.push({ id_cliente: m.id_cliente, status: 'rejeitado', motivo: 'colaborador inativo ou inexistente' });
-          } else {
-            // Mesma regra do workflow real: gestor, manual, veredito diferente
-            // de aceito ou relogio fora de 2 min vao para a mesa do RH.
-            const p = pessoas.find(x => x.pessoa_id === m.pessoa_id);
-            const deriva = m.deriva_relogio_ms == null ? 0 : Number(m.deriva_relogio_ms);
-            const revisar = m.veredito !== 'aceito' || m.origem === 'manual'
-              || (p && p.papel === 'gestor') || Math.abs(deriva) > 120000;
-            estado.marcacoes.set(m.id_cliente, Object.assign({}, m, {
-              requer_revisao: !!revisar,
-              foto_auditoria: revisar ? (m.foto_auditoria || '') : ''
-            }));
-            resultados.push({ id_cliente: m.id_cliente, status: 'aceito', motivo: null });
+            continue;
           }
+          if (estado.marcacoes.has(m.id_cliente)) {
+            resultados.push({ id_cliente: m.id_cliente, status: 'duplicado', motivo: null });
+            continue;
+          }
+
+          const porAparelho = resultadoPorEstadoAparelho(dispositivoDoLote, agoraMs);
+          if (porAparelho) {
+            const item = Object.assign({}, m, {
+              requer_revisao: true,
+              recebido_em: agoraIso,
+              aparelho_estado_no_envio: dispositivoDoLote ? dispositivoDoLote.estado : 'desconhecido',
+              aparelho_revogado_em: dispositivoDoLote ? (dispositivoDoLote.revogado_em || null) : null,
+              aparelho_apelido: dispositivoDoLote ? dispositivoDoLote.apelido : null,
+              aparelho_dispositivo_id: body.dispositivo_id || null,
+              motivo_codigo: porAparelho.motivo_codigo
+            });
+            if (porAparelho.status === 'retido') {
+              estado.marcacoes.set(m.id_cliente, item);
+              if (dispositivoDoLote) {
+                dispositivoDoLote.retidasPosRevogacao = (dispositivoDoLote.retidasPosRevogacao || 0) + 1;
+              }
+            }
+            resultados.push({
+              id_cliente: m.id_cliente, status: porAparelho.status,
+              motivo_codigo: porAparelho.motivo_codigo, motivo: FRASES_MOTIVO[porAparelho.motivo_codigo]
+            });
+            continue;
+          }
+
+          const pessoa = pessoas.find(p => p.pessoa_id === m.pessoa_id);
+          const pessoaComEstado = pessoa ? Object.assign({}, pessoa, { ativo: !estado.inativos.has(pessoa.pessoa_id) }) : null;
+          const porPessoa = resultadoPorEstadoPessoa(pessoaComEstado, m.marcado_em);
+          if (porPessoa) {
+            const item = Object.assign({}, m, {
+              requer_revisao: true, recebido_em: agoraIso, motivo_codigo: porPessoa.motivo_codigo
+            });
+            if (porPessoa.status === 'retido') estado.marcacoes.set(m.id_cliente, item);
+            resultados.push({
+              id_cliente: m.id_cliente, status: porPessoa.status,
+              motivo_codigo: porPessoa.motivo_codigo, motivo: FRASES_MOTIVO[porPessoa.motivo_codigo]
+            });
+            continue;
+          }
+
+          // Mesma regra do workflow real: gestor, manual, veredito diferente
+          // de aceito ou relogio fora de 2 min vao para a mesa do RH.
+          const deriva = m.deriva_relogio_ms == null ? 0 : Number(m.deriva_relogio_ms);
+          const revisar = m.veredito !== 'aceito' || m.origem === 'manual'
+            || (pessoa && pessoa.papel === 'gestor') || Math.abs(deriva) > 120000;
+          estado.marcacoes.set(m.id_cliente, Object.assign({}, m, {
+            requer_revisao: !!revisar,
+            foto_auditoria: revisar ? (m.foto_auditoria || '') : ''
+          }));
+          resultados.push({ id_cliente: m.id_cliente, status: 'aceito', motivo: null });
         }
         estado.lotesSimultaneos--;
         const conta = s => resultados.filter(x => x.status === s).length;
         return responder(200, {
-          ok: true, servidor_hora: new Date().toISOString(),
-          resumo: { aceitas: conta('aceito'), duplicadas: conta('duplicado'), rejeitadas: conta('rejeitado') },
+          ok: true, servidor_hora: agoraIso,
+          resumo: {
+            aceitas: conta('aceito'), duplicadas: conta('duplicado'),
+            retidas: conta('retido'), rejeitadas: conta('rejeitado')
+          },
           resultados
         });
       }
@@ -954,6 +1065,13 @@ export function criarServidor(opts = {}) {
             if (dispositivo.estado !== 'ativo') return responder(422, { ok: false, erro: 'aparelho nao esta ativo' });
             dispositivo.estado = 'revogado';
             dispositivo.equipes_ids = [];
+            // §1.5/§1.6: revogado_em é a âncora da janela de drenagem de 30
+            // dias e do teto de 500 marcações — sem ela /efrat/marcacoes não
+            // tem como decidir retido vs rejeitado por prazo.
+            dispositivo.revogado_em = new Date().toISOString();
+            dispositivo.revogado_por = rhUsuario.usuario;
+            dispositivo.motivo_decisao = String(body.motivo || '').trim() || null;
+            dispositivo.retidasPosRevogacao = 0;
           } else {
             return responder(422, { ok: false, erro: 'acao desconhecida' });
           }

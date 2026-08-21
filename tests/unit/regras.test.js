@@ -2,10 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   tipoDaVez, vereditoPorDistancia, ranquear, precisaRevisao, emCooldown,
-  itensParaRemover, agoraCorrigido, calcularDeriva, cargaValida, euclidiana, dia,
+  itensParaRemover, itensRecusados, agoraCorrigido, calcularDeriva, cargaValida, euclidiana, dia,
   indicadores, espelho, gestorDeveMarcar,
   presencaPorEquipe, statusPresenca, serieDiaria, pendenciasPorMotivo, LIMIAR_PRESENCA,
-  separarAparelhos, normalizarTelefone, telefonesCompartilhados
+  separarAparelhos, normalizarTelefone, telefonesCompartilhados, retidasPorAparelho
 } from '../../js/regras.js';
 
 const CFG = { limiarAceite: 0.45, limiarCinza: 0.58 };
@@ -83,6 +83,72 @@ test('so sai da fila o que o servidor confirmou', () => {
 
 test('duplicado sai da fila: servidor ja tem o registro', () => {
   assert.deepEqual(itensParaRemover([{ id_cliente: 'x', status: 'duplicado' }]), ['x']);
+});
+
+// T-D00CE0 (§1.6 do contrato): retido sai da fila igual aceito/duplicado —
+// o servidor já tem o registro, só não conta como ponto até o RH decidir.
+test('retido sai da fila igual aceito e duplicado: o servidor ja tem o registro', () => {
+  const res = [
+    { id_cliente: '1', status: 'aceito' },
+    { id_cliente: '2', status: 'retido' },
+    { id_cliente: '3', status: 'rejeitado' }
+  ];
+  assert.deepEqual(itensParaRemover(res), ['1', '2']);
+});
+
+test('itensRecusados: so rejeitado entra, e tambem sai da fila de envio', () => {
+  const res = [
+    { id_cliente: '1', status: 'aceito' },
+    { id_cliente: '2', status: 'duplicado' },
+    { id_cliente: '3', status: 'retido' },
+    { id_cliente: '4', status: 'rejeitado' }
+  ];
+  assert.deepEqual(itensRecusados(res), ['4']);
+  assert.deepEqual(itensRecusados([]), []);
+  assert.deepEqual(itensRecusados(null), []);
+});
+
+/* ------------------------------------------------------- retidasPorAparelho */
+
+test('retidasPorAparelho: agrupa por aparelho, conta e acha a faixa de batida', () => {
+  const marcacoes = [
+    {
+      pendente: true, motivo_codigo: 'aparelho_revogado', aparelho_dispositivo_id: 'd1',
+      aparelho_apelido: 'Tablet Norte', aparelho_revogado_em: '2026-08-20T18:00:00Z',
+      marcado_em: '2026-08-20T07:02:00Z', recebido_em: '2026-08-21T14:20:00Z'
+    },
+    {
+      pendente: true, motivo_codigo: 'aparelho_revogado', aparelho_dispositivo_id: 'd1',
+      aparelho_apelido: 'Tablet Norte', aparelho_revogado_em: '2026-08-20T18:00:00Z',
+      marcado_em: '2026-08-20T17:40:00Z', recebido_em: '2026-08-21T14:19:00Z'
+    }
+  ];
+  const grupos = retidasPorAparelho(marcacoes);
+  assert.equal(grupos.length, 1);
+  assert.equal(grupos[0].dispositivo_id, 'd1');
+  assert.equal(grupos[0].apelido, 'Tablet Norte');
+  assert.equal(grupos[0].total, 2);
+  assert.equal(grupos[0].batida_min, '2026-08-20T07:02:00Z');
+  assert.equal(grupos[0].batida_max, '2026-08-20T17:40:00Z');
+  assert.equal(grupos[0].recebido_max, '2026-08-21T14:20:00Z');
+});
+
+test('retidasPorAparelho: ignora pessoa_inativa_no_envio e nao-pendente', () => {
+  const grupos = retidasPorAparelho([
+    { pendente: true, motivo_codigo: 'pessoa_inativa_no_envio', aparelho_dispositivo_id: 'd1' },
+    { pendente: false, motivo_codigo: 'aparelho_revogado', aparelho_dispositivo_id: 'd1' }
+  ]);
+  assert.deepEqual(grupos, []);
+});
+
+test('retidasPorAparelho: dois aparelhos viram dois grupos, ordenados do maior pro menor', () => {
+  const marcacoes = [
+    { pendente: true, motivo_codigo: 'aparelho_revogado', aparelho_dispositivo_id: 'pequeno', marcado_em: 'x' },
+    { pendente: true, motivo_codigo: 'aparelho_revogado', aparelho_dispositivo_id: 'grande', marcado_em: 'x' },
+    { pendente: true, motivo_codigo: 'aparelho_revogado', aparelho_dispositivo_id: 'grande', marcado_em: 'x' }
+  ];
+  const grupos = retidasPorAparelho(marcacoes);
+  assert.deepEqual(grupos.map(g => g.dispositivo_id), ['grande', 'pequeno']);
 });
 
 test('calcularDeriva desconta metade da ida e volta', () => {
