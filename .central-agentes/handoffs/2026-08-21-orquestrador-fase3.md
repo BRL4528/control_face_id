@@ -334,3 +334,31 @@ esperando `avaliarPose`. Número limpo com o fato ao lado, não número limpo po
 | **inferido, não medido** | navegador órfão · a política de produção da origem pública, conferida por guarda que **lê** o arquivo e nunca exercida num servidor |
 
 A média disso vira "o sistema está testado" — verdadeiro e inútil.
+
+## Decisão de fecho: o gate absoluto de pitch NÃO entra
+
+Sequência: o Biometria achou, lendo o código antes de implementar, que o motor 2D não tem
+zero natural de pitch — o nariz fica abaixo da linha dos olhos por anatomia. Qualquer
+métrica 2D precisa de uma razão antropométrica **dentro da fórmula**, e ela, errada,
+**desloca** a leitura de quem foge da razão assumida (variação por anatomia, ancestralidade,
+idade). Decidi contra a constante global pelo tipo de defeito trocado: hoje o gate é cego de
+forma **uniforme**; a constante trocaria isso por um gate que recusa mais algumas pessoas.
+Média melhor, distribuição pior — e no gate é pior que no matcher, porque o matcher errado
+manda para revisão e o gate errado nem tenta.
+
+Aprovei o candidato do QA (razão entre duas medidas do próprio rosto) e **ele mesmo o
+derrubou 20 minutos depois, com medição**: a razão cancela **escala**, não **forma** — duas
+anatomias frontais dão 0,6154 e 0,2778, fator 2,2 na mesma pose. Trocava uma constante por
+outra.
+
+O que funciona, medido: **diferença** entre duas fotos da mesma pessoa cancela o
+deslocamento exatamente (zero exato nas duas anatomias); a escala difere, então compara
+fotos e nunca mede ângulo absoluto.
+
+**Resultado:** o eixo relativo entra ("as 3 fotos estão em poses consistentes?", mesma forma
+da coerência que já existe, sem viés). O gate absoluto **não entra** — não é adiamento, é
+não-respondível em 2D sem viés. Fica a cegueira uniforme, que é o defeito justo. Vai ao
+cliente como **limite conhecido e nomeado**.
+
+Os 3 vermelhos do QA passariam com qualquer das duas fórmulas erradas — ele vai declarar no
+arquivo que não cobrem viés antropométrico.
