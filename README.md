@@ -133,14 +133,25 @@ uma abaixo nasceu de um defeito real, e cada uma foi verificada **sabotando a
 própria invariante** e confirmando que o CI fica vermelho — não por leitura de
 código.
 
-**A versão do cache do `sw.js` acompanha o `ASSETS`.** O caso concreto: dois
+**A versão do cache do `sw.js` acompanha o que ele pré-cacheia — lista *e*
+conteúdo.** O caso concreto: dois
 ramos mexeram no `ASSETS` e cada um subiu `efrat-ponto-v7` para `v8`. Como a
 linha da versão ficou **idêntica** nos dois lados, o git une as duas listas e
 **não dá conflito**. O merge sai com um `v8` diferente do `v8` que os celulares
 em campo já têm em disco — e como o número não mudou, o service worker não
 invalida nada: cache velho e incompleto, sem um aviso. Combinar "conferimos o
 número no merge" não resolve, porque nada avisa. A guarda compara o `ASSETS` com
-o da base e só exige número novo quando a lista mudou de fato.
+o  da base e só exige
+número novo quando algo mudou de fato.
+
+O segundo caminho para o mesmo estrago é o conteúdo: trocar os **bytes** de um
+asset mantendo o nome — pesos em `models/`, `vendor/face-api.js` — não mexe na
+lista. Como o handler é cache-first e esses caminhos vão com
+`max-age=31536000, immutable`, o aparelho instalado serve o arquivo antigo por
+tempo indefinido e o navegador nem revalida. A guarda compara o hash de blob do
+git, que já é hash de conteúdo. Isso sustenta o carimbo de identidade do modelo
+(T-D30529): um hash calculado no build descreveria bytes que aquele aparelho
+nunca recebeu.
 
 **O servidor de teste nunca entrega `apiBase` de produção.** `npm run serve` e
 todo o E2E serviam `js/config.js` apontando para o n8n de produção. Efeito

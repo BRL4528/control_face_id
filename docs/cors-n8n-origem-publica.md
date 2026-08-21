@@ -12,9 +12,10 @@ O aplicativo de ponto **já** chama o n8n de outro endereço
 configurado e funcionando para ele. O que falta é **acrescentar um endereço à
 lista que já existe** — não montar CORS do zero.
 
-Se você não sabe onde essa configuração está hoje, procure por
-`Access-Control-Allow-Origin` no proxy na frente do n8n (nginx, Traefik,
-Caddy) ou nos nós de resposta dos workflows.
+Como **não há proxy** na frente do n8n (confirmado por você), essa
+configuração está no próprio n8n: na opção **Allowed Origins (CORS)** do nó
+Webhook de cada rota, ou nos cabeçalhos que os nós de resposta devolvem. É lá que
+o endereço novo entra — não há camada intermediária onde mexer.
 
 ## Os dois valores
 
@@ -150,6 +151,105 @@ curl -si -X OPTIONS \
 
 Passando os quatro, está aplicado. O teste 4 é o único que a maioria esquece, e é
 o que diferencia lista de `*`.
+
+## Não há proxy na frente do n8n: o que isso significa
+
+Você confirmou que o n8n responde direto, sem proxy. Isso simplifica o passo
+acima — não há duas camadas para manter em acordo. Vale registrar o outro lado,
+porque esta fase muda uma coisa: **até agora todo mundo que chamava o n8n era um
+aparelho de operador com credencial. A página de cadastro de rosto é a primeira
+superfície pública do produto apontada para essa instância** — uma URL que
+qualquer pessoa com o link abre.
+
+### O que não existe hoje, em termos diretos
+
+- **Não há WAF.** Não existe camada que recuse requisição por endereço, padrão ou
+  volume *antes* de chegar ao n8n. Toda recusa é decisão de workflow, ou seja
+  acontece depois que o n8n aceitou a conexão e começou uma execução.
+- **Não há limite de volume independente da aplicação.** O teto que protege o n8n
+  roda dentro do n8n. Ele impede abuso de *regra* — um link vazado sendo
+  reenviado — e não impede esgotamento de *recurso*, porque cada recusa ainda
+  custa uma execução.
+- **Não há botão de desligar só o tráfego ruim.** O que existe é desativar
+  workflow, que também para o tráfego bom daquele workflow.
+
+Nada disso é defeito de instalação. É a topologia que você tem, e para um piloto
+pode ser exatamente a escolha certa. O que segue é para você reconhecer o quadro
+se acontecer, não para te convencer de nada.
+
+### O que você veria, se a instância fosse inundada
+
+- A lista de execuções do n8n enchendo com a mesma rota, e a fila crescendo.
+- **O ponto continua sendo registrado.** O aplicativo do operador é offline-first:
+  sem resposta do servidor, a marcação fica na fila do próprio aparelho e sincroniza
+  depois. Você não perde marcação por causa disso — é o que o desenho já protege.
+- **O painel do RH fica inutilizável**, e o sincronismo das marcações atrasa. É
+  aqui que dói primeiro.
+- A página de cadastro de rosto falha ao abrir ou ao enviar as fotos, e o
+  colaborador liga para o RH — o canal que a fase está tentando desafogar.
+- **Se essa instância de n8n roda outros workflows da empresa, eles degradam
+  junto.** O alcance não para no produto de ponto.
+- O histórico de execuções cresce rápido. Guardar cada execução de uma inundação
+  é, com frequência, o que enche o disco antes de qualquer outra coisa.
+
+### O que você poderia fazer no mesmo dia
+
+1. **Desativar só os dois workflows do convite.** Isso remove a superfície pública
+   e **o aplicativo do operador continua funcionando** — as rotas dele são outras.
+   É o motivo prático de as rotas do convite serem separadas, e é o seu botão de
+   emergência: custa nada e já está pronto. Vale saber onde ele fica antes de
+   precisar.
+2. **Revogar os convites em aberto** (`/efrat/rh/face/convite/revogar`), para que
+   nenhum link já enviado continue valendo.
+3. **Reduzir o custo por requisição:** desligar ou reduzir a gravação de execuções
+   e limpar o histórico. Não estanca a entrada, mas compra tempo de disco.
+4. **Último recurso:** tirar o nome do ar no DNS. Para tudo, inclusive o
+   aplicativo do operador. Só faz sentido se o resto não bastou.
+
+### Um caminho barato e reversível, se você quiser um
+
+Existe, e o custo é honesto. **Não é recomendação** — é para você comparar.
+
+A página de cadastro já vive num projeto da Vercel. Dá para fazer **as duas rotas
+do convite passarem por lá** em vez de irem direto ao n8n: são duas regras de
+`rewrites` no `publico/vercel.json` apontando para o endereço do n8n (a
+documentação da Vercel permite destino em URL externa). Não vira projeto novo,
+não move dado nenhum, e **só as duas rotas do convite** mudam de caminho — o
+aplicativo do operador continua falando direto com o n8n, igual a hoje.
+
+O que isso te daria:
+
+- Mitigação automática de DDoS, bloqueio por IP e regras próprias — **gratuitos em
+  todos os planos** da Vercel. Tráfego barrado nessa camada não conta como
+  requisição nem como transferência.
+- **O passo de CORS acima deixa de existir para a página pública**, porque as
+  chamadas passam a ser da mesma origem dela.
+- Limite de volume (*rate limiting*) da Vercel: existe, mas é **recurso pago** —
+  ao contrário dos três acima.
+
+O que isso te custaria:
+
+- Essas requisições passam a contar no uso da Vercel. O envio das fotos carrega
+  três imagens em base64, ou seja **megabytes por cadastro** — hoje esse tráfego
+  vai direto para o n8n e não passa por lá.
+- Um salto de rede a mais, portanto um pouco mais de latência no cadastro.
+- **Atenção ao endereço de origem, e isto precisa ser verificado antes de
+  confiar:** com a Vercel no meio, o n8n passa a ver o endereço *dela*, não o do
+  colaborador — a menos que o endereço real venha repassado em cabeçalho e o n8n
+  seja configurado para lê-lo. Duas coisas dependem disso: o limite de volume por
+  IP dentro da rota, e o aviso de "muitos pedidos da mesma rede" na tela do RH.
+  Ambos passariam a ver um endereço só. Um `curl` pelo caminho novo, olhando o que
+  o n8n registra como origem, resolve a dúvida — não assuma nem que funciona nem
+  que não.
+- Reverter é apagar as duas regras e devolver o CORS. Nada migra.
+
+### Se você não fizer nada
+
+É uma escolha legítima para um piloto, e fica mais confortável quanto mais destes
+for verdade: o volume esperado é baixo e conhecido, os links de cadastro saem em
+lotes pequenos e controlados pelo RH, e essa instância de n8n **não** hospeda
+outros processos críticos da empresa. Fica menos confortável na medida em que
+qualquer um dos três não valer.
 
 ## Quando fazer
 
