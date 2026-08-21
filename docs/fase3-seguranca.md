@@ -872,6 +872,14 @@ errada:
   3/3 verde isolado em 4,0s; e `aparelhos.spec.js:102`, vermelho na suíte e verde
   sozinho em 15,7s.
 
+**O instrumento também mente.** Três vezes nesta fase o defeito estava na
+ferramenta de medir, não no medido: um painel que afirmava estado velho, uma
+guarda que lia o texto do handler em vez do efeito, e o `pgrep` de pista — que,
+chamado no mesmo script que invoca a suíte, casa com o próprio `argv` do script
+e reporta uma sobreposição que não existe. O truque do colchete protege o
+`pgrep` de casar consigo, não de casar com o script que o carrega: **rode-o em
+chamada separada**.
+
 O que salvou nos dois casos não foi a regra, foi a disciplina de reconferir antes
 de formar hipótese: investigar o código a partir de um vermelho falso custa horas,
 e rodar o teste sozinho custa segundos. **Reconferir é mais barato que raciocinar

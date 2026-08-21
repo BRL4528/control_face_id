@@ -30,7 +30,7 @@ import { criarServidor } from './servidor-falso.js';
 
 // T-87615C entrou: a rota é /efrat/rh/aparelho, ação 'aprovar', e ela resolve
 // o pendente SOMENTE pelo código digitado — nunca por dispositivo_id.
-const ROTA_APROVAR = '/efrat/rh/aparelho';
+const ROTA_APROVAR = '/efrat/rh/aparelho/aprovar';
 const RH = { usuario: 'rh', chave: 'CHAVE-DE-TESTE' };
 
 let ctx;
@@ -65,7 +65,9 @@ async function leituraRh(request, rota = '/efrat/rh/dados') {
 
 async function aprovar(request, dados) {
   return request.post(`${ctx.base}${ROTA_APROVAR}`, {
-    data: { ...RH, acao: 'aprovar', ...dados },
+    // Contrato §1.3: o corpo NAO tem dispositivo_id, pendente_id nem local_id.
+    // O alvo e o codigo e mais nada.
+    data: { ...RH, idempotency_key: crypto.randomUUID(), equipes_ids: ['eq-1'], ...dados },
     failOnStatusCode: false
   });
 }
@@ -155,21 +157,61 @@ test('T-87615C · código errado não ativa, e não ativa o aparelho vizinho', a
   const alvo = await registrar(request, 'Tablet legítimo');
   const outro = await registrar(request, 'Totem Portaria');
 
-  // O código do vizinho, apresentado junto do dispositivo_id do alvo: é
-  // exatamente o Cenário 2 de docs/ameacas-v3.md (aprovar a linha errada).
+  // MUDOU DE NATUREZA COM O CONTRATO §1.1 REGRA 2, e vale registrar por quê em
+  // vez de apagar o teste. O Cenário 2 de docs/ameacas-v3.md ("aprovar a linha
+  // errada") foi ELIMINADO POR DESENHO, não mitigado: o corpo de
+  // /efrat/rh/aparelho/aprovar não tem `dispositivo_id`, então não existe forma
+  // de expressar "ative o aparelho X usando o código Y". Só existe "digite um
+  // código", e ele ativa o dono do código.
+  //
+  // O teste sobrevive como GUARDA DA ELIMINAÇÃO: manda `dispositivo_id` mesmo
+  // assim — um campo que o contrato não define — e exige que ele não consiga
+  // dirigir nada. Se alguém reintroduzir seleção por id (o pedido plausível é
+  // "para desambiguar"), isto fica vermelho. A vulnerabilidade sumiu; este é o
+  // teste que a mantém sumida.
   await aprovar(request, { dispositivo_id: alvo.dispositivo_id, codigo: outro.codigo });
 
-  // A invariante é esta e só esta: o dispositivo_id NÃO consegue mandar. O
-  // aparelho que o painel "tinha em mãos" continua trancado.
   expect(await estadoDoAparelho(request, alvo),
-    'dispositivo_id no corpo não pode ativar aparelho nenhum').toBe('pendente');
+    'dispositivo_id no corpo não pode dirigir a aprovação').toBe('pendente');
+  expect(await estadoDoAparelho(request, outro),
+    'o código é a autoridade: quem o exibe é quem o RH está olhando').toBe('ativo');
+});
 
-  // O dono do código ser ativado é o comportamento CERTO, não um defeito: o
-  // código é a autoridade, e quem o exibe é quem o RH está olhando. Registro
-  // aqui porque a primeira versão deste teste exigia recusa — era uma regra
-  // mais dura do que a acordada, e falhar por isso seria falso-vermelho no
-  // cartão de outra pessoa.
-  expect(await estadoDoAparelho(request, outro)).toBe('ativo');
+test('T-C20AD3 · os quatro casos de código que não resolve dão UMA resposta só', async ({ request }) => {
+  // Contrato §1.3: inexistente, expirado, recusado e já ativo respondem todos
+  // 404 CODIGO_NAO_ENCONTRADO, com a mesma mensagem. É a invariante 1.6b de
+  // docs/fase3-seguranca.md: diferenciar entrega um oráculo de enumeração de
+  // graça — "esse código existe mas expirou" já é informação que o adversário
+  // não tinha.
+  const aprovado = await registrar(request, 'Tablet já aprovado');
+  expect((await aprovar(request, { codigo: aprovado.codigo })).status()).toBe(200);
+
+  const expirado = await registrar(request, 'Tablet esquecido');
+  ctx.estado.dispositivos.get(expirado.dispositivo_id).criado_em =
+    new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+
+  const respostas = [];
+  for (const codigo of ['ZZZZZZ', expirado.codigo, aprovado.codigo]) {
+    const r = await aprovar(request, { codigo });
+    respostas.push({ status: r.status(), corpo: await r.text() });
+  }
+
+  for (const r of respostas) expect(r.status).toBe(404);
+  const distintas = new Set(respostas.map(r =>
+    r.corpo.replace(/"request_id"\s*:\s*"[^"]*"/, '')));
+  expect(distintas.size,
+    'inexistente, expirado e já ativo têm de ser indistinguíveis').toBe(1);
+});
+
+test('T-C20AD3 · letra fora do alfabeto é erro de digitação, não pista sobre existência', async ({ request }) => {
+  // 422 CODIGO_COM_LETRA_INVALIDA é distinguível do 404 DE PROPÓSITO, e isso
+  // NÃO abre oráculo: é propriedade estática da string digitada, verdadeira
+  // antes de consultar qualquer linha. Registrado aqui para ninguém
+  // "uniformizar" isso em 404 depois achando que fecha vazamento — só faria o
+  // RH procurar defeito onde não tem.
+  const r = await aprovar(request, { codigo: 'ABC0IL' });
+  expect(r.status()).toBe(422);
+  expect(await r.text()).toContain('CODIGO_COM_LETRA_INVALIDA');
 });
 
 test('T-87615C · um código só serve uma vez', async ({ request }) => {
