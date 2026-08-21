@@ -1018,7 +1018,30 @@ exatamente no momento em que o template nasce.
 
 Faixas, e as duas pontas são medidas, não arbitradas. Referências de
 `validacao-biometrica.md`: mesma pessoa em pose diferente **0,094**; pessoas
-diferentes **0,61** e **0,80**; aceite do produto **0,45**.
+diferentes **0,61** e **0,80**. E o aceite do produto, **0,45**, que **não é medição** —
+ver a procedência de cada número logo abaixo.
+
+**Procedência dos números desta seção.** Varredura pedida pelo Orquestrador depois de o QA
+pegar o `0,133` sendo citado como medido quando é aritmética de fixture sintética. Foi a
+segunda vez na fase que número construído apareceu como medido, então a distinção passa a
+ser explícita e permanente:
+
+| Número | O que é | Ressalva |
+|---|---|---|
+| `0,094` | **medido** — mesma pessoa, pose diferente | 1 pessoa, 1 par |
+| `0,169` `0,253` `0,257` `0,422` `0,440` | **medidos** — mesma pessoa com adorno contra template limpo dela mesma | **1 pessoa**, 6 tentativas por adorno |
+| `0,61` `0,80` | **medidos** — pessoas diferentes | 2 pares |
+| **`0,45`** | **escolhido**, não medido | `limiarAceite` de `js/config.js`. `validacao-biometrica.md:85` diz que esse ponto de operação **tem de ser calibrado com dados da própria população da Efrat, não copiado** — e não foi. É o número em que esta seção mais se apoia, e é o menos sustentado dela |
+| `0,58` | **escolhido** | `limiarCinza`, mesma ressalva |
+| `0,02` | **escolhido por mim**, ancorado em `0,094` | separa "pose diferente" de "mesmo arquivo"; nenhuma medição delimita esse piso |
+| `0,1329` | **construído** | fixture sintética do QA: `0,094 × √2`. Não há rosto por trás |
+| `29,7 bits` | **construído** | `log2(31⁶)`, do alfabeto de §1.1 |
+
+`A consequência que importa:` o teto da regra de coerência **é** o `limiarAceite`, então
+ele herda a incerteza dele. Isso está certo como acoplamento — no dia em que a calibração
+mover `0,45`, a regra de cadastro move junto, sozinha, porque é a mesma constante. O que
+não se deve fazer é ler `0,45` como validado só porque está no código desde o começo.
+Antiguidade de um número não é evidência.
 
 | Faixa da maior distância par a par | Decisão |
 |---|---|
@@ -1043,7 +1066,8 @@ Mesmo raciocínio, sinais opostos, porque o que está em jogo em cada ponta é
 diferente. `coerencia_maxima` na resposta de `abrir` (§4.5) é, portanto,
 "estritamente abaixo deste número".
 
-- **Teto em 0,45.** É o `limiarAceite` do produto inteiro. Três fotos da mesma
+- **Teto em 0,45.** É o `limiarAceite` do produto inteiro — **escolhido, não medido**
+  (tabela de procedência acima). Três fotos da mesma
   pessoa mediram 0,094, então o teto não aperta ninguém de verdade: quem bate
   nele tem pessoa diferente ou foto ruim. **Recusa, não sinaliza**, mesmo na zona
   cinzenta 0,45–0,58 em que a *marcação diária* registra-e-sinaliza — cadastro é
