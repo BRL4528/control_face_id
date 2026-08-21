@@ -2,27 +2,26 @@
 //
 // Invariantes de docs/fase3-seguranca.md §2.1. Cartão que implementa: T-87615C.
 //
-// Divisão em duas metades, de propósito:
+// TODOS ATIVOS. O arquivo nasceu dividido em vivos e armados: 2.1b e 2.1d já
+// valiam contra o servidor da época, e 2.1a/2.1c/2.1e/2.1f ficaram em
+// `test.fixme` porque a rota de aprovação não existia — deixar vermelho por rota
+// ausente é ruído, não defeito. T-87615C trouxe a rota e religou quatro;
+// T-C20AD3 trouxe o limite e religou os dois últimos. Não sobrou nenhum armado.
 //
-//   VIVOS  — 2.1b e 2.1d valem contra o servidor de hoje e já rodam. 2.1b em
-//            especial é o guarda de regressão que importa: quando a aba de
-//            aparelhos pendentes for construída, o caminho mais natural de
-//            implementar (mandar a lista de pendentes com o código junto, para
-//            o RH achar a linha) destrói a prova de posse — é o "Novo 2" de
-//            docs/ameacas-v3.md. O teste tem de existir ANTES da aba.
+// 2.1b continua sendo o guarda que mais importa, e o motivo não envelheceu: o
+// jeito mais natural de construir a aba de pendentes é mandar a lista com o
+// código junto, para o RH achar a linha — e isso destrói a prova de posse ("Novo
+// 2" de docs/ameacas-v3.md). O teste existia antes da aba, e é por isso que a
+// aba nasceu sem o código.
 //
-//   ARMADOS — 2.1a, 2.1c, 2.1e e 2.1f dependem da rota de aprovação, que ainda
-//            não existe (é o achado 3 do QA: hoje os testes aprovam mexendo no
-//            Map do servidor-falso, fluxo.spec.js:34-44). Ficam em test.fixme
-//            para não deixar a suíte vermelha por rota ausente, que é ruído e
-//            não defeito. Quatro deles foram religados quando T-87615C entrou;
-//            só LIMITE_APROVAÇÃO segue armado, atrelado ao T-C20AD3.
-//
-// PORQUE A CONTRAPROVA VEM PRIMEIRO EM CADA TESTE ARMADO: um teste que só
+// PORQUE A CONTRAPROVA VEM PRIMEIRO EM CADA TESTE QUE NEGA: um teste que só
 // afirma "sem código não ativa" PASSA contra uma rota que não existe — 404 não
-// ativa nada. Verde por ausência de implementação é pior que vermelho. Por isso
-// cada teste armado primeiro prova que o caminho feliz funciona, e só então
-// nega.
+// ativa nada. Verde por ausência de implementação é pior que vermelho, porque
+// não pede atenção de ninguém. Por isso cada um prova o caminho feliz antes de
+// negar. Isso pagou duas vezes: pegou uma troca de constante que falhou calada
+// no meu próprio commit, e deu o vermelho legível ("o caminho feliz precisa
+// existir antes de negar nada") durante a janela entre a renomeação da rota e a
+// adaptação dos testes.
 
 import { test, expect } from '@playwright/test';
 import crypto from 'node:crypto';
@@ -239,7 +238,7 @@ test('T-87615C · um código só serve uma vez', async ({ request }) => {
 // ela no contrato — e inventar um campo para satisfazer um teste seria deixar
 // o teste dirigir o desenho. Fica registrado como lacuna aberta em
 // docs/fase3-seguranca.md, não como asserção fingida.
-test.fixme('T-C20AD3 · código errado esbarra em limite, e o limite segura até o código certo', async ({ request }) => {
+test('T-C20AD3 · código errado esbarra em limite, e o limite segura até o código certo', async ({ request }) => {
   const a = await registrar(request);
 
   let bloqueou = null;
@@ -258,7 +257,7 @@ test.fixme('T-C20AD3 · código errado esbarra em limite, e o limite segura até
   expect(await estadoDoAparelho(request, a)).toBe('pendente');
 });
 
-test.fixme('T-C20AD3 · o limite é contado depois de autenticar, não antes', async ({ request }) => {
+test('T-C20AD3 · o limite é contado depois de autenticar, não antes', async ({ request }) => {
   // Se a contagem vier ANTES da checagem de usuário/chave, quem souber só o
   // nome do usuário de RH derruba a aprovação de aparelhos por 5 minutos sem
   // ter credencial nenhuma — vira negação de serviço contra o próprio RH,
