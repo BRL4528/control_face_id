@@ -899,6 +899,12 @@ enquanto o template do link está `pendente`, a pessoa **continua sem biometria*
 aparece no indicador "ativos sem biometria" e só pode ser marcada manualmente.
 Não é bug, é a fila esperando decisão.
 
+Isso casa com o que `js/rh.js` já faz depois do commit `53136b3`, que entrou nesta
+rodada: a fila separa **primeiro cadastro** de **substituição de biometria** e
+deriva "primeiro cadastro" de `pessoa.tem_biometria` ser falso — exatamente a
+consequência descrita no parágrafo acima. O contrato e a tela estão alinhados, e a
+tela já lê `t.origem`, que é o campo que §5 acrescenta ao template.
+
 `pendente` cai na **fila de recadastro que já existe** (`/efrat/rh/dados` →
 `recadastros`, decidida em `/efrat/rh/decidir` com `tipo: "template"`), onde o RH
 vê a miniatura nova ao lado da atual antes de virar referência. Semântica idêntica
@@ -1557,6 +1563,10 @@ Critérios de UI que são contrato, não estética:
     cumpre o critério, mesmo sendo a mesma escrita por baixo.
 32-B. O texto de autorização de telefone duplicado diz, **antes** de autorizar,
     que aquela pessoa não vai poder receber o link de cadastro de face (§3.1).
+32-C. A fila de cadastros de face nunca é lista uniforme: separa primeiro cadastro
+    de substituição, mostra contagem, e o Aprovar de cada card só destrava depois
+    da conferência explícita (já implementado em `53136b3`; fica como critério para
+    não regredir).
 33. A pendência de marcação retida mostra hora da batida **e** hora do
     recebimento, agrupada por aparelho, com contagem.
 34. A página de face, na tela final, não tem link nem botão para o app.
