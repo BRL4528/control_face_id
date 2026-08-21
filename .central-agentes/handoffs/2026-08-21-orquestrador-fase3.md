@@ -202,10 +202,13 @@ registrado.
 em `js/rh.js`) · marcação de aparelho revogado (T-D00CE0) · fatia de segurança da §1
 (T-C20AD3, fora do backlog de propósito — sua ausência é invisível).
 
-**Espera o cliente:** link do celular (hostname) · resposta ao capacete (quatro fotos,
+**Espera o cliente** (corrigido: o link do celular está sendo CONSTRUÍDO com placeholder
+— o hostname só publica, não desenvolve): resposta ao capacete (quatro fotos,
 com e sem, duas poses) · Parte 1 na Vercel (recomendada).
 
-**Não verificado visualmente:** oito das dez telas. Prints pedidos ao QA — equipe
+**OBSOLETO — corrigido abaixo.** Dizia que oito das dez telas não tinham verificação
+visual e que os prints estavam pedidos. Os prints chegaram e eu verifiquei duas por
+imagem (equipe aberta com membros; telefone duplicado). O texto original seguia: equipe
 aberta com membros, ficha do colaborador com telefone, diálogo de telefone duplicado,
 câmera do PC. É o único requisito do cliente sem conferência de olho.
 
@@ -236,7 +239,8 @@ telefone, edição e inativar/reativar · cadastro de face pela **câmera do PC*
 **upload de 3 fotos** · marcação de aparelho revogado (retida na mesa do RH, nunca
 descartada; os quatro status soltam a fila).
 
-**Falta:** link do celular (hostname do cliente) · T-C20AD3, a fatia de segurança da §1.
+**Falta:** link do celular (em construção com placeholder; o hostname só publica) ·
+T-C20AD3, a fatia de segurança da §1 · métrica de pose (T-55A616).
 
 ## Cobertura completa do dia (as três medições)
 
@@ -248,3 +252,23 @@ descartada; os quatro status soltam a fila).
 
 Nenhuma das três é "a" medição: cada uma cobre o que cobre, e as três juntas são o
 estado. Foi o erro que eu cometi ao registrar unitário+e2e como *a* medição válida.
+
+## Auditoria do próprio checkpoint (o documento também envelhece)
+
+O QA achou um parágrafo obsoleto no documento de segurança dele — declarava uma lacuna
+que ele mesmo já havia fechado no mesmo dia — e a distinção que ele fez vale para este
+arquivo: comentário errado tem o código ao lado para desmenti-lo; **documento é a única
+fonte, e ninguém tem com o que confrontar.** Lacuna declarada que já foi fechada faz
+alguém fechar de novo, ou tratar como aberto um risco coberto.
+
+Auditei este checkpoint e achei duas afirmações minhas que ficaram falsas:
+1. "oito das dez telas não verificadas visualmente, prints pedidos" — os prints chegaram
+   e eu verifiquei duas por imagem. Marcado como obsoleto acima em vez de apagado.
+2. "link do celular espera o hostname" — ele está sendo construído com placeholder; o
+   hostname **publica**, não desenvolve. A redação antiga fazia o hostname parecer
+   bloqueio de desenvolvimento, que foi um erro meu de sequenciamento antes.
+
+**Verificado visualmente por mim, em imagem:** app destrancado · aba Aparelhos · equipe
+aberta com membros, remover e adicionar de dentro · ficha do colaborador em edição com
+telefone e o diálogo de telefone duplicado (que avisa, na hora da autorização, que a
+pessoa não poderá receber o link de cadastro de face).
