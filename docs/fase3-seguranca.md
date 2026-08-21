@@ -898,6 +898,32 @@ regressão e alguém "consertaria" o produto de volta.
 **Regra:** todo teste cuja asserção descreve um defeito aceito carrega, na
 mensagem, a instrução para o dia em que o defeito morrer.
 
+### 0. Por que os outros existem: aviso escrito não intercepta gesto natural
+
+**Aviso escrito não protege contra defeito cujo erro parece certo enquanto você o
+comete.** Os três padrões abaixo não são disciplina — são desenho, e é isso que os
+faz sobreviver a nós.
+
+A prova saiu de dois casos do mesmo dia, e o segundo é o forte:
+
+- O autor da regra "rode o `pgrep` em chamada separada, senão o `argv` do próprio
+  script casa com o filtro" violou-a horas depois, num comando de rotina. Dá para
+  atribuir a memória.
+- Quem estava **consertando** a ferramenta reintroduziu o mesmo defeito no arquivo
+  que o documenta, sobre a linha que estava editando, com o comentário na tela.
+  Isso não é memória nem leitura: `pgrep -f` com a string é o gesto natural, e o
+  defeito só existe no *resultado*. Nenhuma quantidade de aviso intercepta um gesto
+  que parece correto no momento de fazer.
+
+O conserto que funcionou não foi um aviso melhor — foi tirar a linha de comando do
+caminho (filtrar por `/proc/PID/comm`), e fazer a saída do comando carregar o
+próprio limite. Nenhum dos dois exige que alguém esteja prestando atenção.
+
+É o mesmo movimento nos três padrões seguintes: a **confiança mora dentro da
+asserção** (igualdade exata para o algébrico, faixa para o indicativo), a
+**contraprova vem antes da negação**, e o **limite mora dentro do instrumento**.
+Em todos, a propriedade sobrevive a quem a esqueceu.
+
 ### 2. Não inferir de ausência
 
 Afirmar que algo **não** aconteceu só vale se algo positivo provar que o caminho
