@@ -1956,6 +1956,9 @@ Critérios de UI que são contrato, não estética:
 | Devolver o motivo da recusa para o aparelho | Texto interno do RH renderizado num aparelho que ele acabou de declarar não confiável (§1.4) |
 | Telefone do RH na resposta de `/dispositivo/estado` | Dado da organização entregue a quem ainda não foi liberado; `config.js` resolve melhor (§1.8) |
 | `Access-Control-Allow-Origin: *` nas rotas de face | Barato demais para não fazer a lista, e a lista impede sondagem conduzida pelo navegador de terceiro (§4.6) |
+| **Rate limit de `convite/abrir` por IP** (era o que eu havia escrito, achado do DevOps) | NAT de operadora faz uma turma no mesmo canteiro se trancar mutuamente; o colaborador lê "tente mais tarde" e liga para o RH — o limite produziria o volume de ligação que a fase existe para desafogar. E contradizia o meu próprio parágrafo seguinte: se com 256 bits o limite é contra volume, não precisa ser severo nem morar na rota (§4.4) |
+| **Entidade `efrat_local` com id próprio** (era o que eu havia escrito, pergunta do Full-Stack) | Terceiro conceito para um RH leigo e um passo a mais em duas telas, para agrupar por id o que já agrupa por texto. E o único poder exclusivo da entidade — aparelho seguir o lugar, equipe nova entrando no escopo sozinha — é o Cenário 3 com a API cumprida (§2.4) |
+| **Mostrar o número de coerência no card do RH** (decisão anterior do Orquestrador, caducada) | Fazia sentido com limiar `0,55` e `confirm()`, quando o número decidia se o RH seguia. Com o servidor recusando em `0,45`, o número passou a variar numa faixa em que a resposta é sempre a mesma — decoração numérica de nome técnico (§4.3). Continua gravado para auditoria e recalibração |
 
 ---
 
