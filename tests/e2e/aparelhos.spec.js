@@ -19,7 +19,13 @@ import { criarServidor } from './servidor-falso.js';
 
 let ctx;
 test.beforeEach(async () => {
-  const { servidor, estado } = criarServidor({});
+  // consultarAposS: 1 encurta o passo do poll. O que os testes deste arquivo
+  // provam e que a tela vira sozinha pelo poll de fundo, sem reload -- nao que
+  // o intervalo seja 15s. Com o padrao, o teste do ciclo gastava 15,7s contra
+  // timeout de 30s e era o unico da suite acima do teto de expect, o que o
+  // tornava o primeiro a cair sob contencao e o unico vermelho suspeito da
+  // suite. Nenhum teste daqui afirma nada sobre o intervalo.
+  const { servidor, estado } = criarServidor({ consultarAposS: 1 });
   await new Promise(res => servidor.listen(0, '127.0.0.1', res));
   ctx = { url: 'http://127.0.0.1:' + servidor.address().port, servidor, estado };
 });

@@ -179,6 +179,12 @@ export function criarServidor(opts = {}) {
   // depois de 24h o aparelho recebe um novo na próxima consulta de estado
   // (mostrarAparelhosCodigoExpirado) e o antigo para de resolver no /rh/aparelho.
   const EXPIRA_PENDENTE_MS = opts.expiraPendenteMs || 24 * 60 * 60 * 1000;
+  // Intervalo que o servidor manda o aparelho esperar antes de reconsultar.
+  // js/app.js:207 obedece o servidor de proposito, entao quem testa o ciclo de
+  // liberacao pode encurtar o passo sem enfraquecer a prova: o que esta sob
+  // teste e a tela virar SO pelo poll de fundo, nao o intervalo valer 15s.
+  // Sem a opcao, os valores continuam os mesmos de antes (10 e 15).
+  const consultarAposS = padrao => (opts.consultarAposS == null ? padrao : opts.consultarAposS);
   const codigoExpirado = dispositivo =>
     !dispositivo.criado_em || (Date.now() - Date.parse(dispositivo.criado_em)) > EXPIRA_PENDENTE_MS;
   const novoCodigoUnico = () => {
@@ -425,7 +431,7 @@ export function criarServidor(opts = {}) {
           }
           return responder(202, {
             ok: true, estado: existente.estado, dispositivo_id: body.dispositivo_id,
-            codigo_curto: existente.codigo_curto, consultar_apos_s: 10, request_id: requestId()
+            codigo_curto: existente.codigo_curto, consultar_apos_s: consultarAposS(10), request_id: requestId()
           });
         }
         const codigo = novoCodigoUnico();
@@ -441,7 +447,7 @@ export function criarServidor(opts = {}) {
         estado.codigosPendentes.set(codigo, body.dispositivo_id);
         return responder(202, {
           ok: true, estado: 'pendente', dispositivo_id: body.dispositivo_id,
-          codigo_curto: codigo, consultar_apos_s: 10, request_id: requestId()
+          codigo_curto: codigo, consultar_apos_s: consultarAposS(10), request_id: requestId()
         });
       }
 
@@ -461,7 +467,7 @@ export function criarServidor(opts = {}) {
           }
           return responder(200, {
             ok: true, estado: 'pendente', codigo_curto: dispositivo.codigo_curto,
-            consultar_apos_s: 15, request_id: requestId()
+            consultar_apos_s: consultarAposS(15), request_id: requestId()
           });
         }
         if (dispositivo.estado !== 'ativo') {
