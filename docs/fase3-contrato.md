@@ -1203,6 +1203,19 @@ workflow, porque o servidor não lê `config.js`. Teste de contrato afirma que a
 duas valem `0,45` (§7, item 14) — divergência silenciosa entre elas é o jeito
 mais fácil de perder essa regra sem ninguém notar.
 
+**Segundo eixo relativo do lote: consistência de pose.** Mesma **forma** da coerência —
+compara as três fotos **entre si**, nunca contra um absoluto — e por isso é respondível sem
+viés. O QA mediu: a **diferença** entre duas fotos da mesma pessoa cancela o deslocamento
+antropométrico **exatamente** (zero exato nas duas anatomias que quebravam o gate absoluto).
+Serve para **comparar** fotos e nunca para medir ângulo.
+O caso real que ela pega é o do upload: três fotos tiradas em momentos diferentes, uma com a
+pessoa olhando para baixo — hoje passam, porque a coerência de descritor tolera e nada olha
+pose.
+**Limiar: pendente de medição.** A escala da diferença varia com a anatomia (`0,151` contra
+`0,092` nas duas medidas), então o número não sai por proporção — sai da mesma instrumentação
+que §4.2 já exige para a coerência, e entra aqui quando existir. Registrado sem número de
+propósito: cravar um agora seria repetir o `0,30`.
+
 **O cliente continua calculando, e continua recusando antes de enviar.** Isso é
 UX, não segurança: evita esperar upload para ouvir "não". A decisão é do servidor,
 sempre, mesmo quando o cliente já disse sim.
@@ -1285,12 +1298,17 @@ qualquer comparação. Duas consequências, e elas são diferentes entre si:
   transformar a instrução em algo que o app cobra em vez de pedir.
   Texto do Designer para a instrução, que não pede nada de ninguém: **"De capacete? Olhe
   reto pra frente, sem abaixar o queixo."**
-  **Status dessa frase: bengala até a medição existir, não solução** — e a formulação é do
-  próprio Designer. Ela depende de a pessoa lembrar, e instrução que depende de alguém
-  lembrar degrada com o tempo. Se a medição confirmar a sombra da aba, ela vira gate
-  (pitch no `avaliar()`) e para de depender de memória; se não confirmar, o problema é
-  outro e a frase sai. Em nenhum dos dois cenários ela é o desfecho, e esta seção **não
-  está fechada** — está esperando medição.
+  **A medição voltou, e o desfecho é o terceiro cenário: a frase fica sendo a única
+  resposta, porque o gate é impossível.** O QA mediu e o gate absoluto de pitch **não
+  entra** — e não é adiamento. A razão auto-normalizada que ele havia proposto cancela
+  **escala** e não cancela **forma**: duas anatomias plausíveis, as duas perfeitamente de
+  frente, pitch verdadeiro zero nas duas, deram `0,6154` e `0,2778` — fator 2,2 na **mesma
+  pose**. Um corte fixo sobre isso não mede pose, mede anatomia, e discriminaria por
+  subgrupo exatamente como `validacao-biometrica.md:101` avisa.
+  Logo: **"esta pessoa está de queixo baixo?" não é respondível em 2D sem constante
+  antropométrica, e portanto não é respondível sem viés.** Fica a cegueira uniforme, que é
+  o defeito justo — e vai ao cliente como **limite conhecido e nomeado**, não como peça
+  pendente. A frase do Designer deixa de ser bengala e passa a ser o que existe.
   A frase de biometria do produto hoje (`js/rh.js`, área de cadastro) lista "boné, óculos
   escuros ou máscara" e **não menciona capacete** — justamente o item que todo mundo usa.
   A parte da distância, por contraste, é folgada: `0,257` contra um limiar de `0,45`
