@@ -805,13 +805,26 @@ E o gate que existe é mais frouxo do que parece:
 (`z = 20` para 100 px entre olhos), e mudam com a geometria do rosto. O que não muda
 é a ordem de grandeza: `0,30` é muito, não pouco.
 
-**Por que não há teste ainda:** `yaw()` e `avaliar()` são privadas em `js/face.js`, e
-o caminho de rosto fingido do próprio arquivo (`js/face.js:156`) devolve `yaw: 0.05`
-fixo — nunca executa a fórmula real. Sem exportar a função de pose não existe costura
-por onde afirmar nada. Pedido de uma linha registrado com o Biometria; com ela o
-unitário é determinístico e sai no mesmo dia. **Não forcei um teste no lugar:** um
-teste que não exercita a fórmula daria a impressão de que o gate de pose está
-coberto, que é pior que a lacuna declarada.
+**Onde isto está travado:** `tests/unit/pose.test.js`, determinístico, sem navegador.
+As duas propriedades acima são asserções, e a confiança de cada uma está expressa na
+*forma* da asserção, não só em prosa: a algébrica usa **igualdade exata** contra o
+rosto de frente (sem tolerância de ponto flutuante, porque a fórmula não lê `y`); a
+indicativa usa **faixa**, não valor, porque os ângulos dependem da geometria de nariz
+assumida. Quem for "apertar a precisão" da segunda encontra o motivo escrito ali.
+
+**Verde aqui não quer dizer que o gate está bom** — quer dizer que a lacuna está
+medida e travada. Os testes afirmam o comportamento *atual*. Quando entrar percepção
+de pitch, a propriedade 1 fica vermelha de propósito, e a mensagem de falha dela manda
+trocar a asserção pela do limiar novo em vez de deixar parecer regressão.
+
+*Custou uma costura, e o primeiro pedido meu estava errado:* pedi para **exportar**
+`yaw()` de `js/face.js`, e isso não adiantava — o módulo faz `document.createElement`
+no topo (`js/face.js:9-14`), então não importa em Node de jeito nenhum; exportar só
+tornava visível uma função que continuava inalcançável. O que destravou foi **mover**
+a função para `js/regras.js`, que é onde a primeira linha daquele arquivo já mandava
+pôr regra pura. Move, não copy: duas implementações da mesma fórmula divergiriam em
+silêncio no primeiro ajuste de uma só — e o ajuste vem, porque o proxy de pitch e a
+recalibração de `maxYaw` são o próximo passo.
 
 ### 5.2 O que **não** propor
 
