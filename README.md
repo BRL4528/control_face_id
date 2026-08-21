@@ -126,6 +126,8 @@ publico/                Root Directory de OUTRO projeto da Vercel: a origem
 
 **Não há prova de vida (liveness).** É intencional: foto na tela passa. Serve para justificar liveness certificado ISO/IEC 30107-3 Level 2 no sistema real, onde o adversário é o próprio gestor.
 
+**Estado de UI nunca se distingue só por cor.** Sempre acompanha de conteúdo real — texto ou ícone como caractere, nunca `::before`/CSS puro — pra sobreviver a folha de estilo que não carrega e a leitor de tela. Convenção de traço: vazio/incompleto pede borda tracejada (convite a preencher), falhou/erro pede borda sólida (estado definitivo) — ajuda daltonismo independente de cor.
+
 ## Não inferir de ausência
 
 Leia isto antes de mexer nas guardas, e antes de escrever teste, campo ou
