@@ -174,10 +174,17 @@ Decisões dentro dessa resposta:
   que o próprio aparelho que pede aprovação escolheu. O rótulo na tela tem de
   dizer "informado pelo aparelho".
 - **`pedidos_da_mesma_rede_1h` é fato observado pelo servidor**, não declarado —
-  contagem de pedidos pendentes na última hora com o mesmo `ip_hash`. É o número
-  que torna o flood do Cenário 1 visível para um RH leigo: "12 pedidos da mesma
-  rede na última hora" é suspeita que ninguém precisa explicar. Guardamos hash
+  contagem de pedidos pendentes na última hora com o mesmo `ip_hash`. Guardamos hash
   com sal de deploy, nunca o IP.
+  **O campo fica no dado e no log; na tela aparece uma frase, não o número.** Eu havia
+  posto o contador direto na tela, e é jargão por número: um RH leigo não liga "mesma
+  rede" a "possível ataque" e não sabe o que fazer com `12`. A tela mostra, **só quando
+  é anômalo**, algo como "Vários aparelhos pediram liberação da mesma internet na
+  última hora. Se você só está esperando um, recuse os outros." — mesma informação, com
+  a ação dentro.
+  `Por quê o número não sai do dado:` observabilidade. No dia em que alguém investigar
+  um flood de verdade, "vários" não serve para nada. Frase para decidir, número para
+  investigar.
 - **`encerrados` cobre 30 dias.** Recusa e revogação precisam ser auditáveis por
   um período curto; não é histórico eterno.
 - Rota **separada** de `/efrat/rh/dados`, que ganha apenas o contador
@@ -1191,9 +1198,35 @@ exceção é `consumido`, que `abrir` devolve como estado (`200`), para a pessoa
 recarregou depois de terminar ver "já recebemos" em vez de um erro — e essa
 distinção não vaza nada, porque só é alcançável por quem já tem o token.
 
-Limites: 5 envios recusados por convite → `bloqueado`. Rate limit por IP em
-`convite/abrir` → `429 LIMITE_CONVITE` + `Retry-After`. Com 256 bits, adivinhar é
-impossível; o limite é contra volume, não contra sorte.
+**Limites, e a chave deles importa mais que o número.** Achado do DevOps: a versão
+anterior desta linha cravava rate limit em `convite/abrir` **por IP**, e IP é a chave
+errada para esta população.
+
+`Por quê IP não serve aqui:` o colaborador abre o link em dados móveis, a operadora
+faz NAT em escala, e uma turma no mesmo canteiro compartilha um punhado de endereços.
+Com limite apertado por IP, **eles se trancam mutuamente** — o colaborador lê "tente
+mais tarde", não entende, e liga para o RH. Ou seja: o limite produziria exatamente o
+volume de ligação que esta fase existe para desafogar. E o próprio contrato entrega o
+argumento de que ele não precisa ser apertado: com 256 bits, adivinhar é impossível, o
+limite é contra **volume**, não contra sorte — logo não precisa morar na rota nem ser
+severo.
+
+Desenho aprovado, em dois lugares com **chaves diferentes de propósito**:
+
+| Onde | Chave | Limiar | Resposta |
+|---|---|---|---|
+| Regra de produto, na rota | **o convite** (o token já vem em `Authorization`) | 5 envios recusados → `bloqueado`; aberturas não limitadas | envelope normal do app |
+| Guarda de volume, no proxy | IP | generoso, ordem de **centenas por minuto** | `429` seco, **sem imitar o envelope do app** |
+
+`Por quê chaves diferentes:` o mesmo limite em dois lugares com a mesma chave produz
+`429` que ninguém consegue explicar depois — o suporte não sabe qual camada disparou,
+e o número na tela do RH não corresponde a nenhuma regra que alguém escreveu. Chaves
+distintas fazem cada `429` ter uma causa única e legível: se veio do proxy é volume
+anômalo, se veio da rota é aquele convite específico. Por isso o `429` do proxy
+**não** deve imitar o formato de erro do app: é resposta de infraestrutura, e parecer
+erro de aplicação faria o cliente tratá-la como regra de negócio.
+
+`LIMITE_CONVITE` sai do catálogo da rota: a rota não limita abertura.
 
 **Uso único com Data Table, honestamente.** O consumo é um compare-and-set
 `aberto → consumido` que, sem índice único nem transação, é leitura-e-escrita e
@@ -1691,7 +1724,6 @@ como está (§2.4).
 | `PESSOA_INATIVA` | 422 | rh/face/convite |
 | `CONVITE_INVALIDO` | 404 | face/convite/abrir, face/convite/enviar |
 | `CONVITE_CONSUMIDO` | 409 | face/convite/enviar |
-| `LIMITE_CONVITE` | 429 | face/convite/abrir |
 | `MODELO_AUSENTE` | 400 | rh/face/cadastrar, face/convite/enviar |
 | `IDEMPOTENCIA_AUSENTE` | 400 | toda rota nova de escrita |
 
@@ -1859,7 +1891,9 @@ Critérios de UI que são contrato, não estética:
 28. O campo de aprovação é **digitação livre** — sem `<select>`, sem `datalist`,
     sem autocomplete a partir da lista de pendentes.
 29. A lista de pendentes rotula `apelido`/`ua`/`geo` como informados pelo
-    aparelho, e mostra `pedidos_da_mesma_rede_1h`.
+    aparelho, e sinaliza concentração de pedidos por **frase com a ação**, não pelo
+    contador cru — o `pedidos_da_mesma_rede_1h` continua na resposta e no log, para
+    investigação (§1.2).
 30. A confirmação de revogar diz que o aparelho ainda entrega e que cada marcação
     cai na mesa do RH com as duas horas.
 31. A confirmação de inativar diz que reativar exige cadastrar o rosto de novo.
