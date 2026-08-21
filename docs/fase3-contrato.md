@@ -102,6 +102,8 @@ a falta é lida como afirmação**.
 | `acesso.spec.js:105,123` | `waitForTimeout` fixo, e o caminho não teve tempo de rodar | fail-closed comprovado |
 | protocolo de pista | resultado não anunciado | suíte verde |
 | protocolo de pista | anúncio de fim que nunca chega (rodada morreu) | pista ocupada para sempre |
+| quadro de tarefas | cartão não movido durante o merge | estado real do cartão |
+| quadro de tarefas | rótulo `PRONTO` cujo significado ninguém conferiu (é *ready*, não *done*) | entrega concluída |
 
 ### O terceiro irmão: guarda que confere o mecanismo, não o resultado
 
@@ -119,8 +121,16 @@ implementação vira mentira na primeira limpeza, e pior: continua verde enquant
 Os três foram consertados no mesmo dia, e nos três o defeito era o mesmo: a asserção olhava
 para como a coisa é feita, e o que importa é o que sai.
 
-Os dois últimos casos da tabela anterior são do nosso canal e não do produto, e é por isso
-que o princípio ficou visível: o mesmo defeito aparece igual quando o "sistema" é a equipe. **Regra prática:**
+Os últimos quatro casos não são do produto — dois são do nosso canal e dois do nosso
+instrumento de acompanhamento — e é por isso que o princípio ficou visível: o mesmo defeito aparece igual quando o "sistema" é a equipe. E os dois casos do quadro merecem nota, porque a forma deles é diferente: ali a ausência não
+era de dado, era de **atualização** — e um quadro não atualizado não fica calado, ele
+**continua afirmando o estado anterior em nome de quem devia tê-lo movido**. Somado a um
+rótulo cujo significado ninguém conferiu (`PRONTO` é *ready*, não *done*), produziu uma
+conferência de boa-fé que devolveu garantia falsa. Rótulo não é evidência, do mesmo modo que
+antiguidade de número não é (§4.2) — e conferir o quadro sem conferir o vocabulário do quadro
+é conferir mecanismo, não resultado.
+
+**Regra prática:**
 todo campo, teste ou protocolo deste contrato que trate falta de dado como resultado tem de
 dizer explicitamente qual dos dois lados a falta significa — e, quando não puder dizer,
 perguntar em vez de assumir. É o que §1.8 já faz com o aparelho offline (falha fechado, e
