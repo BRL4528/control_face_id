@@ -62,7 +62,12 @@ export const ApiRh = {
   colaboradorReativar(cred, dados) { return postRh('/efrat/rh/colaborador/reativar', Object.assign({}, cred, dados)); },
   decidir(cred, dados) { return postRh('/efrat/rh/decidir', Object.assign({}, cred, dados)); },
   // acao: 'aprovar' | 'recusar' | 'revogar' (T-87615C, docs/fase3-rh-pessoas.md § A).
-  aparelho(cred, dados) { return postRh('/efrat/rh/aparelho', Object.assign({}, cred, dados)); }
+  aparelho(cred, dados) { return postRh('/efrat/rh/aparelho', Object.assign({}, cred, dados)); },
+  // Câmera do PC e upload de 3 fotos (T-8ADD9C/T-65D806 §4.3+§4.7). Autenticada
+  // como RH, não com credencial de aparelho — corrige js/rh.js pegar
+  // emprestada a credencial de um dispositivo que pode nem existir num PC que
+  // nunca se cadastrou. `dados.idempotency_key` é obrigatório (C2 do contrato).
+  faceCadastrar(cred, dados) { return postRh('/efrat/rh/face/cadastrar', Object.assign({}, cred, dados)); }
 };
 
 /**

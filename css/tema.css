@@ -163,6 +163,18 @@ nav button.on,.nav-item.on{background:var(--azul-bg);color:var(--azul-esc)}
   justify-content:center;color:var(--muted);font-size:11px}
 .shots img{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
 
+/* Upload de 3 fotos (T-D30529/T-92D567): vazio e falhou têm de ter sinal
+   visual DIFERENTE, não só texto — senão ausência de foto e foto recusada
+   se confundem na tela (achado do Orquestrador sobre o próprio dado). */
+.slot{flex:1;aspect-ratio:1;border-radius:9px;overflow:hidden;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+  font-size:11px;text-align:center}
+.slot img{width:100%;height:100%;object-fit:cover}
+.slot .ic{font-size:20px;line-height:1}
+.slot.vazio{background:var(--surface-2);border:1px dashed var(--linha);color:var(--muted)}
+.slot.falhou{background:#fdecee;border:1.5px solid var(--vermelho);color:var(--vermelho)}
+.slot.ok{border:1.5px solid var(--verde)}
+
 /* corpo pequeno de proposito: espelho de ponto e lido por cima do ombro na fila (privacidade) */
 .esp{display:flex;gap:8px;padding:9px 0;border-top:1px solid var(--linha-2);font-size:12.5px}
 .esp .d{color:var(--muted);width:92px;flex:none;font-family:var(--font-mono);font-variant-numeric:tabular-nums}
