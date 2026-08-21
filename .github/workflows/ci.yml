@@ -350,6 +350,66 @@ jobs:
             console.log("origem publica: cache, indexacao e CSP conferidos (apiBase " + apiBase + ")");
           '
 
+      - name: O servidor de teste realmente ENVIA a política do _headers
+        run: |
+          # A paridade acima compara arquivo com arquivo. Esta compara o que sai
+          # NA RESPOSTA com o que o _headers manda — e a unica que prova que o
+          # E2E roda sob a politica de producao e nao sob nenhuma.
+          #
+          # A lacuna que ela fecha: o teste unitario de CSP chama
+          # extrairCspDeHeaders(), que e funcao pura lendo o arquivo. Se o
+          # servidor falso parar de APLICAR os cabecalhos, aquele teste continua
+          # verde e o E2E passa a validar uma politica que nao existe. Nada
+          # pegava isso.
+          #
+          # Compara contra o _headers lido aqui, de proposito: nao importa como
+          # o servidor implementa, importa que a resposta case com o arquivo.
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import { subir } from "./tests/e2e/servidor-falso.js";
+
+            const blocos = [];
+            let atual = null;
+            for (const linha of fs.readFileSync("_headers", "utf8").split("\n")) {
+              if (!linha.trim() || linha.trim().startsWith("#")) continue;
+              if (!/^\s/.test(linha)) { atual = { padrao: linha.trim(), h: {} }; blocos.push(atual); continue; }
+              const s = linha.indexOf(":");
+              if (atual && s > 0) atual.h[linha.slice(0, s).trim().toLowerCase()] = linha.slice(s + 1).trim();
+            }
+            const esperado = p => {
+              const out = {};
+              for (const b of blocos) {
+                const re = new RegExp("^" + b.padrao.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$");
+                if (re.test(p)) Object.assign(out, b.h);
+              }
+              return out;
+            };
+
+            const ALVOS = ["/index.html", "/js/app.js", "/sw.js",
+                           "/models/tiny_face_detector_model.bin", "/vendor/face-api.js"];
+            const { url, servidor } = await subir();
+            const falhas = [];
+            for (const p of ALVOS) {
+              const r = await fetch(url + p);
+              if (!r.ok) { falhas.push(p + " respondeu " + r.status); continue; }
+              const quer = esperado(p);
+              if (!Object.keys(quer).length) { falhas.push(p + " nao casa com nenhum bloco do _headers"); continue; }
+              for (const [k, v] of Object.entries(quer)) {
+                const recebido = r.headers.get(k);
+                if (recebido === null) falhas.push(p + ": nao enviou " + k + " (o _headers manda \"" + v + "\")");
+                else if (recebido !== v) falhas.push(p + ": " + k + " enviado \"" + recebido + "\", _headers manda \"" + v + "\"");
+              }
+            }
+            servidor.close();
+
+            if (falhas.length) {
+              for (const f of falhas) console.error("::error::servidor de teste x _headers — " + f);
+              console.error("::error::o E2E estaria rodando sob politica diferente da de producao");
+              process.exit(1);
+            }
+            console.log("servidor de teste envia a politica do _headers em " + ALVOS.length + " caminhos conferidos");
+          '
+
       - name: npm run serve nunca aponta para produção (T-B1D7F6)
         run: |
           node --input-type=module -e '

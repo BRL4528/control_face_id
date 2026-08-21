@@ -161,6 +161,14 @@ só a CSP e o `Cache-Control`, ficaria verde no dia em que o próximo cabeçalho
 fosse acrescentado em um lado só, que é exatamente o dia em que produção
 divergiria em silêncio.
 
+**O servidor de teste realmente envia a política do `_headers`.** A paridade
+acima compara arquivo com arquivo; esta compara o que sai **na resposta**. A
+lacuna que fecha: o teste de CSP chama `extrairCspDeHeaders()`, que é função pura
+lendo o arquivo — se o servidor falso parasse de *aplicar* os cabeçalhos, aquele
+teste continuaria verde e o E2E passaria a validar uma política que não existe.
+Nada pegava isso, e o risco é concreto sempre que `servidor-falso.js` é
+reescrito.
+
 **A origem pública é isolada por ausência do arquivo.** `publico/` é o Root
 Directory de outro projeto da Vercel e `.vercelignore` o tira do deploy do app.
 Se ele voltar para o deploy do app, a página pública volta a estar na **mesma
