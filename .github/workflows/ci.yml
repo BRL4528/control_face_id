@@ -76,46 +76,60 @@ jobs:
           fi
           echo "ok"
 
-      - name: A versão do cache do service worker subiu junto com o app
-        env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      - name: A versão do cache do sw.js descreve o conteúdo atual (T-C7A7E1)
         run: |
+          # NAO compara com a base do push. Compara com o commit que FIXOU a
+          # versao atual, e a pergunta e a certa: "a versao subiu depois da
+          # ultima mudanca de conteudo?" — nao "a versao subiu neste intervalo?".
+          #
+          # A versao anterior desta guarda era de dois pontos e por isso cega ao
+          # caso que mais acontece: a versao e bumpada no commit de integracao, e
+          # o ramo que ja estava aberto tras conteudo novo em cima dela sem tocar
+          # no numero. Num push com base antiga ela via v10 -> v12 e aprovava.
+          # Isso aconteceu TRES vezes em um dia (v10, v11, v12) e as tres foram
+          # achadas por inspecao manual, o que nao escala.
+          #
+          # Estrutural em ramo de vida longa, nao descuido: quem abriu o ramo
+          # antes do bump nao tem como saber que precisa mexer no numero.
           v=$(grep -o "efrat-ponto-v[0-9]*" sw.js | head -1)
-          echo "cache atual: $v"
           test -n "$v" || { echo "::error::sw.js sem versão de cache"; exit 1; }
+          echo "versão atual: $v"
 
-          # Dois ramos podem chegar na MESMA versão por caminhos diferentes: cada
-          # um mexe no ASSETS e cada um sobe v7 para v8. O merge une as duas
-          # listas e mantém o v8, porque a linha da versão é idêntica nos dois
-          # lados e o git não vê conflito. Resultado: navegador de campo com um
-          # cache v8 que não tem os arquivos do outro ramo, e nada avisa. Foi o
-          # que quase aconteceu entre T-B1D7F6 e T-8ADD9C.
-          if [ -z "${BASE:-}" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
-            echo "sem base para comparar (execução manual) — só a existência foi checada"
+          # O bump: o commit mais ANTIGO da sequência contígua em que a versão
+          # já era $v. Andando do mais novo para trás enquanto a versão bate.
+          bump=""
+          for c in $(git log --format=%H -- sw.js); do
+            vc=$(git show "$c:sw.js" 2>/dev/null | grep -o "efrat-ponto-v[0-9]*" | head -1)
+            if [ "$vc" = "$v" ]; then bump="$c"; else break; fi
+          done
+          if [ -z "$bump" ]; then
+            echo "::error::não achei o commit que fixou $v — sem isso a guarda não tem contra o que comparar, e prefiro falhar a passar calada"
+            exit 1
+          fi
+          echo "versão $v fixada em: $(git log -1 --format='%h %s' "$bump")"
+
+          # Impressão do que o sw.js pré-cacheia: caminho + hash de blob do git,
+          # que já é hash de conteúdo. Pega mudança de LISTA e de CONTEÚDO.
+          impressao() {
+            git show "$1:sw.js" \
+              | grep -oE "'\./[^']+'" | tr -d "'" | sed 's|^\./||' | sort -u \
+              | while read -r p; do
+                  printf '%s %s\n' "$p" "$(git rev-parse "$1:$p" 2>/dev/null || echo AUSENTE)"
+                done
+          }
+          impressao "$bump" > /tmp/sw-bump.txt
+          impressao HEAD     > /tmp/sw-head.txt
+
+          if diff -q /tmp/sw-bump.txt /tmp/sw-head.txt >/dev/null; then
+            echo "nada pré-cacheado mudou desde o bump — $v descreve o conteúdo atual"
             exit 0
           fi
-          if ! git cat-file -e "$BASE:sw.js" 2>/dev/null; then
-            echo "sw.js não existia na base — nada a comparar"
-            exit 0
-          fi
-          git show "$BASE:sw.js" > /tmp/sw-base.js
-          node --input-type=module -e '
-            import fs from "node:fs";
-            const lista = t => {
-              const i = t.indexOf("const ASSETS = [");
-              return t.slice(i, t.indexOf("];", i)).match(/\x27[^\x27]+\x27/g).sort().join(",");
-            };
-            const versao = t => t.match(/efrat-ponto-v(\d+)/)[1];
-            const atual = fs.readFileSync("sw.js", "utf8");
-            const base = fs.readFileSync("/tmp/sw-base.js", "utf8");
-            if (lista(atual) === lista(base)) { console.log("ASSETS igual à base — versão pode ficar"); process.exit(0); }
-            if (versao(atual) === versao(base)) {
-              console.error("::error::o ASSETS do sw.js mudou e a versão do cache continua v" + versao(base) +
-                " — suba para v" + (Number(versao(base)) + 1) + ", senão o celular em campo fica com um cache velho e incompleto");
-              process.exit(1);
-            }
-            console.log("ASSETS mudou e a versão subiu: v" + versao(base) + " -> v" + versao(atual));
-          '
+
+          echo "mudou desde o bump de $v:"
+          diff /tmp/sw-bump.txt /tmp/sw-head.txt | grep -E '^[<>]' | sed 's/^/  /'
+          proxima=$(( ${v##*-v} + 1 ))
+          echo "::error::o que o sw.js pré-cacheia mudou DEPOIS do commit que fixou $v — suba para efrat-ponto-v$proxima. Sem isso, aparelho com $v em disco continua servindo os arquivos antigos: não dá erro, o app simplesmente não muda"
+          exit 1
 
       # A partir daqui: a página pública de cadastro de face (link enviado ao
       # celular do colaborador) vive fora do app do operador. Ela é um alvo
@@ -167,25 +181,78 @@ jobs:
 
       - name: O service worker do operador não alcança a página pública
         run: |
+          # GUARDA DE RESULTADO, NAO DE MECANISMO. A versao anterior desta guarda
+          # lia o TEXTO do handler e comparava a posicao de FORA_DO_APP com a de
+          # respondWith. Medido: trocar a linha do desvio por
+          # `if (false && (...)) return;` deixava a guarda VERDE com o desvio
+          # morto. Ela conferia como a coisa e feita, quando o que importa e o
+          # que sai.
+          #
+          # Agora executa o handler de verdade, com self/caches/location/fetch
+          # dublados, e observa se respondWith FOI chamado. Qualquer refatoracao
+          # que preserve o comportamento passa; qualquer uma que o quebre falha,
+          # inclusive as que ninguem previu.
           node --input-type=module -e '
             import fs from "node:fs";
-            const sw = fs.readFileSync("sw.js", "utf8");
-            const prefixo = sw.match(/const FORA_DO_APP = .([^"\x27]+)./)[1];
+            const src = fs.readFileSync("sw.js", "utf8");
             const falhar = m => { console.error("::error::" + m); process.exit(1); };
 
-            // O desvio tem de sair do handler ANTES do respondWith, senão o
-            // fallback do index.html do operador responde no lugar da página.
-            const fetchHandler = sw.slice(sw.indexOf("addEventListener(\x27fetch\x27"));
-            const desvio = fetchHandler.indexOf("FORA_DO_APP");
-            const responde = fetchHandler.indexOf("respondWith");
-            if (desvio < 0) falhar("o handler de fetch do sw.js não desvia a página pública");
-            if (desvio > responde) falhar("o desvio da página pública vem depois do respondWith — o cache do operador responde antes");
+            const ouvintes = {};
+            const self = {
+              addEventListener: (t, f) => { ouvintes[t] = f; },
+              skipWaiting: () => {}, clients: { claim: () => {} }
+            };
+            const cacheDublado = { add: async () => {}, put: async () => {}, match: async () => undefined };
+            const caches = {
+              open: async () => cacheDublado, keys: async () => [],
+              match: async () => undefined, delete: async () => {}
+            };
+            const location = { origin: "https://app.exemplo.test" };
+            const fetch = async () => ({ ok: false, clone: () => ({}) });
+            new Function("self", "caches", "location", "fetch", src)(self, caches, location, fetch);
 
-            // E ela não pode estar no precache.
-            const assets = [...sw.matchAll(/.(\.\/[^\x27"]+)./g)].map(m => m[1]);
-            const dentro = assets.filter(a => a.replace(/^\./, "").startsWith(prefixo));
-            if (dentro.length) falhar("página pública no precache do sw.js: " + dentro.join(", "));
-            console.log("página pública fora do service worker: ok");
+            if (typeof ouvintes.fetch !== "function") falhar("sw.js nao registrou handler de fetch");
+
+            // Chamou respondWith? Entao o service worker assumiu a resposta.
+            const assumiu = (url, method = "GET") => {
+              let r = false;
+              ouvintes.fetch({ request: { method, url }, respondWith: () => { r = true; } });
+              return r;
+            };
+
+            const orig = location.origin;
+            const publicas = ["/publico", "/publico/", "/publico/index.html", "/publico/cadastro.js"];
+            for (const p of publicas) {
+              if (assumiu(orig + p)) {
+                falhar("o service worker do operador ASSUMIU a resposta de " + p +
+                  " — sem rede isso entrega o shell do app do operador ao colaborador, e um link de uso unico volta do cache");
+              }
+            }
+
+            // Contraprova: se ele nao assumir NADA, a guarda acima passaria por
+            // vacuidade e o app perderia o offline sem ninguem notar.
+            const deveAssumir = ["/index.html", "/js/app.js", "/models/face_recognition_model.bin"];
+            for (const p of deveAssumir) {
+              if (!assumiu(orig + p)) falhar("o service worker deixou de assumir " + p + " — o app do operador perde o offline");
+            }
+
+            // E o que nunca foi dele: outra origem e nao-GET.
+            if (assumiu("https://n8n.exemplo.test/webhook/efrat/marcacoes", "POST")) {
+              falhar("o service worker assumiu um POST de API — resposta de marcacao em cache seria mentira sobre o que o servidor recebeu");
+            }
+            if (assumiu("https://n8n.exemplo.test/webhook/efrat/carga")) {
+              falhar("o service worker assumiu GET de outra origem");
+            }
+
+            // O precache tambem nao pode conter a pagina publica.
+            const prefixo = src.match(/const FORA_DO_APP = .([^"\x27]+)./);
+            if (!prefixo) falhar("sw.js sem FORA_DO_APP — o desvio da pagina publica desapareceu");
+            const assets = [...src.matchAll(/.(\.\/[^\x27"]+)./g)].map(m => m[1]);
+            const dentro = assets.filter(a => a.replace(/^\./, "").startsWith(prefixo[1]));
+            if (dentro.length) falhar("pagina publica no precache do sw.js: " + dentro.join(", "));
+
+            console.log("handler executado: nao assume " + publicas.length + " caminhos publicos, assume " +
+              deveAssumir.length + " do app, e ignora API e outra origem");
           '
 
       - name: Nenhum asset externo, fonte remota ou script de terceiro no que vai ao ar
@@ -217,6 +284,110 @@ jobs:
             exit 1
           fi
           echo "nenhum asset externo"
+
+      - name: Nada no HTML inicial já satisfaz o que um spec espera
+        run: |
+          # Enquanto #porta nascia sem class="hide", qualquer spec que ESPERASSE
+          # por ele passava pelo flash de um quadro entre o HTML inicial e a
+          # decisão de verificarDispositivo() — passava mesmo com o resto
+          # quebrado. E #btnPonto nascia sem `disabled`, e só irParaPorta()
+          # (alcançável apenas com aparelho ATIVO) o desabilita: medido em
+          # navegador, `toBeEnabled()` passava com aparelho pendente, aprovado e
+          # antes de a página decidir qualquer coisa. Era o sinal de aceite de
+          # aprovação de aparelho em 7 pontos de 6 specs, e não verificava nada.
+          #
+          # Assertiva NEGATIVA falharia com o flash; é a POSITIVA que passa por
+          # engano. Por isso a correção é no HTML e não em cada spec: aqui a
+          # classe inteira de defeito fecha de uma vez, e tela nova nascendo
+          # visível também cai.
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const html = fs.readFileSync("index.html", "utf8");
+            const falhas = [];
+
+            const tagDe = id => {
+              const i = html.indexOf("id=\"" + id + "\"");
+              if (i < 0) return null;
+              return html.slice(html.lastIndexOf("<", i), html.indexOf(">", i) + 1);
+            };
+
+            for (const id of ["porta", "aguardando", "fila", "rh", "loginRh"]) {
+              const tag = tagDe(id);
+              if (!tag) { falhas.push("a seção #" + id + " não existe no index.html"); continue; }
+              const classe = (tag.match(/class="([^"]*)"/) || ["", ""])[1];
+              if (!classe.split(/\s+/).includes("hide")) {
+                falhas.push("a seção #" + id + " nasce VISÍVEL — spec que espera por ela passa pelo flash do boot mesmo com o app quebrado");
+              }
+            }
+
+            const btn = tagDe("btnPonto");
+            if (!btn) falhas.push("o botão #btnPonto não existe no index.html");
+            else if (!/\sdisabled/.test(btn)) {
+              falhas.push("#btnPonto nasce HABILITADO — toBeEnabled() passa com aparelho pendente, e é o sinal de aceite de aprovação em vários specs");
+            }
+
+            if (falhas.length) {
+              for (const f of falhas) console.error("::error::" + f);
+              process.exit(1);
+            }
+            console.log("nada no HTML inicial antecipa decisão do boot: 5 telas ocultas e o botão de ponto desabilitado");
+          '
+
+      - name: _headers e vercel.json declaram exatamente a mesma coisa
+        run: |
+          # Na Vercel o _headers NAO e lido: quem vale e o vercel.json. O repo
+          # mantem os dois porque o _headers e a fonte legivel (e o servidor
+          # falso do E2E le dele), mas isso significa que quem edita so o
+          # _headers ACREDITA ter mudado producao e nao mudou.
+          #
+          # Por isso a comparacao e exaustiva por construcao, e nao uma lista de
+          # cabecalhos que a gente lembrou de conferir: conjunto inteiro de
+          # caminhos, e para cada caminho o dicionario inteiro de chave->valor.
+          # Uma paridade que cobre so os cabecalhos de hoje fica verde no dia em
+          # que alguem acrescenta o proximo e producao divergir.
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const falhas = [];
+
+            // _headers: bloco por caminho, linhas indentadas sao cabecalhos.
+            const doHeaders = {};
+            let atual = null;
+            for (const linha of fs.readFileSync("_headers", "utf8").split("\n")) {
+              if (!linha.trim() || linha.trim().startsWith("#")) continue;
+              if (!/^\s/.test(linha)) { atual = linha.trim(); doHeaders[atual] = {}; continue; }
+              const sep = linha.indexOf(":");
+              if (atual && sep > 0) doHeaders[atual][linha.slice(0, sep).trim()] = linha.slice(sep + 1).trim();
+            }
+
+            // vercel.json: source usa (.*) onde o _headers usa *.
+            const canon = f => f.replace(/\(\.\*\)/g, "*");
+            const doVercel = {};
+            for (const regra of JSON.parse(fs.readFileSync("vercel.json", "utf8")).headers) {
+              const chave = canon(regra.source);
+              doVercel[chave] = doVercel[chave] || {};
+              for (const h of regra.headers) doVercel[chave][h.key] = h.value;
+            }
+
+            const caminhos = [...new Set([...Object.keys(doHeaders), ...Object.keys(doVercel)])].sort();
+            for (const c of caminhos) {
+              if (!doHeaders[c]) { falhas.push("caminho " + c + " existe no vercel.json e nao no _headers"); continue; }
+              if (!doVercel[c]) { falhas.push("caminho " + c + " existe no _headers e nao no vercel.json — editar so o _headers NAO muda producao"); continue; }
+              const chaves = [...new Set([...Object.keys(doHeaders[c]), ...Object.keys(doVercel[c])])].sort();
+              for (const k of chaves) {
+                const a = doHeaders[c][k], b = doVercel[c][k];
+                if (a === undefined) falhas.push(c + ": " + k + " so no vercel.json");
+                else if (b === undefined) falhas.push(c + ": " + k + " so no _headers — nao chega em producao");
+                else if (a !== b) falhas.push(c + ": " + k + " divergente\n      _headers:    " + a + "\n      vercel.json: " + b);
+              }
+            }
+
+            if (falhas.length) {
+              for (const f of falhas) console.error("::error::paridade _headers x vercel.json — " + f);
+              process.exit(1);
+            }
+            const n = caminhos.reduce((s, c) => s + Object.keys(doHeaders[c]).length, 0);
+            console.log("paridade exaustiva ok: " + caminhos.length + " caminhos, " + n + " cabecalhos, nenhuma divergencia");
+          '
 
       - name: A origem pública é isolada por ausência do arquivo, não por rota
         run: |
@@ -293,6 +464,95 @@ jobs:
             if (!externos.length) falhar("a CSP da origem publica nao libera o apiBase — a pagina nao gravaria face nenhuma");
             console.log("origem publica: cache, indexacao e CSP conferidos (apiBase " + apiBase + ")");
           '
+
+      - name: O servidor de teste realmente ENVIA a política do _headers
+        run: |
+          # A paridade acima compara arquivo com arquivo. Esta compara o que sai
+          # NA RESPOSTA com o que o _headers manda — e a unica que prova que o
+          # E2E roda sob a politica de producao e nao sob nenhuma.
+          #
+          # A lacuna que ela fecha: o teste unitario de CSP chama
+          # extrairCspDeHeaders(), que e funcao pura lendo o arquivo. Se o
+          # servidor falso parar de APLICAR os cabecalhos, aquele teste continua
+          # verde e o E2E passa a validar uma politica que nao existe. Nada
+          # pegava isso.
+          #
+          # Compara contra o _headers lido aqui, de proposito: nao importa como
+          # o servidor implementa, importa que a resposta case com o arquivo.
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import { subir } from "./tests/e2e/servidor-falso.js";
+
+            const blocos = [];
+            let atual = null;
+            for (const linha of fs.readFileSync("_headers", "utf8").split("\n")) {
+              if (!linha.trim() || linha.trim().startsWith("#")) continue;
+              if (!/^\s/.test(linha)) { atual = { padrao: linha.trim(), h: {} }; blocos.push(atual); continue; }
+              const s = linha.indexOf(":");
+              if (atual && s > 0) atual.h[linha.slice(0, s).trim().toLowerCase()] = linha.slice(s + 1).trim();
+            }
+            const esperado = p => {
+              const out = {};
+              for (const b of blocos) {
+                const re = new RegExp("^" + b.padrao.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$");
+                if (re.test(p)) Object.assign(out, b.h);
+              }
+              return out;
+            };
+
+            const ALVOS = ["/index.html", "/js/app.js", "/sw.js",
+                           "/models/tiny_face_detector_model.bin", "/vendor/face-api.js"];
+            const { url, servidor } = await subir();
+            const falhas = [];
+            for (const p of ALVOS) {
+              const r = await fetch(url + p);
+              if (!r.ok) { falhas.push(p + " respondeu " + r.status); continue; }
+              const quer = esperado(p);
+              if (!Object.keys(quer).length) { falhas.push(p + " nao casa com nenhum bloco do _headers"); continue; }
+              for (const [k, v] of Object.entries(quer)) {
+                const recebido = r.headers.get(k);
+                if (recebido === null) falhas.push(p + ": nao enviou " + k + " (o _headers manda \"" + v + "\")");
+                else if (recebido !== v) falhas.push(p + ": " + k + " enviado \"" + recebido + "\", _headers manda \"" + v + "\"");
+              }
+            }
+            servidor.close();
+
+            if (falhas.length) {
+              for (const f of falhas) console.error("::error::servidor de teste x _headers — " + f);
+              console.error("::error::o E2E estaria rodando sob politica diferente da de producao");
+              process.exit(1);
+            }
+            console.log("servidor de teste envia a politica do _headers em " + ALVOS.length + " caminhos conferidos");
+          '
+
+      - name: Nenhum cabeçalho de teste escapa para fora de tests/
+        run: |
+          # Pedido do T-C20AD3. O servidor falso precisa simular o IP de origem
+          # para tornar testavel o pedidos_da_mesma_rede_1h (§1.2), e o jeito
+          # obvio e um cabecalho so-de-teste. O risco, que ja aconteceu nesta
+          # base com o campo coerencia: o servidor falso e o modelo que alguem
+          # usa para escrever o workflow real do n8n. Se o cabecalho for
+          # copiado para la, nasce falsificacao de origem — qualquer requisicao
+          # externa manda o cabecalho e o sinal que existe para DETECTAR flood
+          # passa a ser o que o atacante escolher, inclusive variando o valor
+          # para se esconder do proprio sinal.
+          #
+          # Casa por PADRAO e nao por um nome so: qualquer cabecalho marcado
+          # como teste/fake/mock. Assim vale para o nome que o T-C20AD3
+          # escolher e para o proximo que alguem inventar.
+          #
+          # tests/ e onde ele PODE existir. .github/ esta fora porque este
+          # arquivo cita o padrao. vendor/ e models/ sao terceiros e binarios.
+          alvos=$(git ls-files | grep -vE '^(tests|vendor|models|\.github)/' || true)
+          if [ -z "$alvos" ]; then echo "::error::nenhum arquivo para varrer — a guarda ficaria sem efeito"; exit 1; fi
+
+          achados=$(grep -niE 'x-(teste|test|fake|falso|mock|dev)-' $alvos || true)
+          if [ -n "$achados" ]; then
+            echo "$achados"
+            echo "::error::cabeçalho de teste fora de tests/ — se isto chegar ao workflow do n8n, a origem da requisição passa a ser escolhida por quem chama, e o sinal de flood vira decoração"
+            exit 1
+          fi
+          echo "nenhum cabeçalho de teste fora de tests/ ($(echo "$alvos" | wc -l) arquivos varridos)"
 
       - name: npm run serve nunca aponta para produção (T-B1D7F6)
         run: |

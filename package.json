@@ -8,7 +8,8 @@
     "test": "npm run test:unit && npm run test:e2e",
     "test:unit": "node --test tests/unit/*.test.js",
     "test:e2e": "playwright test",
-    "serve": "node tests/e2e/servir.js"
+    "serve": "node tests/e2e/servir.js",
+    "pista": "./bin/pista"
   },
   "devDependencies": {
     "@playwright/test": "^1.50.0"
