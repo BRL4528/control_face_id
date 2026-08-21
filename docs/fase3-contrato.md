@@ -532,8 +532,8 @@ de equipe. Troca de equipe não é correção de ponto.
 
 ```json
 { "usuario": "rh", "chave": "…", "idempotency_key": "uuid-v4",
-  "equipe_id": "eq-01", "nome": "Equipe Norte", "local_id": "loc-01",
-  "ativo": true }
+  "equipe_id": "eq-01", "nome": "Equipe Norte", "unidade": "Obra Norte",
+  "lat": -20.46, "lng": -54.62, "raio_m": 500, "ativo": true }
 ```
 
 - Sem `equipe_id` → cria. Com `equipe_id` → atualiza.
