@@ -34,6 +34,13 @@ window.EFRAT_CFG = Object.assign({
   maxBright: 215,
   maxYaw: 0.30,
 
+  // Consistência de pose ENTRE as 3 fotos do lote de cadastro (T-5EC67B), não
+  // pitch absoluto — pitch absoluto em 2D exigiria assumir uma razão
+  // antropométrica, e isso produz viés demográfico (docs/validacao-biometrica.md:101).
+  // Julgamento, não medição de população real, como o próprio limiarAceite:
+  // ~15° de queixo baixo numa anatomia mediana. Recalibrar aqui, não no teste.
+  maxInconsistenciaPose: 0.12,
+
   inputSize: 416,       // resolução do detector no quadro inteiro
   roiInputSize: 224,    // resolução do detector no recorte rastreado
 
