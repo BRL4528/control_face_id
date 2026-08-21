@@ -218,6 +218,62 @@ jobs:
           fi
           echo "nenhum asset externo"
 
+      - name: _headers e vercel.json declaram exatamente a mesma coisa
+        run: |
+          # Na Vercel o _headers NAO e lido: quem vale e o vercel.json. O repo
+          # mantem os dois porque o _headers e a fonte legivel (e o servidor
+          # falso do E2E le dele), mas isso significa que quem edita so o
+          # _headers ACREDITA ter mudado producao e nao mudou.
+          #
+          # Por isso a comparacao e exaustiva por construcao, e nao uma lista de
+          # cabecalhos que a gente lembrou de conferir: conjunto inteiro de
+          # caminhos, e para cada caminho o dicionario inteiro de chave->valor.
+          # Uma paridade que cobre so os cabecalhos de hoje fica verde no dia em
+          # que alguem acrescenta o proximo e producao divergir.
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const falhas = [];
+
+            // _headers: bloco por caminho, linhas indentadas sao cabecalhos.
+            const doHeaders = {};
+            let atual = null;
+            for (const linha of fs.readFileSync("_headers", "utf8").split("\n")) {
+              if (!linha.trim() || linha.trim().startsWith("#")) continue;
+              if (!/^\s/.test(linha)) { atual = linha.trim(); doHeaders[atual] = {}; continue; }
+              const sep = linha.indexOf(":");
+              if (atual && sep > 0) doHeaders[atual][linha.slice(0, sep).trim()] = linha.slice(sep + 1).trim();
+            }
+
+            // vercel.json: source usa (.*) onde o _headers usa *.
+            const canon = f => f.replace(/\(\.\*\)/g, "*");
+            const doVercel = {};
+            for (const regra of JSON.parse(fs.readFileSync("vercel.json", "utf8")).headers) {
+              const chave = canon(regra.source);
+              doVercel[chave] = doVercel[chave] || {};
+              for (const h of regra.headers) doVercel[chave][h.key] = h.value;
+            }
+
+            const caminhos = [...new Set([...Object.keys(doHeaders), ...Object.keys(doVercel)])].sort();
+            for (const c of caminhos) {
+              if (!doHeaders[c]) { falhas.push("caminho " + c + " existe no vercel.json e nao no _headers"); continue; }
+              if (!doVercel[c]) { falhas.push("caminho " + c + " existe no _headers e nao no vercel.json — editar so o _headers NAO muda producao"); continue; }
+              const chaves = [...new Set([...Object.keys(doHeaders[c]), ...Object.keys(doVercel[c])])].sort();
+              for (const k of chaves) {
+                const a = doHeaders[c][k], b = doVercel[c][k];
+                if (a === undefined) falhas.push(c + ": " + k + " so no vercel.json");
+                else if (b === undefined) falhas.push(c + ": " + k + " so no _headers — nao chega em producao");
+                else if (a !== b) falhas.push(c + ": " + k + " divergente\n      _headers:    " + a + "\n      vercel.json: " + b);
+              }
+            }
+
+            if (falhas.length) {
+              for (const f of falhas) console.error("::error::paridade _headers x vercel.json — " + f);
+              process.exit(1);
+            }
+            const n = caminhos.reduce((s, c) => s + Object.keys(doHeaders[c]).length, 0);
+            console.log("paridade exaustiva ok: " + caminhos.length + " caminhos, " + n + " cabecalhos, nenhuma divergencia");
+          '
+
       - name: A origem pública é isolada por ausência do arquivo, não por rota
         run: |
           # A pagina publica roda em projeto separado da Vercel (Root Directory

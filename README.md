@@ -150,6 +150,17 @@ máquina com rota para o host, runner do CI incluso, o E2E fazia `POST
 /dispositivo/registrar` em produção a cada execução. Teste que passa por efeito
 colateral de rede fica vermelho no dia em que a rede melhora.
 
+**`_headers` e `vercel.json` declaram exatamente a mesma coisa.** Na Vercel o
+`_headers` **não é lido** — quem vale é o `vercel.json`. O repo mantém os dois
+porque o `_headers` é a fonte legível e o servidor falso do E2E lê dele; o preço
+é que quem editar só o `_headers` **acredita** ter mudado produção e não mudou. A
+comparação é exaustiva **por construção** — conjunto inteiro de caminhos, e para
+cada caminho o dicionário inteiro de chave→valor — e não uma lista dos
+cabeçalhos que alguém lembrou de conferir. Uma paridade que cobrisse só a CSP, ou
+só a CSP e o `Cache-Control`, ficaria verde no dia em que o próximo cabeçalho
+fosse acrescentado em um lado só, que é exatamente o dia em que produção
+divergiria em silêncio.
+
 **A origem pública é isolada por ausência do arquivo.** `publico/` é o Root
 Directory de outro projeto da Vercel e `.vercelignore` o tira do deploy do app.
 Se ele voltar para o deploy do app, a página pública volta a estar na **mesma
