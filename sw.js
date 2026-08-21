@@ -1,6 +1,6 @@
 // Cache dos estáticos. As chamadas de API nunca passam por aqui: resposta de
 // marcação em cache seria mentira sobre o que o servidor recebeu.
-const CACHE = 'efrat-ponto-v8';
+const CACHE = 'efrat-ponto-v9';
 // BACKSTOP. A pagina publica de cadastro de face vive em ORIGEM PROPRIA
 // (projeto separado da Vercel, Root Directory publico/) — ver publico/LEIA-ME.md.
 // A fronteira de verdade e a origem, garantida por AUSENCIA: .vercelignore tira
@@ -39,6 +39,7 @@ const ASSETS = [
   './js/api.js',
   './js/face.js',
   './js/regras.js',
+  './js/coerencia.js',
   './js/store.js',
   './js/ui.js',
   './js/fila.js',
