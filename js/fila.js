@@ -16,6 +16,25 @@ import { $, esc, mostrar, toast, hora } from './ui.js';
 
 const cfg = () => window.EFRAT_CFG;
 
+// Texto para o gestor no recadastro em campo (T-8ADD9C): o servidor agora
+// recusa lote incoerente com 422 + código (docs/fase3-contrato.md § 4.2 / § 7),
+// em vez de aceitar qualquer coisa. Aprovado com o Designer (750f40fef8) —
+// COERENCIA_INSUFICIENTE aponta pra pessoa errada e escala pro RH se repetir;
+// FOTOS_IGUAIS reusa o vocabulário de "mover a cabeça" (js/rh.js:459), porque
+// o remédio é variar a pose, não a luz; VETORES_INVALIDOS (falha técnica de
+// captura) usa o texto genérico.
+const MENSAGENS_ERRO_CADASTRO = {
+  COERENCIA_INSUFICIENTE: 'As 3 fotos não deram certo — pareceram de pessoas diferentes. Tire as 3 de novo com calma; se continuar assim, avise o RH.',
+  FOTOS_IGUAIS: 'As 3 fotos ficaram iguais demais. Mova um pouco a cabeça entre as capturas e tente de novo.',
+  VETORES_INVALIDOS: 'As fotos não ficaram boas pra usar. Tire as 3 de novo, com boa luz e o rosto bem visível.'
+};
+
+function mensagemErroCadastro(erro) {
+  return (erro && MENSAGENS_ERRO_CADASTRO[erro.codigo])
+    || (typeof erro === 'string' ? erro : null)
+    || 'Falha ao enviar';
+}
+
 export const Fila = {
   dispositivo: null,
   carga: null,
@@ -259,11 +278,11 @@ export const Fila = {
     const env = await Api.cadastrar(this.dispositivo.dispositivo_id, this.dispositivo.credencial, {
       origem: 'gestor', pessoa_id: pessoaId, nome: alvo.nome, matricula: alvo.matricula,
       equipe_id: alvo.equipe_id, vetores: capturas.map(c => c.descritor),
-      miniatura: capturas[0].thumb, coerencia: 0
+      miniatura: capturas[0].thumb
     });
     this.estado = 'aguardando';
     $('cartao').innerHTML = '';
-    toast(env.ok ? 'Enviado para aprovação do RH' : (env.erro || 'Falha ao enviar'), env.ok ? 'ok' : 'bad');
+    toast(env.ok ? 'Enviado para aprovação do RH' : mensagemErroCadastro(env.erro), env.ok ? 'ok' : 'bad');
   },
 
   /* ------------------------------------------------------- marcação */
