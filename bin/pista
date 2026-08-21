@@ -10,10 +10,27 @@
 set -u
 alvo=$(pgrep -f '[p]laywright test' | tr '\n' ' ')
 chrome=$(pgrep -f '[c]hrome --.*--remote-debugging|[c]hromium.*--headless' | tr '\n' ' ')
-serve=$(pgrep -f '[t]ests/e2e/servir.js' | tr '\n' ' ')
+# Casa servir.js E proxy ad hoc de validacao visual (visual-*.mjs, proxy-*.js na
+# raiz), porque servidor esquecido de pe foi incidente real: a porta 38975 ficou
+# uma hora no ar. O caso que mais importa e justamente o proxy ad hoc, que a
+# nossa propria regra manda usar para nao apontar navegador visivel a producao.
+# Filtra por EXECUTAVEL real (/proc/PID/comm), nao pela linha de comando: o
+# truque do colchete protege o pgrep de casar consigo, e NAO protege de casar
+# com o shell que carrega a string. Foi assim que o QA quebrou a propria regra
+# hoje, e assim que eu a quebrei de novo cinco minutos depois de escrever isto.
+so_node() { for p in $1; do [ "$(cat /proc/$p/comm 2>/dev/null)" = node ] && printf '%s ' "$p"; done; }
+serve=$(so_node "$(pgrep -f '(tests/e2e/servir\.js|(visual|proxy|servir)[^/]*\.(mjs|cjs|js))')")
 ocupado=0
 [ -n "${alvo// /}" ] && { echo "OCUPADO playwright: $alvo"; ocupado=1; }
 [ -n "${chrome// /}" ] && { echo "OCUPADO navegador: $chrome"; ocupado=1; }
 [ -n "${serve// /}" ] && { echo "servidor de serve de pe: $serve (derrube quando terminar)"; }
-[ "$ocupado" = 0 ] && echo "LIVRE  $(date -Is)"
+if [ "$ocupado" = 0 ]; then
+  echo "LIVRE  $(date -Is)"
+  echo
+  echo "  Isto e UMA FOTO deste instante, nao procedencia da sua rodada:"
+  echo "  alguem pode entrar um segundo depois. Vale como CONDICAO DE ENTRADA."
+  echo "  Ao reportar numero, use uma das duas frases:"
+  echo "    - \"janela travada, todos confirmaram parada\"  <- medicao valida"
+  echo "    - \"sem travar janela, pista LIVRE na entrada\"  <- honesta, nao valida"
+fi
 exit 0
