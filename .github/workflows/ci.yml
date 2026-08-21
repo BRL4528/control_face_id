@@ -49,6 +49,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # a guarda de versão do sw.js compara com a base
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -75,7 +77,185 @@ jobs:
           echo "ok"
 
       - name: A versão do cache do service worker subiu junto com o app
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           v=$(grep -o "efrat-ponto-v[0-9]*" sw.js | head -1)
           echo "cache atual: $v"
           test -n "$v" || { echo "::error::sw.js sem versão de cache"; exit 1; }
+
+          # Dois ramos podem chegar na MESMA versão por caminhos diferentes: cada
+          # um mexe no ASSETS e cada um sobe v7 para v8. O merge une as duas
+          # listas e mantém o v8, porque a linha da versão é idêntica nos dois
+          # lados e o git não vê conflito. Resultado: navegador de campo com um
+          # cache v8 que não tem os arquivos do outro ramo, e nada avisa. Foi o
+          # que quase aconteceu entre T-B1D7F6 e T-8ADD9C.
+          if [ -z "${BASE:-}" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            echo "sem base para comparar (execução manual) — só a existência foi checada"
+            exit 0
+          fi
+          if ! git cat-file -e "$BASE:sw.js" 2>/dev/null; then
+            echo "sw.js não existia na base — nada a comparar"
+            exit 0
+          fi
+          git show "$BASE:sw.js" > /tmp/sw-base.js
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const lista = t => {
+              const i = t.indexOf("const ASSETS = [");
+              return t.slice(i, t.indexOf("];", i)).match(/\x27[^\x27]+\x27/g).sort().join(",");
+            };
+            const versao = t => t.match(/efrat-ponto-v(\d+)/)[1];
+            const atual = fs.readFileSync("sw.js", "utf8");
+            const base = fs.readFileSync("/tmp/sw-base.js", "utf8");
+            if (lista(atual) === lista(base)) { console.log("ASSETS igual à base — versão pode ficar"); process.exit(0); }
+            if (versao(atual) === versao(base)) {
+              console.error("::error::o ASSETS do sw.js mudou e a versão do cache continua v" + versao(base) +
+                " — suba para v" + (Number(versao(base)) + 1) + ", senão o celular em campo fica com um cache velho e incompleto");
+              process.exit(1);
+            }
+            console.log("ASSETS mudou e a versão subiu: v" + versao(base) + " -> v" + versao(atual));
+          '
+
+      # A partir daqui: a página pública de cadastro de face (link enviado ao
+      # celular do colaborador) vive fora do app do operador. Ela é um alvo
+      # público, então cada regra que a isola tem uma guarda aqui.
+
+      - name: O prefixo da página pública é o mesmo no sw.js, no _headers e no vercel.json
+        run: |
+          # Se alguém mudar o caminho da página em um lugar só, a isolação abre
+          # um buraco silencioso: cache velho, ou precache dentro do app.
+          prefixo=$(grep -oE "const FORA_DO_APP = '[^']+'" sw.js | sed "s/.*'\(.*\)'/\1/")
+          test -n "$prefixo" || { echo "::error::sw.js sem FORA_DO_APP — o desvio da página pública desapareceu"; exit 1; }
+          echo "prefixo da página pública: $prefixo"
+          grep -qF "$prefixo" _headers    || { echo "::error::_headers não tem bloco para $prefixo"; exit 1; }
+          grep -qF "$prefixo" vercel.json || { echo "::error::vercel.json não tem bloco para $prefixo"; exit 1; }
+
+      - name: A página pública nunca é servida de cache
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const prefixo = fs.readFileSync("sw.js", "utf8").match(/const FORA_DO_APP = .([^"\x27]+)./)[1];
+            const falhar = m => { console.error("::error::" + m); process.exit(1); };
+
+            // _headers: os dois blocos (o clean URL e o prefixo) com no-store.
+            const headers = fs.readFileSync("_headers", "utf8");
+            for (const alvo of [prefixo, prefixo + "/*"]) {
+              const bloco = headers.split(/\n(?=\S)/).find(b => b.trimStart().startsWith(alvo + "\n"));
+              if (!bloco) falhar("_headers sem bloco " + alvo);
+              if (!/Cache-Control:.*no-store/.test(bloco)) falhar("_headers: " + alvo + " tem de ser no-store");
+              if (!/X-Robots-Tag:.*noindex/.test(bloco)) falhar("_headers: " + alvo + " tem de ser noindex — link público não entra em buscador");
+            }
+
+            // vercel.json: mesma coisa, senão produção divergiria do _headers.
+            const vercel = JSON.parse(fs.readFileSync("vercel.json", "utf8"));
+            for (const fonte of [prefixo, prefixo + "/(.*)"]) {
+              const regra = vercel.headers.find(h => h.source === fonte);
+              if (!regra) falhar("vercel.json sem regra para " + fonte);
+              const cc = regra.headers.find(h => h.key === "Cache-Control");
+              if (!cc || !/no-store/.test(cc.value)) falhar("vercel.json: " + fonte + " tem de ser no-store");
+            }
+
+            // E os pesados continuam com cache longo — é o que faz o motor abrir
+            // rápido no celular do colaborador.
+            for (const alvo of ["/models/*", "/vendor/*"]) {
+              const bloco = headers.split(/\n(?=\S)/).find(b => b.trimStart().startsWith(alvo + "\n"));
+              if (!bloco || !/max-age=31536000.*immutable/.test(bloco)) falhar("_headers: " + alvo + " perdeu o cache longo");
+            }
+            console.log("cache da página pública e dos modelos: ok");
+          '
+
+      - name: O service worker do operador não alcança a página pública
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const sw = fs.readFileSync("sw.js", "utf8");
+            const prefixo = sw.match(/const FORA_DO_APP = .([^"\x27]+)./)[1];
+            const falhar = m => { console.error("::error::" + m); process.exit(1); };
+
+            // O desvio tem de sair do handler ANTES do respondWith, senão o
+            // fallback do index.html do operador responde no lugar da página.
+            const fetchHandler = sw.slice(sw.indexOf("addEventListener(\x27fetch\x27"));
+            const desvio = fetchHandler.indexOf("FORA_DO_APP");
+            const responde = fetchHandler.indexOf("respondWith");
+            if (desvio < 0) falhar("o handler de fetch do sw.js não desvia a página pública");
+            if (desvio > responde) falhar("o desvio da página pública vem depois do respondWith — o cache do operador responde antes");
+
+            // E ela não pode estar no precache.
+            const assets = [...sw.matchAll(/.(\.\/[^\x27"]+)./g)].map(m => m[1]);
+            const dentro = assets.filter(a => a.replace(/^\./, "").startsWith(prefixo));
+            if (dentro.length) falhar("página pública no precache do sw.js: " + dentro.join(", "));
+            console.log("página pública fora do service worker: ok");
+          '
+
+      - name: Nenhum asset externo, fonte remota ou script de terceiro no que vai ao ar
+        run: |
+          # Mesma guarda que já impede a volta de CDN, agora sobre TODO arquivo
+          # publicado — inclusive a página pública, que ainda não existe hoje e
+          # por isso é o lugar mais fácil de alguém colar um <script src="...">.
+          publicados=$(git ls-files '*.html' '*.js' '*.css' '*.json' \
+            | grep -vE '^(vendor|models|tests|docs|n8n|\.central-agentes|\.github)/' \
+            | grep -v '^package-lock\.json$')
+          echo "arquivos verificados:"; echo "$publicados" | sed 's/^/  /'
+
+          proibidos='cdn\.jsdelivr\.net|unpkg\.com|cdnjs\.cloudflare\.com|fonts\.googleapis\.com|fonts\.gstatic\.com|ajax\.googleapis\.com|code\.jquery\.com|esm\.sh|skypack\.dev|googletagmanager\.com|google-analytics\.com'
+          if grep -nEi "$proibidos" $publicados; then
+            echo "::error::CDN, fonte remota ou script de terceiro em arquivo publicado"
+            exit 1
+          fi
+
+          # Fora do apiBase (js/config.js) e do $schema do vercel.json, nenhum
+          # arquivo publicado tem motivo para citar origem externa.
+          sobra=$(grep -nE 'https?://' $publicados \
+            | grep -v '^js/config\.js:' \
+            | grep -v '^vercel\.json:' || true)
+          if [ -n "$sobra" ]; then
+            echo "$sobra"
+            echo "::error::origem externa em arquivo publicado — todo asset tem de ser local"
+            exit 1
+          fi
+          echo "nenhum asset externo"
+
+      - name: A página pública não fala com ninguém além da própria origem e do apiBase
+        run: |
+          test -d cadastro || { echo "cadastro/ ainda não existe — guarda ativa quando a página entrar"; exit 0; }
+          if grep -rnE 'https?://' cadastro/; then
+            echo "::error::a página pública não pode citar origem externa nenhuma — o apiBase vem de js/config.js"
+            exit 1
+          fi
+          # Nada dela pode morar em js/ ou css/: js/*.js é precacheado pelo
+          # service worker do operador por teste unitário.
+          if grep -rnE '(src|href)=["\x27](\.\./)?(js|css)/' cadastro/; then
+            echo "::error::a página pública carrega arquivo de js/ ou css/ — isso a coloca no precache do app do operador"
+            exit 1
+          fi
+          echo "página pública sem asset externo e sem asset do app"
+
+      - name: npm run serve nunca aponta para produção (T-B1D7F6)
+        run: |
+          node --input-type=module -e '
+            import { subir } from "./tests/e2e/servidor-falso.js";
+            const { url, servidor } = await subir();
+            const src = await (await fetch(url + "/js/config.js")).text();
+            servidor.close();
+
+            // Avalia o config exatamente como o navegador faria, sem override.
+            const window = {};
+            new Function("window", src)(window);
+            const servida = new URL(window.EFRAT_CFG.apiBase).host;
+            const local = new URL(url).host;
+            if (servida !== local) {
+              console.error("::error::o servidor de teste entrega o app apontando para " + servida +
+                " — npm run serve registraria aparelho e bateria ponto em produção");
+              process.exit(1);
+            }
+
+            // E o override que os specs injetam continua vencendo.
+            const comOverride = { EFRAT_CFG: { apiBase: "http://127.0.0.1:1/webhook" } };
+            new Function("window", src)(comOverride);
+            if (comOverride.EFRAT_CFG.apiBase !== "http://127.0.0.1:1/webhook") {
+              console.error("::error::o servidor de teste atropela a apiBase injetada pelos specs");
+              process.exit(1);
+            }
+            console.log("npm run serve -> " + servida + " (local), override de spec preservado");
+          '

@@ -17,6 +17,45 @@ export function extrairCspDeHeaders() {
   return match ? match[1].trim() : '';
 }
 
+// _headers e a fonte unica da politica de borda. A CSP ja vinha de la; cache
+// tambem tem de vir, senao o E2E valida um cache que nao existe em producao —
+// o caso que importa e a pagina publica de uso unico, que nao pode ser servida
+// de cache velho.
+function blocosDeHeaders() {
+  const blocos = [];
+  let atual = null;
+  for (const linha of fs.readFileSync(path.join(RAIZ, '_headers'), 'utf8').split('\n')) {
+    if (!linha.trim() || linha.trim().startsWith('#')) continue;
+    if (!/^\s/.test(linha)) { atual = { padrao: linha.trim(), headers: {} }; blocos.push(atual); continue; }
+    const sep = linha.indexOf(':');
+    if (atual && sep > 0) atual.headers[linha.slice(0, sep).trim()] = linha.slice(sep + 1).trim();
+  }
+  return blocos;
+}
+
+// Todo bloco que casa e aplicado na ordem do arquivo: o mais especifico vem
+// depois e sobrescreve, igual a Vercel.
+export function headersPara(pathname) {
+  const saida = {};
+  for (const bloco of blocosDeHeaders()) {
+    const re = new RegExp('^' + bloco.padrao.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
+    if (re.test(pathname)) Object.assign(saida, bloco.headers);
+  }
+  return saida;
+}
+
+// T-B1D7F6: este servidor e de teste, e servidor de teste nunca pode entregar o
+// app apontando para producao — registro de aparelho e marcacao de ponto sao
+// efeitos colaterais reais e irreversiveis. npm run serve fazia exatamente isso.
+// Prepend, nao append: js/config.js faz Object.assign(padroes, window.EFRAT_CFG),
+// entao o que ja estiver definido vence. Assim o override que os specs injetam
+// por addInitScript continua ganhando — inclusive a apiBase morta de proposito
+// em acesso.spec.js, que testa o app sem servidor.
+function configLocal(base) {
+  return 'window.EFRAT_CFG = Object.assign({ apiBase: ' + JSON.stringify(base + '/webhook') +
+    ' }, window.EFRAT_CFG || {});\n';
+}
+
 const TIPOS = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8', '.png': 'image/png',
@@ -561,18 +600,27 @@ export function criarServidor(opts = {}) {
     }
 
     // estáticos
-    let p = url.pathname === '/' ? '/index.html' : url.pathname;
-    const arq = path.join(RAIZ, decodeURIComponent(p));
-    if (!arq.startsWith(RAIZ) || !fs.existsSync(arq) || fs.statSync(arq).isDirectory()) {
+    const p = url.pathname === '/' ? '/index.html' : url.pathname;
+    let arq = path.join(RAIZ, decodeURIComponent(p));
+    if (!arq.startsWith(RAIZ)) { res.writeHead(404); res.end('nao encontrado'); return; }
+    // Indice de diretorio: /cadastro serve cadastro/index.html, que e como a
+    // Vercel resolve o link publico com cleanUrls ligado.
+    if (fs.existsSync(arq) && fs.statSync(arq).isDirectory()) arq = path.join(arq, 'index.html');
+    else if (!fs.existsSync(arq) && fs.existsSync(arq + '/index.html')) arq = path.join(arq, 'index.html');
+    if (!fs.existsSync(arq) || fs.statSync(arq).isDirectory()) {
       res.writeHead(404); res.end('nao encontrado'); return;
     }
-    const csp = extrairCspDeHeaders();
-    const headers = { 'Content-Type': TIPOS[path.extname(arq)] || 'application/octet-stream' };
-    if (csp) headers['Content-Security-Policy'] = csp;
-    headers['Permissions-Policy'] = 'camera=(self)';
-    headers['X-Content-Type-Options'] = 'nosniff';
-    headers['Referrer-Policy'] = 'same-origin';
-    headers['X-Frame-Options'] = 'DENY';
+    const headers = Object.assign(
+      { 'Content-Type': TIPOS[path.extname(arq)] || 'application/octet-stream' },
+      headersPara(p)
+    );
+    if (p === '/js/config.js') {
+      const corpo = configLocal('http://' + (req.headers.host || '127.0.0.1')) + fs.readFileSync(arq, 'utf8');
+      headers['Content-Length'] = Buffer.byteLength(corpo);
+      res.writeHead(200, headers);
+      res.end(corpo);
+      return;
+    }
     res.writeHead(200, headers);
     fs.createReadStream(arq).pipe(res);
   });
