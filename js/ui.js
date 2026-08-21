@@ -14,7 +14,7 @@ export const esc = s => {
 const ACESSO_RH_VISIVEL = new Set(['porta', 'aguardando']);
 
 export function mostrar(tela) {
-  ['porta', 'aguardando', 'fila', 'rh', 'loginRh', 'painelGestor'].forEach(t => {
+  ['porta', 'aguardando', 'fila', 'rh', 'loginRh', 'painelGestor', 'falhaBoot'].forEach(t => {
     $(t).classList.toggle('hide', t !== tela);
   });
   $('btnAcessar').classList.toggle('hide', !ACESSO_RH_VISIVEL.has(tela));

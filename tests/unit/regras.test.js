@@ -5,7 +5,7 @@ import {
   itensParaRemover, agoraCorrigido, calcularDeriva, cargaValida, euclidiana, dia,
   indicadores, espelho, gestorDeveMarcar,
   presencaPorEquipe, statusPresenca, serieDiaria, pendenciasPorMotivo, LIMIAR_PRESENCA,
-  separarAparelhos
+  separarAparelhos, normalizarTelefone, telefonesCompartilhados
 } from '../../js/regras.js';
 
 const CFG = { limiarAceite: 0.45, limiarCinza: 0.58 };
@@ -362,4 +362,116 @@ test('separarAparelhos: aprovados por uso mais recente primeiro, nunca-usado vai
 test('separarAparelhos: lista vazia ou ausente nao explode', () => {
   assert.deepEqual(separarAparelhos([]), { pendentes: [], aprovados: [] });
   assert.deepEqual(separarAparelhos(undefined), { pendentes: [], aprovados: [] });
+});
+
+/* ------------------------------------------------------- normalizarTelefone */
+
+test('normalizarTelefone: 11 digitos BR vira +55 e-164', () => {
+  const r = normalizarTelefone('67998765432');
+  assert.equal(r.ok, true);
+  assert.equal(r.e164, '+5567998765432');
+  assert.equal(r.estrangeiro, false);
+});
+
+test('normalizarTelefone: mascara bonita normaliza igual ao digitos puros', () => {
+  const r = normalizarTelefone('(67) 99876-5432');
+  assert.equal(r.ok, true);
+  assert.equal(r.e164, '+5567998765432');
+});
+
+test('normalizarTelefone: 13 digitos comecando em 55 e o mesmo numero', () => {
+  const r = normalizarTelefone('5567998765432');
+  assert.equal(r.ok, true);
+  assert.equal(r.e164, '+5567998765432');
+});
+
+test('normalizarTelefone: com + na frente tambem aceita BR', () => {
+  const r = normalizarTelefone('+5567998765432');
+  assert.equal(r.ok, true);
+  assert.equal(r.e164, '+5567998765432');
+});
+
+test('normalizarTelefone: fixo de 10 digitos e TELEFONE_NAO_MOVEL', () => {
+  const r = normalizarTelefone('6733224455');
+  assert.equal(r.ok, false);
+  assert.equal(r.codigo, 'TELEFONE_NAO_MOVEL');
+});
+
+test('normalizarTelefone: fixo de 12 digitos comecando em 55 tambem e TELEFONE_NAO_MOVEL', () => {
+  const r = normalizarTelefone('556733224455');
+  assert.equal(r.codigo, 'TELEFONE_NAO_MOVEL');
+});
+
+test('normalizarTelefone: celular BR sem o 9 na frente do numero e nao-movel', () => {
+  const r = normalizarTelefone('67888765432'); // DDD 67 + 8 (sem 9) + 8 digitos
+  assert.equal(r.codigo, 'TELEFONE_NAO_MOVEL');
+});
+
+test('normalizarTelefone: ausente ou vazio e TELEFONE_OBRIGATORIO', () => {
+  assert.equal(normalizarTelefone('').codigo, 'TELEFONE_OBRIGATORIO');
+  assert.equal(normalizarTelefone(null).codigo, 'TELEFONE_OBRIGATORIO');
+  assert.equal(normalizarTelefone(undefined).codigo, 'TELEFONE_OBRIGATORIO');
+});
+
+test('normalizarTelefone: DDD com zero ou fora de 11-99 e TELEFONE_INVALIDO', () => {
+  assert.equal(normalizarTelefone('07998765432').codigo, 'TELEFONE_INVALIDO');   // ddd 07
+  assert.equal(normalizarTelefone('10998765432').codigo, 'TELEFONE_INVALIDO');   // ddd 10, fora de 11-99
+});
+
+test('normalizarTelefone: tamanho estranho ou letra sobrando e TELEFONE_INVALIDO', () => {
+  assert.equal(normalizarTelefone('123').codigo, 'TELEFONE_INVALIDO');
+  assert.equal(normalizarTelefone('6799876543299999').codigo, 'TELEFONE_INVALIDO');
+  assert.equal(normalizarTelefone('6799876abc2').codigo, 'TELEFONE_INVALIDO');
+});
+
+test('normalizarTelefone: numero estrangeiro com + e pais diferente de 55 e aceito e marcado', () => {
+  const r = normalizarTelefone('+12025551234');
+  assert.equal(r.ok, true);
+  assert.equal(r.e164, '+12025551234');
+  assert.equal(r.estrangeiro, true);
+});
+
+test('normalizarTelefone: estrangeiro fora de 8-15 digitos e TELEFONE_INVALIDO', () => {
+  assert.equal(normalizarTelefone('+1234').codigo, 'TELEFONE_INVALIDO');
+});
+
+/* --------------------------------------------------- telefonesCompartilhados */
+
+test('telefonesCompartilhados: duas pessoas ativas com o mesmo numero se apontam', () => {
+  const mapa = telefonesCompartilhados([
+    { pessoa_id: 'p1', nome: 'Ana', ativo: true, telefone: '+5567998765432' },
+    { pessoa_id: 'p2', nome: 'Bruno', ativo: true, telefone: '+5567998765432' },
+    { pessoa_id: 'p3', nome: 'Carla', ativo: true, telefone: '+5567911112222' }
+  ]);
+  assert.deepEqual(mapa.p1, [{ pessoa_id: 'p2', nome: 'Bruno' }]);
+  assert.deepEqual(mapa.p2, [{ pessoa_id: 'p1', nome: 'Ana' }]);
+  assert.equal(mapa.p3, undefined);
+});
+
+test('telefonesCompartilhados: pessoa inativa nao conta pro compartilhamento', () => {
+  const mapa = telefonesCompartilhados([
+    { pessoa_id: 'p1', nome: 'Ana', ativo: true, telefone: '+5567998765432' },
+    { pessoa_id: 'p2', nome: 'Bruno', ativo: false, telefone: '+5567998765432' }
+  ]);
+  assert.equal(mapa.p1, undefined);
+  assert.equal(mapa.p2, undefined);
+});
+
+test('telefonesCompartilhados: tres pessoas no mesmo numero aparecem uma pras outras duas', () => {
+  const mapa = telefonesCompartilhados([
+    { pessoa_id: 'p1', nome: 'Ana', ativo: true, telefone: '+5567998765432' },
+    { pessoa_id: 'p2', nome: 'Bruno', ativo: true, telefone: '+5567998765432' },
+    { pessoa_id: 'p3', nome: 'Carla', ativo: true, telefone: '+5567998765432' }
+  ]);
+  assert.equal(mapa.p1.length, 2);
+  assert.equal(mapa.p2.length, 2);
+  assert.equal(mapa.p3.length, 2);
+});
+
+test('telefonesCompartilhados: pessoa sem telefone nunca entra no mapa', () => {
+  const mapa = telefonesCompartilhados([
+    { pessoa_id: 'p1', nome: 'Ana', ativo: true, telefone: '' },
+    { pessoa_id: 'p2', nome: 'Bruno', ativo: true, telefone: '' }
+  ]);
+  assert.deepEqual(mapa, {});
 });
