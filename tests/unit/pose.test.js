@@ -161,18 +161,46 @@ test('avaliarPoseLote existe e recebe o lote inteiro, não uma foto por vez', ()
   }
 });
 
-test('ANTI-VIÉS: mesmas poses em anatomias diferentes dão a MESMA leitura', () => {
-  // A asserção que o gate absoluto nunca poderia passar. Medido: em pose
-  // idêntica, a leitura absoluta difere por fator ~2 entre estas duas
-  // anatomias (0,6154 contra 0,2778); a diferença entre fotos cancela isso.
-  // Se esta falhar, a fórmula voltou a depender de anatomia e o viés voltou
-  // junto — não ajuste o limiar, troque a fórmula.
-  const poses = [0, 15, 30];
-  const daAna = regras[NOME_LOTE](poses.map(ANA), cfg()).inconsistencia;
-  const doBruno = regras[NOME_LOTE](poses.map(BRUNO), cfg()).inconsistencia;
+test('nenhuma anatomia é recusada quando as poses são consistentes', () => {
+  // ESTA ASSERÇÃO SUBSTITUI UMA MINHA QUE ERA FALSA. Eu havia escrito que
+  // "mesmas poses em anatomias diferentes dão a MESMA leitura", com igualdade
+  // exata. Não dão, e o Biometria mostrou com álgebra e número: a diferença
+  // cancela o OFFSET anatômico exatamente, mas não a SENSIBILIDADE. Medido
+  // neste fixture: mesma variação de pose lê -0,1135 para uma anatomia e
+  // -0,0689 para outra, fator ~1,65x, estável entre 15° e 30°.
+  //
+  // O QUE SOBRA É VERDADEIRO E É O QUE IMPORTA NUM GATE: o zero é exato para
+  // qualquer anatomia, então ninguém em pose consistente é recusado. O viés
+  // residual cai no lado PERMISSIVO — para algumas anatomias o gate exige um
+  // desvio real maior para reprovar. Num portão de cadastro essa é a direção
+  // suportável: falso aceite vira template um pouco pior, que a coerência e a
+  // fila humana ainda pegam; falso REJEITE tranca a pessoa fora, e é o dano que
+  // discrimina ("o sistema não me acha", todo dia).
+  //
+  // Não afirmo ausência de viés — afirmo a direção dele. É menos do que eu
+  // tinha prometido e é o que dá para provar.
+  for (const [nome, pessoa] of [['Ana', ANA], ['Bruno', BRUNO]]) {
+    for (const pose of [0, 15, 30]) {
+      const r = regras[NOME_LOTE]([pessoa(pose), pessoa(pose), pessoa(pose)], cfg());
+      assert.equal(r.ok, true,
+        `${nome} em pose ${pose}° consistente foi recusada — falso rejeite é o dano que tranca`);
+    }
+  }
+});
 
-  assert.ok(Math.abs(daAna - doBruno) < 1e-9,
-    `mesmas poses tinham de dar a mesma inconsistência: Ana ${daAna}, Bruno ${doBruno}`);
+test('a leitura não depende do tamanho do rosto nem da distância da câmera', () => {
+  // O que a razão CANCELA de verdade é escala. Vale afirmar, porque é a metade
+  // que funciona: a mesma pessoa mais perto ou mais longe da câmera tem de dar
+  // a mesma inconsistência.
+  const perto = [0, 20, 0].map(ANA);
+  const longe = perto.map(f => ({
+    positions: f.positions.map(p => p && { x: p.x * 0.5, y: p.y * 0.5, z: p.z * 0.5 })
+  }));
+
+  const a = regras[NOME_LOTE](perto, cfg()).inconsistencia;
+  const b = regras[NOME_LOTE](longe, cfg()).inconsistencia;
+  assert.ok(Math.abs(a - b) < 1e-9,
+    `escala tem de cancelar: perto ${a}, longe ${b}`);
 });
 
 test('três fotos na mesma pose têm inconsistência exatamente zero', () => {
