@@ -13,24 +13,27 @@
 # pareciam cobertos.
 set -u
 
-# $1 = pids, $2 = PREFIXOS de comm aceitos, separados por espaco.
-# PREFIXO e nao nome exato porque o Linux corta /proc/PID/comm em 15 CARACTERES:
-# chrome-headless-shell  -> "chrome-headless"
-# chrome_crashpad_handler -> "chrome_crashpad"
-# Lista de nomes completos nunca casa binario de nome longo, e o sintoma e
-# SILENCIO e nao erro -- foi assim que a primeira versao deste filtro deixou de
-# ver o navegador do playwright inteiro. O truncamento nao aparece em lugar
-# nenhum do codigo, entao vai voltar a morder se o casamento for exato.
-so_comm() {
+# $1 = pids, $2 = basenames de executavel aceitos, separados por espaco.
+# Usa /proc/PID/exe (symlink para o binario real) e NAO /proc/PID/comm, porque
+# comm e cortado em 15 caracteres pelo kernel e o limite nao esta escrito em
+# lugar nenhum: chrome-headless-shell chega como "chrome-headless" e
+# chrome_crashpad_handler como "chrome_crashpad". Lista de nomes completos nunca
+# casava, e o sintoma era SILENCIO -- o detector de navegador deixou de ver o
+# navegador do playwright inteiro.
+# exe resolve os dois lados de uma vez: nome completo sem truncagem, e o shell
+# que apenas carrega a string aparece como bash e cai fora. Prefixo tambem
+# funcionaria, mas seria contorno de um limite que este campo nao tem.
+# Ressalvas: exige mesmo usuario (e o caso) e nao vale para kernel thread.
+so_exe() {
   for p in $1; do
-    c=$(cat "/proc/$p/comm" 2>/dev/null) || continue
-    for pref in $2; do case "$c" in "$pref"*) printf '%s ' "$p"; break;; esac; done
+    b=$(basename "$(readlink -f "/proc/$p/exe" 2>/dev/null)" 2>/dev/null) || continue
+    case " $2 " in *" $b "*) printf '%s ' "$p";; esac
   done
 }
 
-alvo=$(so_comm   "$(pgrep -f 'playwright test')" "node")
-chrome=$(so_comm "$(pgrep -f 'remote-debugging|--headless')" "chrome chromium headless_shell headless")
-serve=$(so_comm  "$(pgrep -f '(tests/e2e/servir\.js|(visual|proxy|servir)[^/]*\.(mjs|cjs|js))')" "node")
+alvo=$(so_exe    "$(pgrep -f 'playwright test')" "node")
+chrome=$(so_exe  "$(pgrep -f 'remote-debugging|--headless')" "chrome chromium headless_shell chrome_crashpad_handler chromium-browser")
+serve=$(so_exe   "$(pgrep -f '(tests/e2e/servir\.js|(visual|proxy|servir)[^/]*\.(mjs|cjs|js))')" "node")
 
 ocupado=0
 [ -n "${alvo// /}" ]   && { echo "OCUPADO playwright: $alvo"; ocupado=1; }
