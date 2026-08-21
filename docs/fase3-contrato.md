@@ -1115,9 +1115,12 @@ qualquer comparação. Duas consequências, e elas são diferentes entre si:
 
 - **Cadastro (é regra deste contrato).** A instrução das 3 fotos exige **rosto
   descoberto, sem óculos escuros e sem máscara** — e a razão que o texto tem de dar é a
-  correta: não é "o sistema não vai te reconhecer", é "o sistema não vai achar o seu
-  rosto". Erro de detecção falha para o lado seguro (pede nova tentativa), então aqui o
-  custo é atrito, não risco.
+  correta: não é "o sistema não vai te reconhecer", é que ele não vai **achar** o rosto.
+  Texto do Designer, que explica o mecanismo em vez de só proibir: **"o sistema reconhece
+  pelo formato do rosto — se estiver coberto, ele simplesmente não encontra."** Esta regra
+  **não depende da medição do capacete**: vale nos três desfechos possíveis dela.
+  Erro de detecção falha para o lado seguro (pede nova tentativa), então aqui o custo é
+  atrito, não risco.
 - **Operação diária (não é regra deste contrato, e é a descoberta mais consequente da
   fase).** Capacete detecta 4/6. Quem bate ponto na portaria de uma obra está de capacete
   **todos os dias** — então uma em cada três tentativas tende a não achar rosto, e a
