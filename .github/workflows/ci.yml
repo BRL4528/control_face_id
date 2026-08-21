@@ -241,6 +241,54 @@ jobs:
           fi
           echo "nenhum asset externo"
 
+      - name: Nada no HTML inicial já satisfaz o que um spec espera
+        run: |
+          # Enquanto #porta nascia sem class="hide", qualquer spec que ESPERASSE
+          # por ele passava pelo flash de um quadro entre o HTML inicial e a
+          # decisão de verificarDispositivo() — passava mesmo com o resto
+          # quebrado. E #btnPonto nascia sem `disabled`, e só irParaPorta()
+          # (alcançável apenas com aparelho ATIVO) o desabilita: medido em
+          # navegador, `toBeEnabled()` passava com aparelho pendente, aprovado e
+          # antes de a página decidir qualquer coisa. Era o sinal de aceite de
+          # aprovação de aparelho em 7 pontos de 6 specs, e não verificava nada.
+          #
+          # Assertiva NEGATIVA falharia com o flash; é a POSITIVA que passa por
+          # engano. Por isso a correção é no HTML e não em cada spec: aqui a
+          # classe inteira de defeito fecha de uma vez, e tela nova nascendo
+          # visível também cai.
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const html = fs.readFileSync("index.html", "utf8");
+            const falhas = [];
+
+            const tagDe = id => {
+              const i = html.indexOf("id=\"" + id + "\"");
+              if (i < 0) return null;
+              return html.slice(html.lastIndexOf("<", i), html.indexOf(">", i) + 1);
+            };
+
+            for (const id of ["porta", "aguardando", "fila", "rh", "loginRh"]) {
+              const tag = tagDe(id);
+              if (!tag) { falhas.push("a seção #" + id + " não existe no index.html"); continue; }
+              const classe = (tag.match(/class="([^"]*)"/) || ["", ""])[1];
+              if (!classe.split(/\s+/).includes("hide")) {
+                falhas.push("a seção #" + id + " nasce VISÍVEL — spec que espera por ela passa pelo flash do boot mesmo com o app quebrado");
+              }
+            }
+
+            const btn = tagDe("btnPonto");
+            if (!btn) falhas.push("o botão #btnPonto não existe no index.html");
+            else if (!/\sdisabled/.test(btn)) {
+              falhas.push("#btnPonto nasce HABILITADO — toBeEnabled() passa com aparelho pendente, e é o sinal de aceite de aprovação em vários specs");
+            }
+
+            if (falhas.length) {
+              for (const f of falhas) console.error("::error::" + f);
+              process.exit(1);
+            }
+            console.log("nada no HTML inicial antecipa decisão do boot: 5 telas ocultas e o botão de ponto desabilitado");
+          '
+
       - name: _headers e vercel.json declaram exatamente a mesma coisa
         run: |
           # Na Vercel o _headers NAO e lido: quem vale e o vercel.json. O repo

@@ -180,6 +180,17 @@ teste continuaria verde e o E2E passaria a validar uma política que não existe
 Nada pegava isso, e o risco é concreto sempre que `servidor-falso.js` é
 reescrito.
 
+**Nada no HTML inicial já satisfaz o que um spec espera.** `#porta` nascia sem
+`class="hide"` e `#btnPonto` nascia sem `disabled`. Consequência medida em
+navegador: `toBeEnabled()` no botão de ponto passava com aparelho **pendente**,
+com aparelho aprovado, e antes de a página ter decidido qualquer coisa — e era o
+sinal de aceite de aprovação de aparelho em 7 pontos de 6 specs, inclusive no
+`aprovarDispositivo()` cuja docstring dizia "sinal de aceite é sempre de tela".
+Não verificava nada. Assertiva **negativa** falharia com o flash do boot; é a
+**positiva** que passa por engano, e por isso a correção é no HTML e não em cada
+spec: aqui a classe inteira de defeito fecha de uma vez, e tela nova nascendo
+visível também cai.
+
 **A origem pública é isolada por ausência do arquivo.** `publico/` é o Root
 Directory de outro projeto da Vercel e `.vercelignore` o tira do deploy do app.
 Se ele voltar para o deploy do app, a página pública volta a estar na **mesma
