@@ -1833,6 +1833,22 @@ na resposta das rotas de escrita, para log, teste e recalibração; só não tra
 a tela poderia renderizá-lo. Os avisos que o card mostra são dois: procedência e modelo
 divergente.
 
+**E a remoção acontece na serialização da leitura, não na gravação.** O registro guarda
+`coerencia`; quem monta a resposta de `/efrat/rh/dados` omite o campo. Achado do Biometria
+ao implementar: no servidor de teste, `estado.recadastros` é devolvido **verbatim** por
+`/rh/dados`, então hoje o decimal viaja. As duas saídas possíveis não são equivalentes:
+
+- deixar de **gravar** o campo satisfaria a regra e destruiria a instrumentação de §4.2,
+  que é a única coisa capaz de produzir a distribuição real da população;
+- **omitir na serialização** preserva as duas coisas, e é o que uma tabela de verdade com
+  uma *view* faria: a coluna existe, a leitura do RH não a expõe.
+
+`Por quê isso não é detalhe de implementação:` se o campo deixar de ser gravado, o teste
+do critério 14 passa **por vacuidade** — ele semeia um recadastro com `coerencia`
+preenchida justamente para haver algo a ser removido. Sem nada para remover, o verde não
+afirma nada. É o mesmo defeito de "passar por lista vazia" que esta rodada passou caçando,
+uma camada abaixo.
+
 `Por quê isso é melhor do que a guarda que eu tinha proposto:` na dívida anterior eu
 sugeri uma guarda comparando periodicamente a versão publicada nas duas origens. Ela
 resolve o futuro e não resolve o passado — e, pior, só dispara quando alguém roda a
@@ -2066,8 +2082,9 @@ Contrato (servidor falso + workflows):
       existe naquele payload, semeando antes um recadastro **com** `coerencia` preenchida,
       para o teste não passar por lista vazia;
     - o decimal **continua persistido** em `efrat_template.coerencia`: o mesmo teste
-      afirma que ele está no banco e ausente do payload, porque persistir e exibir são
-      coisas diferentes (§4.2);
+      afirma que ele está no registro e ausente do payload, porque persistir e exibir são
+      coisas diferentes (§4.2). A remoção é na **serialização** da leitura, nunca na
+      gravação — se o campo deixar de ser gravado, este teste passa por vacuidade;
 16-A. **Procedência do modelo (§4.7), que subiu de dívida a critério:**
     - as duas rotas novas sem `modelo_id` → `400 MODELO_AUSENTE`;
     - `modelo_id` igual ao de referência → grava limpo;
