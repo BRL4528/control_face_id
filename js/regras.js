@@ -287,20 +287,13 @@ export function serieDiaria(marcacoes, dias, hoje) {
 }
 
 /**
- * Aparelhos da aba "Aparelhos" (T-87615C), separados em duas filas e cada uma
- * ordenada para quem decide primeiro: pendentes do mais antigo para o mais
- * novo — é quem está esperando há mais tempo — e aprovados do uso mais
- * recente para o mais antigo, para achar rápido um aparelho esquecido ligado.
- * Aparelho sem `ultimo_uso` (nunca chamou a API depois de aprovado) vai para
- * o fim da lista de aprovados, não para o topo.
+ * Chave de comparação de unidade (§2.4/§8-A): "Unidade A", "unidade a" e
+ * "Unidade  A" têm de resolver pra mesma unidade. Só pra COMPARAR — o valor
+ * exibido/gravado é sempre o texto original de alguma equipe, nunca esta
+ * chave normalizada.
  */
-export function separarAparelhos(dispositivos) {
-  const lista = dispositivos || [];
-  const pendentes = lista.filter(d => d && d.estado === 'pendente')
-    .slice().sort((a, b) => String(a.criado_em || '').localeCompare(String(b.criado_em || '')));
-  const aprovados = lista.filter(d => d && d.estado === 'ativo')
-    .slice().sort((a, b) => String(b.ultimo_uso || '').localeCompare(String(a.ultimo_uso || '')));
-  return { pendentes, aprovados };
+export function normalizarUnidade(bruto) {
+  return String(bruto || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 /* ------------------------------------------------------------ colaborador */
