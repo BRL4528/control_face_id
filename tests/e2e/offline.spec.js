@@ -25,6 +25,10 @@ test('app carrega offline na segunda visita apos ativacao do service worker', as
       d.estado = 'ativo'; d.equipes_ids = ['eq-1', 'eq-2']; d.configuracao_versao = 1;
     }
     await page.evaluate(() => window.__EFRAT.verificarDispositivo());
+    // #porta e o sinal que discrimina: fica escondido enquanto o aparelho
+    // esta pendente. btnPonto habilitado, sozinho, ja e verdadeiro antes de
+    // aprovar (toBeEnabled ignora visibilidade) e por isso nao prova nada.
+    await expect(page.locator('#porta')).toBeVisible({ timeout: 20000 });
     await expect(page.locator('#btnPonto')).toBeEnabled({ timeout: 15000 });
 
     // 2. Aguarda a ativação do Service Worker

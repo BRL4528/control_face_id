@@ -125,6 +125,10 @@ test('aparelho pede liberação, RH digita o código na aba Aparelhos, e a tela 
     // js/app.js já reagenda sozinho é que pode fazer a tela virar.
     await expect(page.locator('#porta')).not.toHaveClass(/hide/, { timeout: 30000 });
     await expect(page.locator('#aguardando')).toHaveClass(/hide/);
+    // #porta e o sinal que discrimina: fica escondido enquanto o aparelho
+    // esta pendente. btnPonto habilitado, sozinho, ja e verdadeiro antes de
+    // aprovar (toBeEnabled ignora visibilidade) e por isso nao prova nada.
+    await expect(page.locator('#porta')).toBeVisible();
     await expect(page.locator('#btnPonto')).toBeEnabled();
   } finally {
     await rhContexto.close();

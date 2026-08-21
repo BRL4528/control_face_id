@@ -39,6 +39,10 @@ async function aprovarDispositivo(page, ctx, equipesIds = ['eq-1']) {
     d.configuracao_versao = (d.configuracao_versao || 0) + 1;
   }
   await page.evaluate(() => window.__EFRAT.verificarDispositivo());
+  // #porta e o sinal que discrimina: fica escondido enquanto o aparelho
+  // esta pendente. btnPonto habilitado, sozinho, ja e verdadeiro antes de
+  // aprovar (toBeEnabled ignora visibilidade) e por isso nao prova nada.
+  await expect(page.locator('#porta')).toBeVisible({ timeout: 20000 });
   await expect(page.locator('#btnPonto')).toBeEnabled({ timeout: 20000 });
 }
 
@@ -148,6 +152,10 @@ test('aparelho revogado depois de aprovado volta a ficar bloqueado', async ({ pa
 test('depois de aprovado pelo rh a porta libera o registro de ponto', async ({ page }) => {
   await abrir(page, ctx.url);
   await aprovarDispositivo(page, ctx);
+  // #porta e o sinal que discrimina: fica escondido enquanto o aparelho
+  // esta pendente. btnPonto habilitado, sozinho, ja e verdadeiro antes de
+  // aprovar (toBeEnabled ignora visibilidade) e por isso nao prova nada.
+  await expect(page.locator('#porta')).toBeVisible();
   await expect(page.locator('#btnPonto')).toBeEnabled();
 });
 
