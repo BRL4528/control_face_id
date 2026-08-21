@@ -12,7 +12,7 @@
 // visível de tela, nunca `Fila.estado`/`Fila.gestor`, e continuar passando
 // offline.
 import { test, expect } from '@playwright/test';
-import { subir, semearMarcacao, semearPendencia } from './servidor-falso.js';
+import { subir, semearMarcacao, semearPendencia, semearRecadastro } from './servidor-falso.js';
 
 async function abrir(page, base, pessoa) {
   await page.addInitScript(a => {
@@ -424,6 +424,43 @@ test('RH ve a pendencia do gestor e decide', async ({ page }) => {
   await page.click('#rh-pendencias button[data-acao="aprovar"]');
   await expect(page.locator('#toast')).toContainText('Decidido', { timeout: 15000 });
   expect(ctx.estado.decisoes.length).toBe(1);
+});
+
+// docs/fase3-seguranca.md §1.7b/1.7c: fila de recadastro separa substituição
+// de primeiro cadastro, mostra contagem, nunca oferece aprovar em lote, e o
+// "Aprovar" de cada item só liga depois que o RH marca que conferiu as fotos.
+test('fila de recadastro separa substituicao de primeiro cadastro e trava aprovar sem conferir', async ({ page }) => {
+  semearRecadastro(ctx.estado, {
+    template_id: 't-sub-ana', pessoa_id: 'p-ana', versao: 2, coerencia: 0.09,
+    miniatura: '', origem: 'link'
+  });
+  semearRecadastro(ctx.estado, {
+    template_id: 't-novo-x', pessoa_id: 'p-desconhecido', versao: 1, coerencia: 0.08,
+    miniatura: ''
+  });
+  await abrir(page, ctx.url);
+
+  await logarRh(page);
+  await page.click('#rh nav button[data-aba="pendencias"]');
+  const painel = page.locator('#rh-pendencias');
+
+  await expect(painel).toContainText('2 cadastro(s) de face pendentes');
+  await expect(painel).toContainText('Substituição de biometria');
+  await expect(painel).toContainText('Primeiro cadastro');
+  await expect(painel).toContainText('ninguém do RH acompanhou a captura');
+
+  // sem "aprovar todos": nenhum controle de lote na fila
+  expect(await painel.locator('button', { hasText: /aprovar todos/i }).count()).toBe(0);
+
+  const cartaoSub = painel.locator('.pendface', { hasText: 'Substituição de biometria' });
+  const aprovarSub = cartaoSub.locator('button[data-acao="aprovar"]');
+  await expect(aprovarSub).toBeDisabled();
+  await cartaoSub.locator('input[type=checkbox]').check();
+  await expect(aprovarSub).toBeEnabled();
+
+  await aprovarSub.click();
+  await expect(page.locator('#toast')).toContainText('Decidido', { timeout: 15000 });
+  expect(ctx.estado.decisoes).toContainEqual({ tipo: 'template', id: 't-sub-ana', acao: 'aprovar' });
 });
 
 test('espelho de ponto mostra as marcacoes do colaborador', async ({ page }) => {

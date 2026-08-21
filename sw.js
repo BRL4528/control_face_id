@@ -1,6 +1,26 @@
 // Cache dos estáticos. As chamadas de API nunca passam por aqui: resposta de
 // marcação em cache seria mentira sobre o que o servidor recebeu.
-const CACHE = 'efrat-ponto-v7';
+const CACHE = 'efrat-ponto-v8';
+// MITIGACAO, NAO ISOLAMENTO. A pagina publica de cadastro de face vai para uma
+// origem propria (subdominio); enquanto ela nao existe, este desvio reduz o
+// dano de a pagina ser servida deste mesmo dominio, e nada mais.
+//
+// O que o desvio resolve: pedido sob este prefixo sai do handler sem
+// respondWith, vai direto a rede, nunca entra no cache e — o que importa —
+// nunca cai no fallback caches.match('./index.html') mais abaixo, que
+// entregaria o shell do app do operador ao colaborador quando faltasse rede.
+//
+// O que o desvio NAO resolve, e por isso a origem propria: escopo de service
+// worker e prefixo de caminho, mas IndexedDB, localStorage, Cache Storage e
+// cookie sao por ORIGEM. Na mesma origem a pagina publica le o banco
+// 'efrat-ponto' (js/store.js), onde esta a credencial de 256 bits do aparelho.
+// Caminho separado nao cria fronteira nenhuma contra isso.
+//
+// O JS e o CSS da pagina moram sob o mesmo prefixo, de proposito: uma regra
+// cobre tudo. Ja vendor/ e models/ ficam de fora do desvio e seguem cache-first
+// — sao imutaveis e e o que faz o motor abrir rapido no celular.
+const FORA_DO_APP = '/cadastro';
+
 const ASSETS = [
   './',
   './index.html',
@@ -58,6 +78,7 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
   if (url.origin !== location.origin) return;   // API e CDNs passam direto
+  if (url.pathname === FORA_DO_APP || url.pathname.startsWith(FORA_DO_APP + '/')) return;
   e.respondWith(
     caches.match(e.request).then(hit => hit || fetch(e.request).then(resp => {
       if (resp.ok) { const cp = resp.clone(); caches.open(CACHE).then(c => c.put(e.request, cp)); }
