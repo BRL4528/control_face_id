@@ -266,10 +266,23 @@ Validações, todas `422` salvo indicado:
 | equipes de **unidades diferentes** no mesmo aparelho | `EQUIPES_DE_UNIDADES_DIFERENTES`, com `campo: "equipes_ids"` |
 | mais de 10 códigos errados do mesmo usuário de RH em 5 min | `429 LIMITE_APROVACAO` + `Retry-After` |
 
-`Por quê a mensagem única no 404:` distinguir "existe mas expirou" de "não
-existe" transforma o campo de aprovação em oráculo de códigos válidos. E o
-limite de tentativas erradas existe porque, sem ele, 29,7 bits atrás de um
-formulário logado é força bruta viável contra um lote de pendentes.
+`Por quê os quatro casos colapsam num só — e eu fui e voltei nesta linha:` a primeira
+versão colapsava tudo com a mensagem "não achei nenhum aparelho esperando com esse
+código", e o Designer apontou, com razão, que isso manda o RH procurar defeito onde não
+tem quando o caso real é código expirado. Separei então `CODIGO_EXPIRADO` — e o
+Orquestrador pegou o oráculo que eu tinha aberto: distinguir "expirou" de "nunca existiu"
+**conta se aquele código específico chegou a existir**, e isso vale mesmo com força bruta
+inviável (um insider com acesso de RH confirma que um aparelho plantado foi recebido).
+A saída não era escolher entre as duas versões: é a redação do Designer, que carrega **as
+duas possibilidades numa frase só** — "Código inválido ou expirado. Confira no aparelho e
+digite de novo." Preserva exatamente o que eu defendia, o RH não é mandado procurar
+defeito inexistente, e não distingue nada. Minha objeção era à **palavra**, não à fusão:
+diagnostiquei o problema certo e escolhi a solução errada.
+As outras duas recusas seguem distintas e sem risco: **formato inválido** não toca busca
+nenhuma (validação antes de qualquer `lookup`) e **limite de tentativas** é sobre
+frequência, não sobre a existência de um código específico. Três recusas, portanto, não
+quatro. E o limite de tentativas erradas continua existindo porque é ele que sustenta a
+frase acima.
 
 **A unidade não vem no corpo: é derivada das equipes escolhidas.** As equipes
 selecionadas têm de compartilhar a mesma `unidade` (comparada normalizada, §2.3), e
@@ -1111,10 +1124,30 @@ qualquer comparação. Duas consequências, e elas são diferentes entre si:
   pessoa vai para nova tentativa e depois para registro manual. Isso é FTA em campo, todo
   dia, para todo mundo, e **não se resolve no cadastro**: detecção acontece antes da
   comparação, então template com capacete não conserta detecção com capacete.
-  O que resolve é operacional: **tirar o capacete para bater ponto**, dito na tela no
-  momento certo. E hoje a frase do produto (`js/rh.js`, área de biometria) lista "boné,
-  óculos escuros ou máscara" e **não menciona capacete** — justamente o item que todo
-  mundo usa.
+  **E a saída óbvia está errada.** Eu havia escrito aqui "tirar o capacete para bater
+  ponto"; o Designer apontou o que nenhum de nós tinha visto: **pedir para remover ou
+  levantar EPI na portaria de uma obra ativa contraria a norma de segurança do canteiro.**
+  Qualquer solução que dependa de a pessoa destampar o rosto nasce contrariando a regra do
+  local — e perde, porque a regra do local está certa.
+  **Hipótese técnica em aberto, e ela muda a solução inteira:** capacete detecta 4/6
+  enquanto máscara e óculos escuros ficam em 1/6, e o `README.md` registra que "adorno na
+  parte de cima da cabeça não atrapalha". Se o capacete não bloqueia opticamente os olhos,
+  o que resta é **sombra da aba sobre a região dos olhos**, dependente do ângulo da
+  cabeça — o que explica ser intermitente (4/6) em vez de constante. Se a hipótese se
+  confirmar, a solução é **instrução mais altura de instalação do aparelho**, e não
+  template com capacete nem múltiplos templates por pessoa.
+  Medição pedida ao Biometria, com o motor real, fora do CI: mesmo rosto, mesmo capacete,
+  queixo baixo contra queixo reto.
+  **Uma observação que a hipótese torna acionável:** `js/face.js:46-68` mede **yaw** e
+  reprova por `maxYaw`, mas **não mede pitch** — então a pose exatamente suspeita (queixo
+  baixo) não é detectada pelo gate de qualidade hoje. Se a medição confirmar a sombra da
+  aba, um proxy de pitch sai dos mesmos 68 landmarks que já estão na mão (deslocamento
+  vertical do nariz em relação à linha dos olhos), e é a mudança mais barata capaz de
+  transformar a instrução em algo que o app cobra em vez de pedir.
+  Texto do Designer para a instrução, que não pede nada de ninguém: **"De capacete? Olhe
+  reto pra frente, sem abaixar o queixo."**
+  A frase de biometria do produto hoje (`js/rh.js`, área de cadastro) lista "boné, óculos
+  escuros ou máscara" e **não menciona capacete** — justamente o item que todo mundo usa.
   A parte da distância, por contraste, é folgada: `0,257` contra um limiar de `0,45`
   passa com margem, e passa nos dois sentidos (template limpo × rosto de capacete, ou o
   inverso). O problema é achar o rosto, não medir.
@@ -1910,8 +1943,7 @@ como está (§2.4).
 | Código | HTTP | Onde |
 |---|---|---|
 | `CODIGO_COM_LETRA_INVALIDA` | 422 | rh/aparelho/aprovar |
-| `CODIGO_NAO_ENCONTRADO` | 404 | rh/aparelho/aprovar |
-| `CODIGO_EXPIRADO` | 404 | rh/aparelho/aprovar |
+| `CODIGO_INVALIDO` | 404 | rh/aparelho/aprovar — inexistente, expirado, recusado ou já ativo |
 | `CODIGO_AMBIGUO` | 409 | rh/aparelho/aprovar |
 | `ESCOPO_VAZIO` | 422 | aprovar, escopo |
 | `EQUIPE_INVALIDA` | 422 | aprovar, escopo |
@@ -2166,6 +2198,7 @@ Critérios de UI que são contrato, não estética:
 | Devolver o motivo da recusa para o aparelho | Texto interno do RH renderizado num aparelho que ele acabou de declarar não confiável (§1.4) |
 | Telefone do RH na resposta de `/dispositivo/estado` | Dado da organização entregue a quem ainda não foi liberado; `config.js` resolve melhor (§1.8) |
 | `Access-Control-Allow-Origin: *` nas rotas de face | Barato demais para não fazer a lista, e a lista impede sondagem conduzida pelo navegador de terceiro (§4.6) |
+| **Distinguir `CODIGO_EXPIRADO` de `CODIGO_NAO_ENCONTRADO`** (era a minha segunda versão, achado do Orquestrador) | Conta se aquele código específico chegou a existir — oráculo mesmo com força bruta inviável, porque um insider com acesso de RH confirma que um aparelho plantado foi recebido. A frase única do Designer resolve o problema que me fez separar, sem separar (§1.3) |
 | **Rate limit de `convite/abrir` por IP** (era o que eu havia escrito, achado do DevOps) | NAT de operadora faz uma turma no mesmo canteiro se trancar mutuamente; o colaborador lê "tente mais tarde" e liga para o RH — o limite produziria o volume de ligação que a fase existe para desafogar. E contradizia o meu próprio parágrafo seguinte: se com 256 bits o limite é contra volume, não precisa ser severo nem morar na rota (§4.4) |
 | **Entidade `efrat_local` com id próprio** (era o que eu havia escrito, pergunta do Full-Stack) | Terceiro conceito para um RH leigo e um passo a mais em duas telas, para agrupar por id o que já agrupa por texto. E o único poder exclusivo da entidade — aparelho seguir o lugar, equipe nova entrando no escopo sozinha — é o Cenário 3 com a API cumprida (§2.4) |
 | **Sinal de borda dentro da faixa aceita** (`coerencia_no_limite`, especificado por mim em `0,30`, corrigido para `0,34`, e **derrubado** por decisão do Orquestrador sobre medição que nenhum de nós havia usado) | A tabela de adornos do `README.md` mostra que a faixa aceita está **legitimamente ocupada** por variação da mesma pessoa até quase encostar em `0,45`: capacete de obra sozinho custa `0,257`, e num cliente de engenharia capacete é o estado normal de quem bate ponto. `0,257` mais qualquer outra variação passa de `0,30` num cadastro legítimo, então o aviso acenderia no caso comum e treinaria o RH a ignorar — degradando a conferência humana que compensa a ausência de liveness. **Duas coisas são verdade ao mesmo tempo, e quem ler daqui a seis meses precisa das duas:** a conclusão original do Orquestrador ("o número sai e nada entra no lugar") estava certa, por um motivo que ele não tinha na época; e o meu diagnóstico ("você raciocinou sobre a decisão, não sobre a tarefa") também estava certo — existe uma necessidade de tarefa ali. O que a medição mostrou é que **nenhum mecanismo dentro da faixa atende essa necessidade**, não que a necessidade não existisse. Por isso o corte não volta com outro número: condição de entrada para qualquer sinal nessa faixa é distribuição medida de mesma pessoa na população real (§4.2) |
