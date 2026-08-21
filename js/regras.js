@@ -48,6 +48,33 @@ export function emCooldown(pessoaId, marcacoesDoDia, agoraMs, cooldownMs) {
 }
 
 /**
+ * O que fazer quando alguém em cooldown é reconhecido de novo — achado de
+ * produção (cliente testou e reclamou): a tela de ponto reabre a câmera
+ * sozinha depois do comprovante, e se a pessoa não saiu da frente, o mesmo
+ * rosto é reconhecido bem ali e caía direto na mensagem de cooldown — o
+ * sistema "acusava falha" em quem tinha acabado de ter sucesso.
+ *
+ * `null` = não está em cooldown, segue o fluxo normal de confirmação.
+ * `'nada'` = está em cooldown E é a mesma pessoa que nunca saiu da frente da
+ * câmera desde que marcou aqui — no-op silencioso, sem mensagem nenhuma.
+ * `'mensagem'` = está em cooldown por outro motivo (saiu e voltou depois,
+ * chegou já em cooldown por marcação de outro aparelho, etc.) — aviso
+ * continua útil aqui.
+ *
+ * `continuaNaFrenteDesdeQueMarcouAqui` é um BOOLEANO, não um prazo: "acabou
+ * de marcar" não tem duração fixa — dura o tempo que a pessoa ficar parada
+ * ali, e só isso, então quem decide é presença contínua (rastreada por quem
+ * chama, a partir do sinal de rosto detectado), nunca um relógio. Um prazo
+ * fixo resolveria só o primeiro re-reconhecimento e voltaria a incomodar
+ * assim que o prazo vencesse com a pessoa ainda parada na frente — pior que
+ * o defeito original, porque pareceria corrigido no teste rápido.
+ */
+export function decisaoCooldown(pessoaId, marcacoesDoDia, agoraMs, cooldownMs, continuaNaFrenteDesdeQueMarcouAqui) {
+  if (!emCooldown(pessoaId, marcacoesDoDia, agoraMs, cooldownMs)) return null;
+  return continuaNaFrenteDesdeQueMarcouAqui ? 'nada' : 'mensagem';
+}
+
+/**
  * Quais itens saem da fila local depois da resposta do servidor.
  * `aceito` e `duplicado` significam que o servidor tem o registro — some.
  * `retido` também sai daqui: o servidor já gravou (§1.6), só falta revisão
