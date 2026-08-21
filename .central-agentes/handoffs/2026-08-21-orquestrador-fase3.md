@@ -220,6 +220,10 @@ na prova. T-9C35B7 com o QA.
 `integra/v3-r3` em d000718: **98 unitários + 130 e2e passando, 1 armado, zero falhas.**
 Procedência: janela travada por anúncio, os seis confirmaram parada, `pgrep` 0 no fim.
 Substitui as medições anteriores minha e do DevOps — as duas tinham observação parcial.
+**Cobertura, não arredondar:** isso mede unitário e e2e. As 16 etapas de higiene do CI
+não rodam em `node --test` nem em `playwright test`, então as guardas de borda seguem
+**não verificadas** — e foi exatamente ali que apareceu o `sw.js` preso em v10 com oito
+arquivos pré-cacheados mudados depois (corrigido em f0d9fc3, v11).
 
 `pgrep` antes/depois só pega sobreposição que **começou** antes da entrada e ainda
 estava viva no fim; não pega a que começa e termina entre as duas fotos, que é o caso
