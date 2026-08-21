@@ -179,9 +179,9 @@ Decisões dentro dessa resposta:
   **O campo fica no dado e no log; na tela aparece uma frase, não o número.** Eu havia
   posto o contador direto na tela, e é jargão por número: um RH leigo não liga "mesma
   rede" a "possível ataque" e não sabe o que fazer com `12`. A tela mostra, **só quando
-  é anômalo**, algo como "Vários aparelhos pediram liberação da mesma internet na
-  última hora. Se você só está esperando um, recuse os outros." — mesma informação, com
-  a ação dentro.
+  é anômalo**, o texto fechado com o Designer: **"Vários aparelhos pediram liberação
+  pela mesma internet na última hora — se você só está esperando um, recuse os
+  outros."** Uma frase só, com a ação embutida.
   `Por quê o número não sai do dado:` observabilidade. No dia em que alguém investigar
   um flood de verdade, "vários" não serve para nada. Frase para decidir, número para
   investigar.
@@ -237,6 +237,19 @@ essa unidade é o rótulo que o aparelho vai exibir. Um campo a menos na requisi
 `Por quê a checagem existe:` é o que impede um tablet de sair aprovado com equipes de
 três canteiros diferentes — a limitação de raio de exposição do Cenário 3 de
 `ameacas-v3.md`, que é a razão de o escopo ser por equipe e não por unidade inteira.
+
+**Texto da tela, fechado com o Designer, e é requisito.** Cabeçalho da escolha,
+substituindo qualquer menção a "escopo" ou "equipes autorizadas": **"Quem bate ponto
+neste aparelho?"** Linha de apoio acima da lista: **"Marque as equipes que trabalham
+neste local. Só quem estiver marcado aqui é reconhecido por este aparelho — se ele
+for perdido ou roubado, é só isso que fica exposto."** E **sem botão "selecionar
+todas"**.
+`Por quê é requisito e não estética:` este é o único ponto do contrato em que a tela
+derruba a garantia sozinha, sem defeito no código e sem teste vermelho. O invariante
+não morre por jargão, morre por comportamento racional — RH que não entende por que
+escolhe marca todas, e o raio de exposição do Cenário 3 volta inteiro com a API
+perfeitamente cumprida. A linha de apoio faz o trabalho que o botão "selecionar
+todas" faria por engano: dizer por que marcar menos é o certo.
 
 Efeito da aprovação, atômico: `estado` → `ativo`, grava `equipes_ids`, a `unidade`
 derivada, `aprovado_por`, `aprovado_em`, `configuracao_versao` = 1, apaga
@@ -991,6 +1004,30 @@ mais fácil de perder essa regra sem ninguém notar.
 UX, não segurança: evita esperar upload para ouvir "não". A decisão é do servidor,
 sempre, mesmo quando o cliente já disse sim.
 
+**`coerencia_no_limite`: o sinal da borda de cima, sem decimal na tela.** O servidor
+grava o número e, junto, devolve um booleano:
+
+> `coerencia_no_limite = coerencia >= 0,30` (dentro da faixa aceita, portanto
+> `0,30 <= coerencia < 0,45`)
+
+É o gatilho do aviso de atenção redobrada de §4.3. O cálculo é do servidor, como
+todo o resto de §4.2 — **o decimal não chega à tela** e ninguém decide de cabeça se
+`0.42` é "perto o suficiente".
+
+`Por quê 0,30, e o que esse número não é:` não é medição. As referências que temos
+são **uma** de mesma pessoa (0,094) e **duas** de pessoas diferentes (0,61 e 0,80);
+não existe distribuição medida, então qualquer corte **dentro** da faixa aceita é
+juízo, não dado. `0,30` é aproximadamente três vezes o único valor medido de mesma
+pessoa e ainda um terço abaixo da linha de recusa — longe o bastante do normal para
+merecer um olhar, longe o bastante do limite para não ser recusa. Fica declarado como
+**provisório**, e é exatamente o tipo de número que §4.7 existe para permitir
+recalibrar: com `coerencia` persistida e `modelo_id` na linha, o corte se ajusta com
+dados reais da população da Efrat em vez de continuar sendo juízo meu.
+
+Note o que esse aviso **não** é: não é dúvida sobre o resultado. Abaixo de `0,02` e a
+partir de `0,45` já é recusa, então quem chega à fila passou. O aviso diz "olhe as
+fotos com mais atenção antes de aprovar", não "talvez esteja errado".
+
 ⚠ **Muda o que existe hoje:** `js/rh.js:508` usa `coer > 0.55` + `confirm()`
 ("Salvar assim mesmo?"). Fica superado — 0,45 é recusa dura e não existe opção de
 seguir. O `confirm` sai. `js/rh.js:520` e `js/fila.js:262` param de mandar
@@ -1625,7 +1662,24 @@ checkbox, que é justamente o que a fila separada existe para evitar.
 Avisos coincidentes **empilham, não fundem**: um cadastro que veio por link *e* tem
 divergência de modelo mostra os dois blocos, um embaixo do outro. Cada um cobre um
 risco diferente — quem capturou versus com que motor — e texto fundido esconderia
-um dos dois.
+um dos dois. Vale para os três avisos possíveis no mesmo card: procedência, modelo
+divergente e coerência na borda.
+
+**Terceiro aviso, o da borda de cima da coerência.** Disparado por
+`coerencia_no_limite` (§4.2), no mesmo bloco visual, antes do Aprovar, com o texto
+que já existe hoje e só muda de lugar:
+
+> "As 3 capturas estão pouco parecidas entre si."
+
+Hoje essa frase vive no `confirm()` bloqueante de `js/rh.js:508`; ela sai do diálogo
+e vira aviso. `Por quê a frase sobrevive à saída do número:` o decimal era o que o RH
+não podia usar; a frase é o que ele usa — olha as fotos com mais atenção antes de
+aprovar.
+
+**A fila não recebe o decimal.** Cada item de `recadastros`, em `/efrat/rh/dados`,
+carrega `coerencia_no_limite` (booleano) e **não** carrega `coerencia`. O número
+continua gravado e continua na resposta das rotas de escrita, para log, teste e
+recalibração — só não trafega para onde a tela poderia renderizá-lo.
 
 `Por quê isso é melhor do que a guarda que eu tinha proposto:` na dívida anterior eu
 sugeri uma guarda comparando periodicamente a versão publicada nas duas origens. Ela
@@ -1663,7 +1717,8 @@ texto normalizado.
 `recebido_em` precisa existir separado (§1.6).
 
 `efrat_template` (+): `origem` (`rh_camera` | `rh_upload` | `link` | `gestor`),
-`coerencia` (**calculada pelo servidor**, §4.2), `convite_id`, `descartado_em`,
+`coerencia` (**calculada pelo servidor**, §4.2 — `coerencia_no_limite` é derivado
+dela na leitura, não coluna), `convite_id`, `descartado_em`,
 `modelo_id`, `modelo_divergente`, `modelo_desconhecido` (§4.7). `estado` ganha o
 valor `descartado`. `modelo_id` **não** substitui nem se confunde com `versao`, que
 segue sendo contador de template por pessoa.
@@ -1812,6 +1867,11 @@ Contrato (servidor falso + workflows):
       "harmoniza" os dois depois (§4.2);
     - 2 ou 4 vetores, ou vetor com 127 números → `422 VETORES_INVALIDOS`;
     - o `coerencia` gravado e devolvido é o do servidor;
+    - `coerencia_no_limite` é **calculado pelo servidor** e verdadeiro em `0,30` a
+      `0,449`, falso em `0,29` e abaixo; e os itens de `recadastros` em `/rh/dados`
+      trazem **o booleano e não o decimal** — asserção de que a chave `coerencia`
+      não existe naquele payload, porque é o caminho pelo qual o número voltaria à
+      tela;
     - `EFRAT_CFG.limiarAceite` e a constante do workflow valem **o mesmo número**.
 15. Inativar apaga `vetores` e `miniatura` dos templates, revoga convite vivo, e
     mantém as marcações — contadas antes e depois.
