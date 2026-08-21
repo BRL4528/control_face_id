@@ -151,6 +151,12 @@ nav button.on,.nav-item.on{background:var(--azul-bg);color:var(--azul-esc)}
 .pend .fotos .vazio{width:76px;height:76px;border-radius:10px;background:var(--surface-2);
   display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--muted)}
 .row2{display:flex;gap:8px} .row2>*{flex:1}
+.secaopend{font-size:13px;margin:14px 0 8px;font-weight:700;color:var(--ink)}
+.secaopend:first-of-type{margin-top:0}
+.contagem{margin-bottom:10px}
+.pend .aviso{background:var(--surface-2);border-radius:8px;padding:8px 10px;margin:0 0 8px}
+.pend label.gate{display:flex;align-items:center;gap:7px;margin-bottom:10px;cursor:pointer;font-size:12px;color:var(--ink)}
+.pend label.gate input{width:auto;flex:none}
 .shots{display:flex;gap:7px;margin-bottom:10px}
 .shots div{flex:1;aspect-ratio:1;border-radius:9px;background:var(--surface-2);
   border:1px dashed var(--linha);overflow:hidden;display:flex;align-items:center;

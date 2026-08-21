@@ -405,6 +405,13 @@ export const Rh = {
 
   /* ----------------------------------------------------- pendências */
 
+  /**
+   * Recadastro (substituição ou primeiro cadastro de biometria) nunca ganha
+   * ação em lote e nunca fica pronto pra aprovar sem o RH marcar que olhou —
+   * é a defesa contra o cenário que o QA descreveu: RH com dezenas de
+   * pendentes aprova em lote sem olhar, e destrói sozinho a defesa que a
+   * fila existe pra sustentar (docs/fase3-seguranca.md §1.7b/1.7c).
+   */
   pintarPendencias() {
     const ms = (this.dados.marcacoes || []).filter(m => m.pendente)
       .sort((a, b) => String(b.marcado_em).localeCompare(String(a.marcado_em)));
@@ -414,20 +421,58 @@ export const Rh = {
       el.innerHTML = '<div class="card"><p class="nota">Nada esperando decisão. 🎉</p></div>';
       return;
     }
+
+    const pessoaDe = t => (this.dados.pessoas || []).find(x => x.pessoa_id === t.pessoa_id) || {};
+    // Sem miniatura/biometria anterior == primeiro cadastro; com == substituição
+    // de um rosto já em uso. As duas nunca aparecem numa lista uniforme.
+    const substituicoes = rc.filter(t => pessoaDe(t).tem_biometria);
+    const primeiroCadastro = rc.filter(t => !pessoaDe(t).tem_biometria);
+    // Contagem do dia só quando o servidor manda `criado_em`; sem essa data
+    // ainda no contrato, mostra o total corrente em vez de fingir precisão.
+    const hoje = this.hojeServidor();
+    const temData = rc.some(t => t.criado_em);
+    const doDia = temData ? rc.filter(t => String(t.criado_em).slice(0, 10) === hoje) : rc;
+
+    const cartaoFace = (t, ehSubstituicao) => {
+      const p = pessoaDe(t);
+      const viaLink = t.origem === 'link';
+      const gate = 'gate-' + t.template_id;
+      return '<div class="pend pendface">' +
+        '<div class="top"><div style="flex:1">' +
+          '<div class="nm"><b>' + (ehSubstituicao ? 'Substituição de biometria' : 'Primeiro cadastro') +
+            '</b> · ' + esc(p.nome || t.pessoa_id) + '</div>' +
+          '<div class="mt">versão ' + t.versao + ' · coerência ' +
+            (t.coerencia == null ? '—' : Number(t.coerencia).toFixed(3)) +
+            (viaLink ? ' · <span class="tag">via link do celular</span>' : '') + '</div>' +
+        '</div></div>' +
+        '<div class="fotos">' +
+          (ehSubstituicao
+            ? (p.miniatura ? '<img src="' + p.miniatura + '">' : '<div class="vazio">atual</div>')
+            : '') +
+          (t.miniatura ? '<img src="' + t.miniatura + '">' : '<div class="vazio">novo</div>') +
+        '</div>' +
+        (viaLink ? '<p class="nota aviso">Confira se é a pessoa certa. Este cadastro veio pelo celular do ' +
+          'colaborador e ninguém do RH acompanhou a captura.</p>' : '') +
+        '<label class="lb gate"><input type="checkbox" id="' + gate + '"> ' +
+          (ehSubstituicao ? 'Comparei as duas fotos: é a mesma pessoa.' : 'Conferi a foto: é a pessoa certa.') +
+        '</label>' +
+        '<div class="row2">' +
+          '<button class="act" disabled data-tipo="template" data-id="' + t.template_id + '" data-gate="' + gate + '" data-acao="aprovar">Aprovar</button>' +
+          '<button class="act danger" data-tipo="template" data-id="' + t.template_id + '" data-acao="rejeitar">Rejeitar</button>' +
+        '</div></div>';
+    };
+
     el.innerHTML =
-      rc.map(t => {
-        const p = (this.dados.pessoas || []).find(x => x.pessoa_id === t.pessoa_id) || {};
-        return '<div class="pend"><div class="top"><div style="flex:1">' +
-          '<div class="nm"><b>Recadastro</b> · ' + esc(p.nome || t.pessoa_id) + '</div>' +
-          '<div class="mt">versão ' + t.versao + ' · coerência ' + (t.coerencia == null ? '—' : Number(t.coerencia).toFixed(3)) + '</div>' +
-          '</div></div>' +
-          '<div class="fotos">' +
-            (p.miniatura ? '<img src="' + p.miniatura + '">' : '<div class="vazio">atual</div>') +
-            (t.miniatura ? '<img src="' + t.miniatura + '">' : '<div class="vazio">novo</div>') +
-          '</div>' +
-          '<div class="row2"><button class="act" data-tipo="template" data-id="' + t.template_id + '" data-acao="aprovar">Aprovar</button>' +
-          '<button class="act danger" data-tipo="template" data-id="' + t.template_id + '" data-acao="rejeitar">Rejeitar</button></div></div>';
-      }).join('') +
+      (rc.length ? '<p class="nota contagem">' + doDia.length + ' cadastro(s) de face pendente' +
+        (doDia.length === 1 ? '' : 's') + (temData ? ' hoje' : '') + '</p>' : '') +
+      (substituicoes.length
+        ? '<h3 class="secaopend">Substituição de biometria <span class="nota">— ' + substituicoes.length + '</span></h3>' +
+          substituicoes.map(t => cartaoFace(t, true)).join('')
+        : '') +
+      (primeiroCadastro.length
+        ? '<h3 class="secaopend">Primeiro cadastro <span class="nota">— ' + primeiroCadastro.length + '</span></h3>' +
+          primeiroCadastro.map(t => cartaoFace(t, false)).join('')
+        : '') +
       ms.map(m => {
         const p = (this.dados.pessoas || []).find(x => x.pessoa_id === m.pessoa_id) || {};
         const motivos = [];
@@ -448,6 +493,14 @@ export const Rh = {
           '<div class="row2"><button class="act" data-tipo="marcacao" data-id="' + m.id_cliente + '" data-acao="aprovar">Aprovar</button>' +
           '<button class="act danger" data-tipo="marcacao" data-id="' + m.id_cliente + '" data-acao="rejeitar">Rejeitar</button></div></div>';
       }).join('');
+
+    // O checkbox de conferência é dono do habilitar/desabilitar do próprio
+    // "Aprovar" — nunca dos outros cards, e nunca de um "aprovar todos".
+    el.querySelectorAll('input[type=checkbox][id^="gate-"]').forEach(cb => {
+      cb.onchange = () => {
+        el.querySelectorAll('button[data-gate="' + cb.id + '"]').forEach(b => { b.disabled = !cb.checked; });
+      };
+    });
 
     el.querySelectorAll('button[data-acao]').forEach(b => {
       b.onclick = async () => {
