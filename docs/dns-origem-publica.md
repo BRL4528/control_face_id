@@ -11,7 +11,12 @@ propagação.
 | Domínio | a zona onde o registro vai entrar |
 
 `ORIGEM-PUBLICA-A-DEFINIR` é placeholder de propósito: enquanto a string não for
-decidida, ela não está escrita em nenhum arquivo de código. Quando for, ela é
+decidida, ela não está escrita em nenhum arquivo de código.
+
+**Atenção:** este é um subdomínio **novo**, diferente do endereço onde o
+aplicativo de ponto já roda hoje. São dois endereços distintos de propósito — o
+motivo está na seção seguinte. O registro abaixo é só para o endereço novo; não
+mexa no do aplicativo. Quando for, ela é
 substituída em **um** lugar só (`origemCadastroPublico` em `js/config.js`).
 
 ## Por que existe um subdomínio novo
