@@ -353,6 +353,10 @@ test('marcacao batida ANTES da pessoa ser inativada fica retida — sai da fila,
   ctx.estado.fora = true;
   await abrirPonto(page);
   await marcar(page, 'p-ana');
+  // ancora positiva: sem isto, "fila esvaziou" tambem seria verdade numa fila
+  // que nunca encheu — aqui so escapa disso por construcao (offline forcado
+  // acima), nao por assercao (achado do QA revisando a invariante 2.2c).
+  expect(await page.evaluate(() => window.__EFRAT.Store.fila())).not.toHaveLength(0);
   const pessoa = ctx.pessoas.find(p => p.pessoa_id === 'p-ana');
   ctx.estado.inativos.add('p-ana');
   pessoa.inativado_em = new Date().toISOString();
@@ -378,6 +382,8 @@ test('marcacao batida DEPOIS da pessoa ja estar inativa e rejeitada — nunca e 
   ctx.estado.fora = true;
   await abrirPonto(page);
   await marcar(page, 'p-ana');
+  // ancora positiva, mesmo motivo do teste irmao acima.
+  expect(await page.evaluate(() => window.__EFRAT.Store.fila())).not.toHaveLength(0);
   ctx.estado.fora = false;
 
   await page.evaluate(() => window.__EFRAT.Fila.sincronizar());
