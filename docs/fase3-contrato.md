@@ -1216,6 +1216,19 @@ pose.
 que §4.2 já exige para a coerência, e entra aqui quando existir. Registrado sem número de
 propósito: cravar um agora seria repetir o `0,30`.
 
+**A recusa por pose diz QUAL foto está fora; a recusa por coerência não diz.** Requisito do
+Designer, e a assimetria é deliberada — está escrita aqui para ninguém "harmonizar" as duas
+mensagens depois.
+Na pose, apontar é possível e é útil: com as três diferenças par a par, a foto discrepante é a
+que aparece nas **duas maiores**. E é útil porque o público é o colaborador **sozinho no
+celular** decidindo qual refazer — "uma das fotos está com a pessoa em posição diferente das
+outras" é acionável, "as fotos não bateram" manda ele refazer as três às cegas.
+Na coerência, a mesma aritmética identificaria a discrepante, e **não se aponta de propósito**:
+se duas das três forem de um impostor e uma da pessoa certa, a "discrepante" é a foto **da
+vítima** — e nomeá-la ensina exatamente qual substituir para o lote passar. Pose não tem
+ganho adversarial; coerência tem. Mesma conta, decisão oposta, porque o que está em jogo é
+diferente — igual à fronteira `0,45` de §4.2.
+
 **O cliente continua calculando, e continua recusando antes de enviar.** Isso é
 UX, não segurança: evita esperar upload para ouvir "não". A decisão é do servidor,
 sempre, mesmo quando o cliente já disse sim.
