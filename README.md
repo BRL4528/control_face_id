@@ -164,6 +164,11 @@ virarem uma, o `IndexedDB` (`js/store.js:10`) volta a ser compartilhado, e **nad
 acende** — a página continua funcionando. A ausência de sintoma seria lida como
 isolamento em pé.
 
+Vale também para o **preparo** de um teste, não só para a assertiva: passo de
+preparo que falha em silêncio — erro engolido por `2>&1`, flag inválida, `cd` que
+não aconteceu — faz o teste medir outra coisa, e o resultado parece legítimo.
+Confira o código de saída do preparo, não só o do alvo.
+
 O corolário que mais custa caro: **detector que mente é pior que detector
 ausente.** Um teste que não existe deixa a pessoa desconfiada; um teste verde que
 não mede nada compra confiança que não foi ganha. Vale igual para um hash
