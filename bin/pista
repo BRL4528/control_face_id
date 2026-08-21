@@ -32,6 +32,16 @@ so_exe() {
 }
 
 alvo=$(so_exe    "$(pgrep -f 'playwright test')" "node")
+# ATENCAO, DUAS METADES: este detector tem de ver o navegador DO PLAYWRIGHT e
+# continuar CEGO ao navegador pessoal do usuario. O discriminador e o ARGV
+# (remote-debugging / --headless), nao o nome do executavel -- os dois sao
+# /opt/google/chrome/chrome.
+# Medido: ha 18 processos de Chrome pessoal nesta maquina, com perfil em
+# ~/.config/google-chrome. Se alguem "consertar" isto alargando para chrome ou
+# chromium em geral -- que e a correcao obvia para "nao ve o navegador" -- a
+# pista fica PERMANENTEMENTE OCUPADA, e portao que sempre barra treina a pessoa
+# a contornar o portao. Seria o defeito mais caro desta ferramenta: mataria o
+# uso dela, nao so a leitura. Preserve o filtro por argv. (Achado do QA.)
 chrome=$(so_exe  "$(pgrep -f 'remote-debugging|--headless')" "chrome chromium headless_shell chrome_crashpad_handler chromium-browser")
 serve=$(so_exe   "$(pgrep -f '(tests/e2e/servir\.js|(visual|proxy|servir)[^/]*\.(mjs|cjs|js))')" "node")
 
