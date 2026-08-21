@@ -272,12 +272,22 @@ jobs:
             exit 1
           fi
 
-          # Fora do apiBase (js/config.js) e do $schema do vercel.json, nenhum
-          # arquivo publicado tem motivo para citar origem externa.
+          # Fora do apiBase e do $schema do vercel.json, nenhum arquivo publicado
+          # tem motivo para citar origem externa.
+          #
+          # Isentos, e por que cada um: js/config.js e publico/js/config-face.js
+          # sao os arquivos de configuracao de RUNTIME das duas origens — o
+          # apiBase mora neles por desenho, editavel no servidor sem republicar.
+          # vercel.json e publico/vercel.json declaram a CSP, que precisa nomear
+          # o host do apiBase em connect-src.
+          # A isencao e por CAMINHO EXATO, nao por pasta: arquivo novo em
+          # publico/js/ que cite origem externa deve falhar e ser uma decisao,
+          # nao herdar isencao de vizinho.
           sobra=$(grep -nE 'https?://' $publicados \
             | grep -v '^js/config\.js:' \
             | grep -v '^vercel\.json:' \
-            | grep -v '^publico/vercel\.json:' || true)
+            | grep -v '^publico/vercel\.json:' \
+            | grep -v '^publico/js/config-face\.js:' || true)
           if [ -n "$sobra" ]; then
             echo "$sobra"
             echo "::error::origem externa em arquivo publicado — todo asset tem de ser local"
