@@ -244,16 +244,24 @@ uma abaixo nasceu de um defeito real, e cada uma foi verificada **sabotando a
 própria invariante** e confirmando que o CI fica vermelho — não por leitura de
 código.
 
-**A versão do cache do `sw.js` acompanha o que ele pré-cacheia — lista *e*
-conteúdo.** O caso concreto: dois
+**A versão do cache do `sw.js` descreve o conteúdo atual.** O caso concreto: dois
 ramos mexeram no `ASSETS` e cada um subiu `efrat-ponto-v7` para `v8`. Como a
 linha da versão ficou **idêntica** nos dois lados, o git une as duas listas e
 **não dá conflito**. O merge sai com um `v8` diferente do `v8` que os celulares
 em campo já têm em disco — e como o número não mudou, o service worker não
 invalida nada: cache velho e incompleto, sem um aviso. Combinar "conferimos o
 número no merge" não resolve, porque nada avisa. A guarda compara o `ASSETS` com
-o  da base e só exige
-número novo quando algo mudou de fato.
+o  **com o commit que fixou a versão
+atual**, não com a base do push — a pergunta é "a versão subiu depois da última
+mudança de conteúdo?", e não "a versão subiu neste intervalo?".
+
+A versão anterior era de dois pontos e por isso cega ao caso que mais acontece: a
+versão é bumpada no commit de integração, e o ramo que já estava aberto traz
+conteúdo novo em cima dela sem tocar no número. Num push com base antiga ela via
+`v10 -> v12` e aprovava. Isso ocorreu **três vezes em um dia** (v10, v11, v12) e as
+três foram achadas por inspeção manual, que não escala. É estrutural em ramo de
+vida longa, não descuido: quem abriu o ramo antes do bump não tem como saber que
+precisa mexer no número.
 
 O segundo caminho para o mesmo estrago é o conteúdo: trocar os **bytes** de um
 asset mantendo o nome — pesos em `models/`, `vendor/face-api.js` — não mexe na
