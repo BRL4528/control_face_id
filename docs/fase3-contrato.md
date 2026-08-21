@@ -141,6 +141,15 @@ significa algo com o registro **semeado**: a semente é a contraprova. Generaliz
 asserção de ausência precisa de uma asserção de presença ao lado, no mesmo teste** — senão a
 ausência pode vir de o mecanismo não ter rodado.
 
+**E a contraprova não é algo de que se lembra: é algo que a sabotagem cobra.** O DevOps achou
+a regra porque estava consertando a guarda e o conserto tentou passar por vacuidade nas mãos
+dele — escreveu "não assume os caminhos públicos", rodou a sabotagem de remover o handler
+inteiro, e a guarda passou. Sem sabotar cada guarda antes de confiar nela, a versão "de
+resultado" sai com o mesmo defeito da versão "de mecanismo" **e a mensagem de commit diz que
+está consertado**. Requisito prático, então: quem escrever guarda de resultado sabota
+explicitamente o caso *"o mecanismo não rodou"* — e é essa sabotagem, não a boa intenção, que
+produz a contraprova.
+
 **Teste operacional para classificar uma guarda em trinta segundos**, também do DevOps:
 *se alguém refatorasse isto corretamente, a minha assertiva continuaria passando?* Se uma
 mudança que **preserva** comportamento pode deixá-la vermelha, ela olha para implementação; e
