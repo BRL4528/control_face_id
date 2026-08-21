@@ -20,7 +20,7 @@ import crypto from 'node:crypto';
 import { criarServidor } from './servidor-falso.js';
 import {
   loteMesmaPessoa, loteDuasPessoas, loteDuasPessoasDistante,
-  loteComMaiorDistancia, maiorDistanciaParAPar
+  loteComMaiorDistancia, loteExatamenteNoLimiar, maiorDistanciaParAPar
 } from './fixtures-biometria.js';
 
 const CREDENCIAL = 'credencial-de-teste';
@@ -148,15 +148,31 @@ test('descritor malformado é recusado', async ({ request }) => {
 
 /* ------------------------------------------------------------ 4.2c — limiar */
 
+test('exatamente no limiar (0,45) o cadastro recusa — assimetria proposital com o reconhecimento', async ({ request }) => {
+  // Decisão do Orquestrador: `>= limiarAceite` RECUSA no cadastro, enquanto
+  // `vereditoPorDistancia` (js/regras.js:14) ACEITA com `<=` no reconhecimento.
+  // A assimetria é intencional e a razão é o raio do erro: no reconhecimento a
+  // decisão de fronteira é um evento só, reversível, e cai na mesa do RH se
+  // estiver errada; no cadastro o template grava uma vez e vale para sempre, e
+  // um lote que nasce na fronteira produz erro em toda marcação futura daquela
+  // pessoa — corretamente aceita, sem nada retido para revisar.
+  // Exato, não aproximado: `loteComMaiorDistancia(0.45)` daria 0,45011, e o
+  // teste passaria por estar ACIMA do limiar em vez de estar NELE.
+  const noLimiar = loteExatamenteNoLimiar(LIMIAR_ACEITE);
+  expect(maiorDistanciaParAPar(noLimiar)).toBe(LIMIAR_ACEITE);
+
+  const r = await cadastrar(request, { vetores: noLimiar });
+
+  expect(r.status(), 'no limiar exato o cadastro recusa, ao contrário do reconhecimento').toBe(422);
+  expect(await pessoaFoiGravada(request)).toBe(false);
+});
+
 test('o veredito vira em torno do limiar de aceite, não de 0,55', async ({ request }) => {
   // O limiar do produto é 0,45 (js/config.js). O 0,55 de js/rh.js:508 deixa
   // passar calada toda a faixa 0,45–0,55 — este teste é o que trava isso.
   //
-  // NOTA DE CONTRATO, deliberadamente não testada aqui: o comportamento em
-  // EXATAMENTE 0,45 é ambíguo. `vereditoPorDistancia` (js/regras.js:14) aceita
-  // com `dist <= limiarAceite`, então espelhar essa regra aceitaria o lote no
-  // limiar. Escolhi 0,44 e 0,46 para não cravar por conta própria uma decisão
-  // que é do contrato — está reportada ao Orquestrador.
+  // O comportamento em EXATAMENTE 0,45 está no teste seguinte — era ambíguo
+  // quando escrevi este arquivo e virou decisão do Orquestrador desde então.
   const abaixo = loteComMaiorDistancia(0.44);
   const acima = loteComMaiorDistancia(0.46);
 
