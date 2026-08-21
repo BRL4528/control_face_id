@@ -303,3 +303,34 @@ vazio-vs-falhou está provado em dois níveis: classe pelo teste, aparência pel
 
 **Aberto:** link do celular (defeito em investigação) · métrica de pose · as quatro
 decisões do cliente.
+
+## Medição válida do dia · janela travada, os seis confirmando
+
+`integra/v3-r3` em **2717eb4**: **97 unitários · 173 e2e · zero falhas · zero skipped.**
+Procedência: janela travada, os seis confirmaram parada nomeando os recursos, ninguém
+entrou durante. As guardas de CI são a terceira cobertura e correm em separado.
+
+**A conta, por arquivo** (o total caiu fora da faixa que eu previ, e faixa não é
+previsão): a soma dos 22 arquivos de spec dá 173 exatos — fluxo 26, equipes-pessoas-
+contrato 19, convite-contrato 19, aparelho-liberacao 13, rh-face-cadastrar 11,
+marcacao-revogado-contrato 10, cadastro-coerencia 9, pagina-publica 8, aparelhos 8,
+rh-biometria 7, acesso 7, e o resto.
+
+**Regra adotada, do Arquiteto:** conferir o total contra a soma por arquivo **sempre**,
+não quando o número parece estranho. Eu só conferi porque caiu fora da faixa — sorte, não
+método. Total plausível é o caso em que ninguém confere, e o único em que a conta errada
+sobrevive.
+
+**Fora de propósito:** o ramo do QA (748e155) com 3 vermelhos que guiam a métrica de pose,
+esperando `avaliarPose`. Número limpo com o fato ao lado, não número limpo por omissão.
+
+## A escala que vale para o cliente
+
+| grau | exemplo |
+|---|---|
+| **visto** | porta destrancada · aba Aparelhos · equipe aberta com membros · telefone duplicado |
+| **medido** | as três coberturas, com procedência declarada |
+| **provado, não visto** | três fotos em sequência · retry de uma posição · recusa sem rosto |
+| **inferido, não medido** | navegador órfão · a política de produção da origem pública, conferida por guarda que **lê** o arquivo e nunca exercida num servidor |
+
+A média disso vira "o sistema está testado" — verdadeiro e inútil.
