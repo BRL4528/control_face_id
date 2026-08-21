@@ -89,3 +89,20 @@ export function loteComMaiorDistancia(alvo) {
   const a = base();
   return [a, afastar(a, alvo, 0), afastar(a, Math.min(alvo, 0.01), 1)];
 }
+
+/**
+ * Lote cuja maior distância par a par é EXATAMENTE `alvo`, para testar a
+ * fronteira sem margem de erro.
+ *
+ * `loteComMaiorDistancia` não serve aqui: ela desloca em eixos ortogonais, então
+ * o par mais distante vale √(alvo² + ε²), que fica ACIMA do alvo — medido,
+ * `loteComMaiorDistancia(0.45)` dá 0,45011. Um teste de fronteira alimentado com
+ * 0,45011 passa por estar acima do limiar, não por estar nele, e não prova nada.
+ *
+ * Aqui os três pontos são colineares: a, a+alvo, a+alvo/2. Os pares valem
+ * `alvo`, `alvo/2` e `alvo/2`, então o maior é `alvo` exato.
+ */
+export function loteExatamenteNoLimiar(alvo) {
+  const a = base();
+  return [a, afastar(a, alvo, 0), afastar(a, alvo / 2, 0)];
+}
