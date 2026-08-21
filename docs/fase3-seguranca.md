@@ -919,6 +919,23 @@ O conserto que funcionou não foi um aviso melhor — foi tirar a linha de coman
 caminho (filtrar por `/proc/PID/comm`), e fazer a saída do comando carregar o
 próprio limite. Nenhum dos dois exige que alguém esteja prestando atenção.
 
+Um terceiro caso, e o mais desconfortável: horas depois de escrever este texto, o
+autor dele comparou duas medições de instantes diferentes — o erro descrito na
+seção 2 — para concluir que a pista estava livre. **Não esqueceu a regra: não a viu
+aplicável**, porque *"estava livre há pouco"* se apresenta como conhecimento e não
+como suposição. É a mesma forma dos dois anteriores: o gesto não parece um gesto.
+
+**Corolário sobre explicações alheias.** Uma causa plausível dada por outra pessoa
+suprime investigação com a mesma eficácia de um aviso — e mais, quando vem de quem
+coordena. Aconteceu aqui: a explicação de um flicker de pista era verdadeira *para a
+observação de quem a deu* e não cobria uma segunda observação de origem diferente,
+que apontava um defeito real. O que impediu o defeito de sumir sob a explicação não
+foi desconfiança — foi a **procedência** da segunda medição: ela vinha do
+instrumento, não de improviso, então a explicação não encaixava nela. Medir com
+instrumento não protege só contra o próprio erro; protege contra a explicação de
+outro absorver o seu dado. Quando você explicar um sintoma, diga que a explicação
+cobre o caso que **você** viu.
+
 É o mesmo movimento nos três padrões seguintes: a **confiança mora dentro da
 asserção** (igualdade exata para o algébrico, faixa para o indicativo), a
 **contraprova vem antes da negação**, e o **limite mora dentro do instrumento**.
