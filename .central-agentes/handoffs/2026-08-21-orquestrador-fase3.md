@@ -82,3 +82,42 @@ dois briefs: `js/rh.js`+`index.html`+rotas `/rh/*` são do `508cd44fd2`;
 Dívida assumida sem disfarce: chave PBKDF2 do RH é credencial permanente
 (`js/rh.js:22-28`) e toda invariante desta fase pressupõe que quem está logado como
 RH é o RH. Fora do escopo, ~2,5-3 dias.
+
+## Atualização 2 · integrações e decisões (mesmo dia)
+
+**Integrado em `integra/v3-r3`:** ramo do DevOps (T-AABCC9 + T-B1D7F6) e ramo do
+Designer (fila sem "aprovar todos"). 59 unitários verdes após os merges.
+
+**Erro meu, corrigido:** `js/config.js:16` aponta para `https://n8n.samasc.com.br/webhook`
+e o servidor falso não injetava nada, então a URL de `npm run serve` que entreguei ao
+cliente falava com a **produção dele**. O QA me corrigiu, o DevOps já havia consertado
+(T-B1D7F6) e eu verifiquei por `curl`: o config servido agora devolve
+`apiBase http://127.0.0.1:PORTA/webhook`. O `offline.spec.js` estava verde *porque* a
+chamada à produção falhava — o E2E fazia POST em `/dispositivo/registrar` de produção
+a cada execução, em qualquer máquina com rota para o host.
+
+**Decisões tomadas neste ciclo:**
+1. **Projeto Vercel separado**, não regra por host — revertendo a recomendação do
+   Arquiteto. O argumento dele (origem diferente ⇒ IndexedDB vazio) é correto quanto
+   ao armazenamento e incompleto: `js/app.js:324` registra `./sw.js` sem condição, então
+   o shell alcançável no host público **instalaria o SW de raiz do app naquela origem**,
+   com o fallback-para-shell que a mudança existe para remover. Isolar por ausência.
+2. **Em exatamente 0,45 o cadastro recusa** (`>=`), divergindo por um fio de
+   `vereditoPorDistancia` (`js/regras.js:14`, que aceita com `<=`). Assimetria
+   intencional: reconhecimento erra um evento reversível; cadastro grava para sempre.
+3. **Telefone compartilhado:** exceção autorizada existe no cadastro, mas pessoa com
+   telefone compartilhado **não recebe link de face** — sobram câmera do PC e upload.
+   O telefone é o canal de entrega do link; número errado entrega template a outro.
+4. **Coerência sai da requisição, não da resposta:** o servidor calcula, persiste e
+   devolve, porque `js/rh.js:358` a renderiza na fila humana — que é a compensação
+   assumida pela ausência de liveness no cadastro.
+
+**Achados de terceiros aceitos:** `js/rh.js:512` usa a credencial do **aparelho** para
+o cadastro de face do RH, então a câmera do PC não funciona hoje em PC que nunca se
+registrou (Arquiteto); `vetorDe()` dá distância 4,069 e o triângulo 0,094/0,61/0,80
+viola a desigualdade triangular — as duas orientações erradas eram minhas, no brief do
+`6d0c426d7f` (QA); colisão de `sw.js` em `v8` nos dois ramos com mesmo valor não dá
+conflito de git e sairia com cache velho sem aviso (DevOps).
+
+**Bloqueio restante:** falta a **string do hostname** de produção. O cliente opera o
+DNS e o CORS do n8n ele mesmo; o DevOps está escrevendo as duas folhas em `docs/`.
