@@ -647,23 +647,41 @@ duas pessoas não gera template" é falsa por construção.
 
 ### 4.3 O teste que prova a recusa
 
-Um teste, com os números que já foram medidos:
+**Escrito e rodando** em `tests/e2e/cadastro-coerencia.spec.js`, com o fixture calibrado em
+`tests/e2e/fixtures-biometria.js`. Nasce vermelho de propósito (7 vermelhos / 1 verde hoje);
+o verde é o aceite do T-8ADD9C.
 
 > **`lote de 3 fotos com duas pessoas diferentes é recusado e não grava template`**
 >
 > Dado um colaborador sem biometria, e três descritores em que os dois primeiros são da
-> mesma pessoa em poses diferentes (distância 0,094) e o terceiro é de outra pessoa
-> (0,61 e 0,80 contra os anteriores) — quando o lote é submetido a `/efrat/cadastro` —
-> então a resposta é `422` com o código de incoerência e a maior distância observada;
-> **e** a pessoa continua sem template na carga seguinte; **e** nenhum diálogo de
-> confirmação é oferecido em nenhum ponto do caminho.
+> mesma pessoa em poses diferentes (0,094) e o terceiro é de outra pessoa (0,61 do
+> primeiro) — quando o lote é submetido a `/efrat/cadastro` — então a resposta é `422`;
+> **e** a pessoa continua sem template; **e** nenhum diálogo de confirmação é oferecido em
+> nenhum ponto do caminho.
 >
-> Contraprova no mesmo arquivo: três capturas da mesma pessoa (0,094) gravam normalmente —
-> senão o teste passa por estar recusando tudo.
+> Contraprova no mesmo arquivo: três capturas da mesma pessoa (maior par 0,133) gravam
+> normalmente — senão o teste passa por estar recusando tudo.
 
-Os quatro números saem de `README.md:129` e `docs/validacao-biometrica.md`; o fixture é o
-que já existe em `tests/e2e/servidor-falso.js:88` (`vetorDe(pessoa_id)`), que gera vetores
-determinísticos por pessoa. Nada precisa ser inventado.
+**Duas correções minhas, descobertas ao escrever o teste** (a versão anterior desta seção
+estava errada nas duas, e o brief do T-8ADD9C herdou o erro):
+
+1. **O triângulo 0,094 / 0,61 / 0,80 não existe.** A desigualdade triangular obriga a
+   terceira distância a cair em `[0,61 − 0,094 ; 0,61 + 0,094]` = `[0,516 ; 0,704]`, e 0,80
+   está fora. Os números de `README.md:129` são **dois pares medidos independentes**
+   ("pessoas diferentes: 0,61 **e** 0,80"), não os três lados de um mesmo lote. O teste usa
+   um par por vez — há um caso para 0,61 e outro para 0,80.
+2. **`vetorDe` não serve de fixture aqui.** Medido:
+   `distancia(vetorDe('p-ana'), vetorDe('p-bruno')) = 4,069` — uma ordem de grandeza acima
+   de qualquer número real do domínio. Um teste que recusa a 4,069 prova que a regra recusa
+   lixo, não que ela respeita o limiar de 0,45. Daí o fixture próprio, com distância
+   construída, que senta no limiar de verdade (0,44 grava · 0,46 recusa).
+
+**Questão de contrato que deixei em aberto de propósito, e que o T-8ADD9C precisa decidir:**
+o comportamento em **exatamente 0,45**. `vereditoPorDistancia` (`js/regras.js:14`) aceita com
+`dist <= limiarAceite`, então espelhar a regra do reconhecimento aceitaria o lote no limiar;
+tratar o cadastro como mais conservador recusaria. O teste usa 0,44 e 0,46 para não cravar
+por conta própria uma decisão que não é minha — mas ela precisa ser tomada, porque hoje as
+duas leituras são defensáveis e um desencontro aqui vira bug silencioso.
 
 Cobertura irmã, no mesmo lugar: **o link público submete o lote incoerente e recebe a mesma
 recusa** — é o caminho sem operador, e portanto o que mais precisa da regra no servidor.
@@ -749,9 +767,9 @@ dentro da decisão que já foi tomada, e é honesto sobre o que garante.
 | Item | Invariantes | Onde o teste vive |
 |---|---|---|
 | **D1** link público | 1.0a · 1.1a-c · 1.2a-b · 1.3a-c · 1.4a-c · 1.5a-d · 1.6a-c · 1.7a-c | `tests/e2e/face-link.spec.js` (novo) + unit do token |
-| **A** aparelho | 2.1a-f · 2.2a-e | `tests/e2e/acesso.spec.js` (estende) + `fluxo.spec.js:130-155` |
+| **A** aparelho | 2.1a-f · 2.2a-e | **`tests/e2e/aparelho-liberacao.spec.js` (escrito)** + `fluxo.spec.js:130-155` |
 | **C** validação | 3.1a-b · 3.3a-b · 3.4a-b · 3.5a-c · 3.6a-c | `tests/e2e/rh-pessoas.spec.js` (novo) + unit das regras puras |
-| **D3** 3 fotos | 4.2a-f | unit da função pura + e2e §4.3 nos três caminhos |
+| **D3** 3 fotos | 4.2a-f | **`tests/e2e/cadastro-coerencia.spec.js` (escrito, vermelho)** + `fixtures-biometria.js` |
 | **limite** | 5.1a-c | e2e das telas de upload e da fila |
 
 ### Ordem sugerida, se a fase não couber inteira
