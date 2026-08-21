@@ -206,25 +206,78 @@ jobs:
 
       - name: O service worker do operador não alcança a página pública
         run: |
+          # GUARDA DE RESULTADO, NAO DE MECANISMO. A versao anterior desta guarda
+          # lia o TEXTO do handler e comparava a posicao de FORA_DO_APP com a de
+          # respondWith. Medido: trocar a linha do desvio por
+          # `if (false && (...)) return;` deixava a guarda VERDE com o desvio
+          # morto. Ela conferia como a coisa e feita, quando o que importa e o
+          # que sai.
+          #
+          # Agora executa o handler de verdade, com self/caches/location/fetch
+          # dublados, e observa se respondWith FOI chamado. Qualquer refatoracao
+          # que preserve o comportamento passa; qualquer uma que o quebre falha,
+          # inclusive as que ninguem previu.
           node --input-type=module -e '
             import fs from "node:fs";
-            const sw = fs.readFileSync("sw.js", "utf8");
-            const prefixo = sw.match(/const FORA_DO_APP = .([^"\x27]+)./)[1];
+            const src = fs.readFileSync("sw.js", "utf8");
             const falhar = m => { console.error("::error::" + m); process.exit(1); };
 
-            // O desvio tem de sair do handler ANTES do respondWith, senão o
-            // fallback do index.html do operador responde no lugar da página.
-            const fetchHandler = sw.slice(sw.indexOf("addEventListener(\x27fetch\x27"));
-            const desvio = fetchHandler.indexOf("FORA_DO_APP");
-            const responde = fetchHandler.indexOf("respondWith");
-            if (desvio < 0) falhar("o handler de fetch do sw.js não desvia a página pública");
-            if (desvio > responde) falhar("o desvio da página pública vem depois do respondWith — o cache do operador responde antes");
+            const ouvintes = {};
+            const self = {
+              addEventListener: (t, f) => { ouvintes[t] = f; },
+              skipWaiting: () => {}, clients: { claim: () => {} }
+            };
+            const cacheDublado = { add: async () => {}, put: async () => {}, match: async () => undefined };
+            const caches = {
+              open: async () => cacheDublado, keys: async () => [],
+              match: async () => undefined, delete: async () => {}
+            };
+            const location = { origin: "https://app.exemplo.test" };
+            const fetch = async () => ({ ok: false, clone: () => ({}) });
+            new Function("self", "caches", "location", "fetch", src)(self, caches, location, fetch);
 
-            // E ela não pode estar no precache.
-            const assets = [...sw.matchAll(/.(\.\/[^\x27"]+)./g)].map(m => m[1]);
-            const dentro = assets.filter(a => a.replace(/^\./, "").startsWith(prefixo));
-            if (dentro.length) falhar("página pública no precache do sw.js: " + dentro.join(", "));
-            console.log("página pública fora do service worker: ok");
+            if (typeof ouvintes.fetch !== "function") falhar("sw.js nao registrou handler de fetch");
+
+            // Chamou respondWith? Entao o service worker assumiu a resposta.
+            const assumiu = (url, method = "GET") => {
+              let r = false;
+              ouvintes.fetch({ request: { method, url }, respondWith: () => { r = true; } });
+              return r;
+            };
+
+            const orig = location.origin;
+            const publicas = ["/publico", "/publico/", "/publico/index.html", "/publico/cadastro.js"];
+            for (const p of publicas) {
+              if (assumiu(orig + p)) {
+                falhar("o service worker do operador ASSUMIU a resposta de " + p +
+                  " — sem rede isso entrega o shell do app do operador ao colaborador, e um link de uso unico volta do cache");
+              }
+            }
+
+            // Contraprova: se ele nao assumir NADA, a guarda acima passaria por
+            // vacuidade e o app perderia o offline sem ninguem notar.
+            const deveAssumir = ["/index.html", "/js/app.js", "/models/face_recognition_model.bin"];
+            for (const p of deveAssumir) {
+              if (!assumiu(orig + p)) falhar("o service worker deixou de assumir " + p + " — o app do operador perde o offline");
+            }
+
+            // E o que nunca foi dele: outra origem e nao-GET.
+            if (assumiu("https://n8n.exemplo.test/webhook/efrat/marcacoes", "POST")) {
+              falhar("o service worker assumiu um POST de API — resposta de marcacao em cache seria mentira sobre o que o servidor recebeu");
+            }
+            if (assumiu("https://n8n.exemplo.test/webhook/efrat/carga")) {
+              falhar("o service worker assumiu GET de outra origem");
+            }
+
+            // O precache tambem nao pode conter a pagina publica.
+            const prefixo = src.match(/const FORA_DO_APP = .([^"\x27]+)./);
+            if (!prefixo) falhar("sw.js sem FORA_DO_APP — o desvio da pagina publica desapareceu");
+            const assets = [...src.matchAll(/.(\.\/[^\x27"]+)./g)].map(m => m[1]);
+            const dentro = assets.filter(a => a.replace(/^\./, "").startsWith(prefixo[1]));
+            if (dentro.length) falhar("pagina publica no precache do sw.js: " + dentro.join(", "));
+
+            console.log("handler executado: nao assume " + publicas.length + " caminhos publicos, assume " +
+              deveAssumir.length + " do app, e ignora API e outra origem");
           '
 
       - name: Nenhum asset externo, fonte remota ou script de terceiro no que vai ao ar

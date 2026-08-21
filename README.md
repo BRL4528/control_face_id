@@ -170,6 +170,33 @@ não mede nada compra confiança que não foi ganha. Vale igual para um hash
 calculado sobre bytes que o aparelho nunca recebeu, e para uma linha de conversa
 onde silêncio significou "está tudo bem".
 
+## Guardar o resultado, não o mecanismo
+
+Irmão do princípio acima, e a pergunta que decide de que lado uma guarda está:
+**se alguém refatorasse isto corretamente, a minha assertiva continuaria
+passando?** Se uma mudança que preserva o comportamento pode deixar a guarda
+vermelha, ela está olhando para a implementação — e o inverso também vale: uma
+mudança que quebra o comportamento pode passar.
+
+Foi medido aqui dentro. A guarda que garante que o service worker não alcança a
+página pública lia o **texto** do handler e comparava a posição de `FORA_DO_APP`
+com a de `respondWith`. Trocar a linha do desvio por
+`if (false && (…)) return;` — referência intacta, desvio morto — deixava a guarda
+**verde**. Hoje ela executa o handler com `self`/`caches`/`location`/`fetch`
+dublados e observa se `respondWith` foi chamado, o que também exige a contraprova:
+o service worker **tem** de assumir `/index.html` e os modelos, senão a guarda
+passaria por vacuidade e o app perderia o offline sem ninguém notar.
+
+O mesmo par aparece na guarda do `apiBase`: ela não verifica que existe um
+`Object.assign`, nem que a linha injetada está presente — ela executa o
+`js/config.js` servido e lê o `window.EFRAT_CFG.apiBase` **resolvido**. Duas URLs
+no arquivo é o estado normal e correto, então presença de string não diz nada; o
+que importa é qual sobrevive.
+
+Guarda de propriedade sobrevive à refatoração. Guarda de implementação vira
+mentira na primeira limpeza — **e continua verde enquanto mente**, que é o que a
+torna pior que guarda nenhuma.
+
 ## As guardas de CI, e por que cada uma existe
 
 Guarda sem motivo escrito é guarda que alguém remove por achar burocrática. Cada
