@@ -51,6 +51,25 @@ async function lerAparelhos(request) {
   return (await r.json());
 }
 
+/**
+ * Registra pela rota pública de verdade (não via seedDispositivo) — é o
+ * único jeito de exercitar o cálculo real de ip_hash, que só roda dentro do
+ * handler de /registrar. `ip` vira `estado.ipSimulado` antes da chamada
+ * (achado do DevOps: estado, não cabeçalho — não existe artefato com forma
+ * de protocolo pra alguém copiar pro workflow real do n8n).
+ */
+async function registrar(request, { apelido = 'Tablet', ip } = {}) {
+  ctx.estado.ipSimulado = ip;
+  const r = await request.post(`${ctx.base}/efrat/dispositivo/registrar`, {
+    data: {
+      dispositivo_id: crypto.randomUUID(),
+      credencial_publica: crypto.createHash('sha256').update(crypto.randomUUID()).digest('base64url'),
+      apelido, ua: 'teste'
+    }
+  });
+  return await r.json();
+}
+
 test('pendentes vêm do mais antigo pedido para o mais novo — quem espera há mais tempo aparece primeiro', async ({ request }) => {
   seedDispositivo('novo', { criado_em: '2026-08-19T10:00:00Z' });
   seedDispositivo('antigo', { criado_em: '2026-08-15T10:00:00Z' });
@@ -79,4 +98,48 @@ test('pendentes e ativos nunca se misturam numa lista só, mesmo com os dois pre
 
   expect(pendentes.map(p => p.pendente_id)).toEqual(['pend-p1']);
   expect(ativos.map(a => a.dispositivo_id)).toEqual(['a1']);
+});
+
+/* --------------------------------------------- pedidos_da_mesma_rede_1h */
+// §1.2: contagem OBSERVADA pelo servidor (ip_hash na última hora), não
+// declarada pelo cliente — sinal de flood (Cenário 1, ameacas-v3.md).
+// Achado do Orquestrador: a invariante existia em código e não tinha teste
+// nenhum provando o número — "invariante sem teste é invariante que a gente
+// acha que tem".
+//
+// Guarda de MECANISMO, achado do Arquiteto — o que estes dois testes provam
+// e o que não provam: com `estado.ipSimulado` eles provam a AGREGAÇÃO (dois
+// IPs diferentes não somam, dois do mesmo IP somam). NÃO provam que o n8n
+// real enxerga o IP real do cliente — isso depende de não haver proxy na
+// frente (verdade hoje, confirmada pelo cliente). Se um proxy for
+// introduzido, `ip_hash` vira constante (o do proxy), o campo passa a
+// contar o mundo inteiro como "mesma rede", o aviso acende SEMPRE — e estes
+// dois testes continuam verdes, porque injetam o IP em vez de observar a
+// topologia real. Se isso mudar, reavaliar §1.2 ANTES, degradando para
+// `pedidos_pendentes_1h` sem a palavra "internet" (o contrato já tem a
+// regra e o gatilho — falta só o ponteiro aqui, onde o verde é lido).
+
+test('tres pedidos da mesma rede contam tres no campo de cada um, nunca declarado pelo cliente', async ({ request }) => {
+  await registrar(request, { apelido: 'Tablet 1', ip: '203.0.113.10' });
+  await registrar(request, { apelido: 'Tablet 2', ip: '203.0.113.10' });
+  await registrar(request, { apelido: 'Tablet 3', ip: '203.0.113.10' });
+
+  const { pendentes } = await lerAparelhos(request);
+  expect(pendentes).toHaveLength(3);
+  for (const p of pendentes) expect(p.pedidos_da_mesma_rede_1h).toBe(3);
+});
+
+test('pedidos de redes diferentes não se contam entre si', async ({ request }) => {
+  await registrar(request, { apelido: 'Tablet Norte', ip: '203.0.113.10' });
+  await registrar(request, { apelido: 'Tablet Sul A', ip: '198.51.100.20' });
+  await registrar(request, { apelido: 'Tablet Sul B', ip: '198.51.100.20' });
+
+  const { pendentes } = await lerAparelhos(request);
+  const norte = pendentes.find(p => p.apelido_declarado === 'Tablet Norte');
+  const sulA = pendentes.find(p => p.apelido_declarado === 'Tablet Sul A');
+  const sulB = pendentes.find(p => p.apelido_declarado === 'Tablet Sul B');
+
+  expect(norte.pedidos_da_mesma_rede_1h).toBe(1);
+  expect(sulA.pedidos_da_mesma_rede_1h).toBe(2);
+  expect(sulB.pedidos_da_mesma_rede_1h).toBe(2);
 });

@@ -160,6 +160,14 @@ test('T-E3DBD4 — RH alcançável com aparelho pendente, sem liberar carga nem 
   // senha errada continua negada
   await page.fill('#rhUsuario', 'rh');
   await page.fill('#rhSenha', 'errada');
+  // Ancora positiva, e ela é a prova de um defeito de produto real que
+  // apareceu aqui (js/app.js abrirLoginRh — refoco atrasado roubava o foco
+  // no meio do preenchimento e grudava os dois valores no mesmo campo,
+  // "rherrada" em #rhUsuario com #rhSenha vazio). Sem afirmar os valores
+  // antes do clique, este teste prova acidentalmente o caminho de campo
+  // vazio em vez do que o nome promete — senha errada rejeitada.
+  await expect(page.locator('#rhUsuario')).toHaveValue('rh');
+  await expect(page.locator('#rhSenha')).toHaveValue('errada');
   await page.click('#btnEntrarRh');
   await expect(page.locator('#toast')).toContainText('invalidos', { timeout: 8000 });
   await expect(page.locator('#rh')).toHaveClass(/hide/);

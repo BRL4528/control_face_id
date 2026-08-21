@@ -176,6 +176,12 @@ export function criarServidor(opts = {}) {
     sessoesGestor: new Map(),
     correcoes: [],
     auditoriaIdentificacao: [],
+    // T-81C721 (§2.1e docs/fase3-seguranca.md, docs/adr-acesso-v3.md
+    // efrat_auditoria_identificacao): toda tentativa de aprovar aparelho,
+    // certa ou errada, com ou sem estourar LIMITE_APROVACAO — nunca só o
+    // 429, senão o padrão paciente (poucas tentativas por dia, todo dia,
+    // nunca batendo o teto) fica invisível. Nunca guarda o código tentado.
+    auditoriaAprovacao: [],
     limitesIdentificacao: new Map(),
     limitesCadastro: new Map(),
     tokenLegadoConsumido: false,
@@ -326,6 +332,19 @@ export function criarServidor(opts = {}) {
     const lista = estado.limitesAprovacao.get(usuario) || [];
     const maisAntiga = Math.min(...lista);
     return Math.max(1, Math.ceil((JANELA_LIMITE_APROVACAO_MS - (Date.now() - maisAntiga)) / 1000));
+  };
+
+  // T-81C721 (§2.1e, docs/adr-acesso-v3.md efrat_auditoria_identificacao):
+  // TODA tentativa de aprovar, certa ou errada, com ou sem 429 — nunca só o
+  // limite estourando, senão o padrão paciente (poucas tentativas por dia,
+  // nunca batendo o teto) não deixa rastro nenhum. NUNCA guarda o código
+  // tentado — ele não serve para investigar, só transformaria o log numa
+  // lista de códigos para quem ler o log.
+  const registrarAuditoriaAprovacao = (resultado, pendenteId) => {
+    estado.auditoriaAprovacao.push({
+      usuario_rh: rhUsuario.usuario, instante: new Date().toISOString(),
+      pendente_id: pendenteId || null, resultado, request_id: requestId()
+    });
   };
 
   // C1-C3 do contrato (fase3-contrato.md §0): chave de idempotência no CORPO
@@ -1123,6 +1142,7 @@ export function criarServidor(opts = {}) {
 
           if (tentativasApovacaoRestantes(rhUsuario.usuario).bloqueado) {
             res.setHeader('Retry-After', String(retryAfterAprovacao(rhUsuario.usuario)));
+            registrarAuditoriaAprovacao('limitado');
             return responder(429, erro('LIMITE_APROVACAO', 'muitas tentativas de código errado — espere e tente de novo'));
           }
 
@@ -1134,6 +1154,7 @@ export function criarServidor(opts = {}) {
           const bruto = String(body.codigo || '').toUpperCase();
           const semFormatacao = bruto.replace(/[\s-]+/g, '');
           if (/[^A-Z0-9]/.test(semFormatacao) || [...semFormatacao].some(c => 'OIL01'.includes(c))) {
+            registrarAuditoriaAprovacao('letra_invalida');
             return responder(422, erro('CODIGO_COM_LETRA_INVALIDA',
               'Esse código tem uma letra que a gente nunca usa (O, I, L, 0, 1). Confira na tela do aparelho.', 'codigo'));
           }
@@ -1146,12 +1167,14 @@ export function criarServidor(opts = {}) {
             erro('CODIGO_NAO_ENCONTRADO', 'Código inválido ou expirado. Confira no aparelho e digite de novo.');
           if (!codigo) {
             registrarTentativaAprovacaoErrada(rhUsuario.usuario);
+            registrarAuditoriaAprovacao('codigo_nao_encontrado');
             return responder(404, RESPOSTA_CODIGO_NAO_ENCONTRADO());
           }
           const dispositivoId = estado.codigosPendentes.get(codigo);
           const dispositivo = dispositivoId && estado.dispositivos.get(dispositivoId);
           if (!dispositivo || dispositivo.estado !== 'pendente' || codigoExpirado(dispositivo)) {
             registrarTentativaAprovacaoErrada(rhUsuario.usuario);
+            registrarAuditoriaAprovacao('codigo_nao_encontrado');
             return responder(404, RESPOSTA_CODIGO_NAO_ENCONTRADO());
           }
           // CODIGO_AMBIGUO (409, §1.3) fica sem caminho de teste: codigosPendentes
@@ -1161,20 +1184,24 @@ export function criarServidor(opts = {}) {
 
           const equipesIds = Array.isArray(body.equipes_ids) ? body.equipes_ids : [];
           if (equipesIds.length === 0) {
+            registrarAuditoriaAprovacao('escopo_vazio', dispositivo.pendente_id);
             return responder(422, erro('ESCOPO_VAZIO', 'Selecione ao menos uma equipe antes de liberar o aparelho.', 'equipes_ids'));
           }
           const equipesSelecionadas = equipesIds.map(id => estado.equipes.get(id));
           if (equipesSelecionadas.some(e => !e || !e.ativo)) {
+            registrarAuditoriaAprovacao('equipe_invalida', dispositivo.pendente_id);
             return responder(422, erro('EQUIPE_INVALIDA', 'uma das equipes selecionadas não existe ou está inativa', 'equipes_ids'));
           }
           const unidades = new Set(equipesSelecionadas.map(e => normalizarUnidade(e.unidade)));
           if (unidades.size > 1) {
+            registrarAuditoriaAprovacao('equipes_de_unidades_diferentes', dispositivo.pendente_id);
             return responder(422, erro('EQUIPES_DE_UNIDADES_DIFERENTES', 'as equipes escolhidas são de unidades diferentes', 'equipes_ids'));
           }
           // Unidade é DERIVADA das equipes, nunca enviada pelo cliente (§2.4/§8-A).
           const unidade = equipesSelecionadas[0].unidade;
 
           estado.codigosPendentes.delete(codigo);
+          const pendenteIdAprovado = dispositivo.pendente_id;
           dispositivo.estado = 'ativo';
           dispositivo.equipes_ids = equipesIds;
           dispositivo.unidade = unidade;
@@ -1182,6 +1209,7 @@ export function criarServidor(opts = {}) {
           dispositivo.aprovado_por = rhUsuario.usuario;
           dispositivo.aprovado_em = new Date().toISOString();
           dispositivo.codigo_curto = null;
+          registrarAuditoriaAprovacao('aprovado', pendenteIdAprovado);
 
           const resposta = {
             ok: true, dispositivo_id: dispositivo.dispositivo_id, apelido: dispositivo.apelido,
