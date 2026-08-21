@@ -408,6 +408,7 @@ test('RH cria equipe e colaborador', async ({ page }) => {
   await page.click('#rh nav button[data-aba="pessoas"]');
   await page.fill('#pNome', 'Novo Colaborador');
   await page.fill('#pMat', '777');
+  await page.fill('#pTelefone', '67998760001');   // T-8188C6: telefone é obrigatório na criação
   await page.click('#btnNovaPessoa');
   await expect(page.locator('#toast')).toContainText('salvo', { timeout: 15000 });
   expect(ctx.estado.colaboradoresCriados).toContain('Novo Colaborador');
@@ -470,6 +471,11 @@ test('fila de recadastro separa substituicao de primeiro cadastro e trava aprova
   await expect(page.locator('#toast')).toContainText('Decidido', { timeout: 15000 });
   expect(ctx.estado.decisoes).toContainEqual({ tipo: 'template', id: 't-sub-ana', acao: 'aprovar' });
 });
+
+// T-89E18B: cobertura de "aviso aparece em link e upload, nunca na câmera do
+// RH" mora em tests/e2e/aviso-liveness.spec.js — teste dedicado que o QA já
+// tinha escrito (nasceu vermelho contra o bug real: viaLink só cobria 'link').
+// Puxado pra este ramo em vez de duplicado aqui.
 
 test('espelho de ponto mostra as marcacoes do colaborador', async ({ page }) => {
   semearMarcacao(ctx.estado, {

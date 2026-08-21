@@ -49,6 +49,77 @@ nenhuma peça deste contrato pode violar:
 
 ---
 
+## Princípio que apareceu quatro vezes nesta fase
+
+**Antes de confiar num sinal, perguntar de onde vem o dado que o alimenta — e se ele
+pode ser constante.**
+
+Nomeado porque a fase inteira o reencontrou em lugares sem relação nenhuma entre si:
+
+| Onde | O sinal | Como ele mentiria |
+|---|---|---|
+| §4.7 | `modelo_id` | manifesto gerado da árvore do repositório declara id certo sobre bytes errados: nunca marca divergência e passa a atestar sanidade |
+| §4.2 | `coerencia_no_limite` (**caiu**) | corte mal escolhido acenderia em todo cadastro e treinaria o RH a ignorar. A medição mostrou que *qualquer* corte na faixa faria isso — o sinal foi removido, não recalibrado |
+| §1.2 | `pedidos_da_mesma_rede_1h` | proxy que não repassa o IP real torna o `ip_hash` constante: "mesma rede" para o mundo inteiro, aceso sempre |
+| T-E3DBD4 | o `#porta` que nascia visível | tela que aparece por padrão não é evidência de estado nenhum |
+
+Detector que mente é pior que detector ausente, porque desliga a suspeita de quem
+olharia. **E medição que ninguém usa é pior que não medir, porque vira falso conforto** —
+formulação do Biometria, e é o mesmo padrão um passo adiante: `efrat_template.coerencia`
+acumulando sem ninguém olhar (dívida 9) não é neutro, é um "nós medimos isso" que ninguém
+pode sacar. A família toda é uma só: coisa que parece evidência e não é. Todo campo deste contrato que existe para alguém *notar algo* carrega, junto,
+a resposta a "o que faria isto virar constante?".
+
+## Convenção de nomes: a força de uma afirmação vai no nome dela
+
+Varredura de nomes pedida pelo Orquestrador, irmã da tabela de procedência de §4.2 — lá o
+risco era número construído lido como medido; aqui é **afirmação fraca lida como forte**.
+
+O achado não foi o que eu previ. Eu esperava encontrar nomes ambíguos (`verificado`,
+`confirmado`); o documento **não tem** esses campos. O que ele tem é uma convenção que eu
+mesmo criei e apliquei **pela metade**: `apelido_declarado`, `geo_declarada` e
+`origem_observada` carregam a força no nome, e campos da mesma natureza não carregam.
+Convenção aplicada pela metade é pior que convenção ausente, porque a presença do sufixo
+em alguns campos faz a ausência nos outros parecer significado.
+
+| Sufixo | Força | O que é |
+|---|---|---|
+| `_declarado` | **nenhuma** | o cliente afirmou, ninguém checou |
+| `_observado` | fato do servidor | o servidor viu acontecer |
+| `_calculado` | aritmética sobre entrada não verificada | o servidor computou; os insumos vieram do cliente |
+| `_provado` | posse verificada | confere contra hash/credencial |
+| `_autorizado_por`, `_decidido_por` | responsabilidade humana | alguém assumiu; nenhuma checagem técnica |
+
+**Onde o sufixo é obrigatório:** quando o mesmo campo poderia plausivelmente ser de outra
+força. `pedidos_da_mesma_rede_1h` não precisa — contagem só pode ser observada. `modelo_id`
+**precisa**, porque poderia ser verificado e não é. Essa é a regra que impede a convenção de
+inflar todo nome do sistema.
+
+Os dois casos que a varredura encontrou:
+
+- **`modelo_id` é declarado pelo cliente** (§4.7) e não diz isso no nome, enquanto
+  `apelido_declarado`, que é da mesma natureza, diz. Nome honesto:
+  **`modelo_id_declarado`**. Feio e honesto vale mais que elegante e ambíguo.
+- **A "conferência" do RH na fila de recadastro** (`53136b3`) é um clique de humano, e a
+  palavra sugere verificação. Na prosa e na tela: **declaração de que conferiu**, não
+  conferência. O que o sistema sabe é que alguém marcou uma caixa; o que aconteceu antes de
+  marcar, ele não sabe.
+
+E por que isso não é preciosismo: a compensação que este contrato oferece pela **ausência de
+liveness** nos caminhos `link` e `rh_upload` é exatamente a conferência humana (§4.3). Se
+"conferência" e "verificado" forem lidos com a mesma confiança, perde-se a distinção que
+sustenta essa compensação — e ela é a única que sustenta dois dos três caminhos de cadastro.
+
+**Quando aplicar, e é a parte que importa mais que a proposta.** `modelo_id` está sendo
+implementado agora (T-8ADD9C). Renomear campo em voo custa mais do que compra, e um contrato
+que muda nome de campo no meio da implementação vira o defeito que ele estava tentando
+evitar. Recomendação: o sufixo vale **para nome que ainda não está em código**; para
+`modelo_id`, a força fica registrada na descrição do campo e a renomeação espera uma passada
+única e coordenada, **depois** de os três caminhos de cadastro estarem entregues. O cliente
+está esperando funcionalidade, não vocabulário.
+
+---
+
 ## 0. Convenções
 
 Herdadas do ADR v3 sem alteração: base `/webhook`; JSON UTF-8; datas ISO 8601
@@ -174,10 +245,39 @@ Decisões dentro dessa resposta:
   que o próprio aparelho que pede aprovação escolheu. O rótulo na tela tem de
   dizer "informado pelo aparelho".
 - **`pedidos_da_mesma_rede_1h` é fato observado pelo servidor**, não declarado —
-  contagem de pedidos pendentes na última hora com o mesmo `ip_hash`. É o número
-  que torna o flood do Cenário 1 visível para um RH leigo: "12 pedidos da mesma
-  rede na última hora" é suspeita que ninguém precisa explicar. Guardamos hash
+  contagem de pedidos pendentes na última hora com o mesmo `ip_hash`. Guardamos hash
   com sal de deploy, nunca o IP.
+  **O campo fica no dado e no log; na tela aparece uma frase, não o número.** Eu havia
+  posto o contador direto na tela, e é jargão por número: um RH leigo não liga "mesma
+  rede" a "possível ataque" e não sabe o que fazer com `12`. A tela mostra, **só quando
+  é anômalo**, uma frase com a ação embutida.
+
+  **Resposta do cliente (21/08/2026): não há proxy — o n8n responde direto.** Logo o
+  n8n vê o endereço real do cliente, o `ip_hash` não é constante, e o sinal **fica com a
+  palavra "mesma rede"**, que é a versão mais específica: "Vários aparelhos pediram
+  liberação **pela mesma internet** na última hora — se você só está esperando um,
+  recuse os outros."
+
+  **Mas a validade desse sinal passa a depender da topologia, e isso é armadilha para o
+  futuro.** No dia em que alguém puser um proxy na frente do n8n, o `ip_hash` vira
+  constante — o do proxy — e o aviso passa a acender **sempre**: "mesma rede" para o
+  mundo inteiro. É exatamente o modo de falha do manifesto sobre a árvore do repositório
+  (§4.7), e por isso fica escrito com o gatilho ligado à topologia e não ao acaso:
+
+  > **Se um proxy for introduzido na frente do n8n, este campo tem de ser reavaliado
+  > ANTES de o proxy entrar.** Se o IP real não chegar ao n8n, o campo degrada para
+  > `pedidos_pendentes_1h` — contagem de pedidos pendentes recentes — e a frase perde a
+  > palavra internet: "Vários aparelhos pediram liberação na última hora — se você só
+  > está esperando um, recuse os outros."
+
+  `Por quê a versão degradada preserva o invariante:` o que sairia é a palavra "mesma
+  rede", não o sinal. O Cenário 1 é **flood** — muitos pedidos plausíveis ao mesmo tempo
+  — e isso o servidor observa com certeza, com proxy ou sem. A frase degradada é
+  verdadeira independentemente de topologia, continua dizendo a ação, e não acende
+  sempre, porque a condição volta a ser volume real em vez de um hash constante.
+  `Por quê o número não sai do dado:` observabilidade. No dia em que alguém investigar
+  um flood de verdade, "vários" não serve para nada. Frase para decidir, número para
+  investigar.
 - **`encerrados` cobre 30 dias.** Recusa e revogação precisam ser auditáveis por
   um período curto; não é histórico eterno.
 - Rota **separada** de `/efrat/rh/dados`, que ganha apenas o contador
@@ -217,10 +317,23 @@ Validações, todas `422` salvo indicado:
 | equipes de **unidades diferentes** no mesmo aparelho | `EQUIPES_DE_UNIDADES_DIFERENTES`, com `campo: "equipes_ids"` |
 | mais de 10 códigos errados do mesmo usuário de RH em 5 min | `429 LIMITE_APROVACAO` + `Retry-After` |
 
-`Por quê a mensagem única no 404:` distinguir "existe mas expirou" de "não
-existe" transforma o campo de aprovação em oráculo de códigos válidos. E o
-limite de tentativas erradas existe porque, sem ele, 29,7 bits atrás de um
-formulário logado é força bruta viável contra um lote de pendentes.
+`Por quê os quatro casos colapsam num só — e eu fui e voltei nesta linha:` a primeira
+versão colapsava tudo com a mensagem "não achei nenhum aparelho esperando com esse
+código", e o Designer apontou, com razão, que isso manda o RH procurar defeito onde não
+tem quando o caso real é código expirado. Separei então `CODIGO_EXPIRADO` — e o
+Orquestrador pegou o oráculo que eu tinha aberto: distinguir "expirou" de "nunca existiu"
+**conta se aquele código específico chegou a existir**, e isso vale mesmo com força bruta
+inviável (um insider com acesso de RH confirma que um aparelho plantado foi recebido).
+A saída não era escolher entre as duas versões: é a redação do Designer, que carrega **as
+duas possibilidades numa frase só** — "Código inválido ou expirado. Confira no aparelho e
+digite de novo." Preserva exatamente o que eu defendia, o RH não é mandado procurar
+defeito inexistente, e não distingue nada. Minha objeção era à **palavra**, não à fusão:
+diagnostiquei o problema certo e escolhi a solução errada.
+As outras duas recusas seguem distintas e sem risco: **formato inválido** não toca busca
+nenhuma (validação antes de qualquer `lookup`) e **limite de tentativas** é sobre
+frequência, não sobre a existência de um código específico. Três recusas, portanto, não
+quatro. E o limite de tentativas erradas continua existindo porque é ele que sustenta a
+frase acima.
 
 **A unidade não vem no corpo: é derivada das equipes escolhidas.** As equipes
 selecionadas têm de compartilhar a mesma `unidade` (comparada normalizada, §2.3), e
@@ -230,6 +343,19 @@ essa unidade é o rótulo que o aparelho vai exibir. Um campo a menos na requisi
 `Por quê a checagem existe:` é o que impede um tablet de sair aprovado com equipes de
 três canteiros diferentes — a limitação de raio de exposição do Cenário 3 de
 `ameacas-v3.md`, que é a razão de o escopo ser por equipe e não por unidade inteira.
+
+**Texto da tela, fechado com o Designer, e é requisito.** Cabeçalho da escolha,
+substituindo qualquer menção a "escopo" ou "equipes autorizadas": **"Quem bate ponto
+neste aparelho?"** Linha de apoio acima da lista: **"Marque as equipes que trabalham
+neste local. Só quem estiver marcado aqui é reconhecido por este aparelho — se ele
+for perdido ou roubado, é só isso que fica exposto."** E **sem botão "selecionar
+todas"**.
+`Por quê é requisito e não estética:` este é o único ponto do contrato em que a tela
+derruba a garantia sozinha, sem defeito no código e sem teste vermelho. O invariante
+não morre por jargão, morre por comportamento racional — RH que não entende por que
+escolhe marca todas, e o raio de exposição do Cenário 3 volta inteiro com a API
+perfeitamente cumprida. A linha de apoio faz o trabalho que o botão "selecionar
+todas" faria por engano: dizer por que marcar menos é o certo.
 
 Efeito da aprovação, atômico: `estado` → `ativo`, grava `equipes_ids`, a `unidade`
 derivada, `aprovado_por`, `aprovado_em`, `configuracao_versao` = 1, apaga
@@ -274,6 +400,18 @@ local para perder. A regeneração fica contida pelo limite por IP que
 O motivo digitado pelo RH **nunca volta para o aparelho**. A tela mostra frase
 fixa. `Por quê:` texto livre do RH renderizado num aparelho que ele acabou de
 declarar não confiável é vazamento gratuito de contexto interno.
+
+**E a frase é a MESMA para recusado e para revogado** — proposta do Designer, aceita:
+"Este aparelho não pode ser usado agora. Fale com o RH pra saber o que fazer."
+`Por quê uma só:` distinguir os dois estados no texto conta a quem está com o aparelho
+que houve um juízo negativo do RH, e em qual direção. Quem revogou por suspeita não quer
+anunciar a suspeita ao aparelho suspeito. É o princípio da indistinção do link público
+(§4.4), um andar acima.
+O que **difere** é a **ação disponível**, não o texto: o recusado oferece "Pedir
+liberação de novo" (que regenera identidade); o revogado não oferece nada. `Por quê isso
+não anula a decisão acima:` o botão fala do que **este aparelho** pode fazer agora, não
+do que o RH concluiu — e sem ele o aparelho recusado legítimo fica sem saída, que é o
+problema que a frase única não pode criar.
 
 ### 1.5 `POST /efrat/rh/aparelho/revogar`
 
@@ -931,7 +1069,30 @@ exatamente no momento em que o template nasce.
 
 Faixas, e as duas pontas são medidas, não arbitradas. Referências de
 `validacao-biometrica.md`: mesma pessoa em pose diferente **0,094**; pessoas
-diferentes **0,61** e **0,80**; aceite do produto **0,45**.
+diferentes **0,61** e **0,80**. E o aceite do produto, **0,45**, que **não é medição** —
+ver a procedência de cada número logo abaixo.
+
+**Procedência dos números desta seção.** Varredura pedida pelo Orquestrador depois de o QA
+pegar o `0,133` sendo citado como medido quando é aritmética de fixture sintética. Foi a
+segunda vez na fase que número construído apareceu como medido, então a distinção passa a
+ser explícita e permanente:
+
+| Número | O que é | Ressalva |
+|---|---|---|
+| `0,094` | **medido** — mesma pessoa, pose diferente | 1 pessoa, 1 par |
+| `0,169` `0,253` `0,257` `0,422` `0,440` | **medidos** — mesma pessoa com adorno contra template limpo dela mesma | **1 pessoa**, 6 tentativas por adorno |
+| `0,61` `0,80` | **medidos** — pessoas diferentes | 2 pares |
+| **`0,45`** | **escolhido**, não medido | `limiarAceite` de `js/config.js`. `validacao-biometrica.md:85` diz que esse ponto de operação **tem de ser calibrado com dados da própria população da Efrat, não copiado** — e não foi. É o número em que esta seção mais se apoia, e é o menos sustentado dela |
+| `0,58` | **escolhido** | `limiarCinza`, mesma ressalva |
+| `0,02` | **escolhido por mim**, ancorado em `0,094` | separa "pose diferente" de "mesmo arquivo"; nenhuma medição delimita esse piso |
+| `0,1329` | **construído** | fixture sintética do QA: `0,094 × √2`. Não há rosto por trás |
+| `29,7 bits` | **construído** | `log2(31⁶)`, do alfabeto de §1.1 |
+
+`A consequência que importa:` o teto da regra de coerência **é** o `limiarAceite`, então
+ele herda a incerteza dele. Isso está certo como acoplamento — no dia em que a calibração
+mover `0,45`, a regra de cadastro move junto, sozinha, porque é a mesma constante. O que
+não se deve fazer é ler `0,45` como validado só porque está no código desde o começo.
+Antiguidade de um número não é evidência.
 
 | Faixa da maior distância par a par | Decisão |
 |---|---|
@@ -956,7 +1117,8 @@ Mesmo raciocínio, sinais opostos, porque o que está em jogo em cada ponta é
 diferente. `coerencia_maxima` na resposta de `abrir` (§4.5) é, portanto,
 "estritamente abaixo deste número".
 
-- **Teto em 0,45.** É o `limiarAceite` do produto inteiro. Três fotos da mesma
+- **Teto em 0,45.** É o `limiarAceite` do produto inteiro — **escolhido, não medido**
+  (tabela de procedência acima). Três fotos da mesma
   pessoa mediram 0,094, então o teto não aperta ninguém de verdade: quem bate
   nele tem pessoa diferente ou foto ruim. **Recusa, não sinaliza**, mesmo na zona
   cinzenta 0,45–0,58 em que a *marcação diária* registra-e-sinaliza — cadastro é
@@ -983,6 +1145,99 @@ mais fácil de perder essa regra sem ninguém notar.
 **O cliente continua calculando, e continua recusando antes de enviar.** Isso é
 UX, não segurança: evita esperar upload para ouvir "não". A decisão é do servidor,
 sempre, mesmo quando o cliente já disse sim.
+
+**Não existe sinal de borda dentro da faixa aceita.** Houve um — `coerencia_no_limite`,
+que eu especifiquei primeiro em `0,30` e depois corrigi para `0,34` — e ele **caiu por
+medição**, não por opinião. O motivo completo está na tabela de §8, e a versão curta é:
+a faixa aceita está **legitimamente ocupada** por variação da mesma pessoa até quase
+encostar no limiar, então não existe corte ali que não acenda no caso comum.
+
+A tabela de adornos do `README.md` § Referências medidas — mesma pessoa, com adorno,
+contra o template limpo dela mesma — é o dado que ninguém havia usado:
+
+| Variação | Distância | Detectou |
+|---|---|---|
+| Boné | 0,169 | 5/6 |
+| Capuz | 0,253 | 4/6 |
+| **Capacete de obra** | **0,257** | 4/6 |
+| Óculos escuros | 0,422 | 1/6 |
+| Máscara | 0,440 | 1/6 |
+
+Num cliente de engenharia, **capacete é o estado normal de quem bate ponto**. `0,257`
+sozinho, mais qualquer outra variação da captura, passa de `0,30` num cadastro
+perfeitamente legítimo — e o aviso passaria a acender no caso comum, treinando o RH a
+ignorar. Isso degradaria exatamente a conferência humana que este contrato assume como
+compensação pela ausência de liveness (§4.3). O risco estava escrito nesta seção como
+risco; a medição mostra que ele **é o comportamento esperado**.
+
+**E o número não volta com outro valor.** Se algum dia alguém quiser sinal nessa faixa, a
+condição de entrada é **distribuição medida de mesma pessoa na população real** — não
+proporção, não meio de vão vazio em cinco pontos de uma pessoa só. É o que a
+instrumentação abaixo existe para produzir.
+
+**O que sobrevive, e é o mais útil: persistir o decimal.** A coluna
+`efrat_template.coerencia` (§5) guarda a maior distância par a par de todo cadastro. Ela
+não alimenta tela nenhuma; alimenta a única coisa capaz de tirar esta discussão do campo
+do juízo — depois de N cadastros do piloto existe a distribuição real da população da
+Efrat, que hoje não existe e que, sem persistir, nunca vai existir. Com `modelo_id` na
+mesma linha (§4.7), ela é agrupável por motor, que é o que torna recalibração possível em
+vez de chute.
+
+**A parte da tabela que assusta não é a distância, é a detecção.** Máscara **1/6**,
+óculos escuros **1/6**, capacete de obra **4/6**. Isso não é o sistema reconhecer a
+pessoa errada — é o detector **não achar rosto nenhum**, e ele acontece *antes* de
+qualquer comparação. Duas consequências, e elas são diferentes entre si:
+
+- **Cadastro (é regra deste contrato).** A instrução das 3 fotos exige **rosto
+  descoberto, sem óculos escuros e sem máscara** — e a razão que o texto tem de dar é a
+  correta: não é "o sistema não vai te reconhecer", é que ele não vai **achar** o rosto.
+  Texto do Designer, que explica o mecanismo em vez de só proibir: **"o sistema reconhece
+  pelo formato do rosto — se estiver coberto, ele simplesmente não encontra."** Esta regra
+  **não depende da medição do capacete**: vale nos três desfechos possíveis dela.
+  Erro de detecção falha para o lado seguro (pede nova tentativa), então aqui o custo é
+  atrito, não risco.
+- **Operação diária (não é regra deste contrato, e é a descoberta mais consequente da
+  fase).** Capacete detecta 4/6. Quem bate ponto na portaria de uma obra está de capacete
+  **todos os dias** — então uma em cada três tentativas tende a não achar rosto, e a
+  pessoa vai para nova tentativa e depois para registro manual. Isso é FTA em campo, todo
+  dia, para todo mundo, e **não se resolve no cadastro**: detecção acontece antes da
+  comparação, então template com capacete não conserta detecção com capacete.
+  **E a saída óbvia está errada.** Eu havia escrito aqui "tirar o capacete para bater
+  ponto"; o Designer apontou o que nenhum de nós tinha visto: **pedir para remover ou
+  levantar EPI na portaria de uma obra ativa contraria a norma de segurança do canteiro.**
+  Qualquer solução que dependa de a pessoa destampar o rosto nasce contrariando a regra do
+  local — e perde, porque a regra do local está certa.
+  **Hipótese técnica em aberto, e ela muda a solução inteira:** capacete detecta 4/6
+  enquanto máscara e óculos escuros ficam em 1/6, e o `README.md` registra que "adorno na
+  parte de cima da cabeça não atrapalha". Se o capacete não bloqueia opticamente os olhos,
+  o que resta é **sombra da aba sobre a região dos olhos**, dependente do ângulo da
+  cabeça — o que explica ser intermitente (4/6) em vez de constante. Se a hipótese se
+  confirmar, a solução é **instrução mais altura de instalação do aparelho**, e não
+  template com capacete nem múltiplos templates por pessoa.
+  Medição pedida ao Biometria, com o motor real, fora do CI: mesmo rosto, mesmo capacete,
+  queixo baixo contra queixo reto.
+  **Uma observação que a hipótese torna acionável:** `js/face.js:46-68` mede **yaw** e
+  reprova por `maxYaw`, mas **não mede pitch** — então a pose exatamente suspeita (queixo
+  baixo) não é detectada pelo gate de qualidade hoje. Se a medição confirmar a sombra da
+  aba, um proxy de pitch sai dos mesmos 68 landmarks que já estão na mão (deslocamento
+  vertical do nariz em relação à linha dos olhos), e é a mudança mais barata capaz de
+  transformar a instrução em algo que o app cobra em vez de pedir.
+  Texto do Designer para a instrução, que não pede nada de ninguém: **"De capacete? Olhe
+  reto pra frente, sem abaixar o queixo."**
+  **Status dessa frase: bengala até a medição existir, não solução** — e a formulação é do
+  próprio Designer. Ela depende de a pessoa lembrar, e instrução que depende de alguém
+  lembrar degrada com o tempo. Se a medição confirmar a sombra da aba, ela vira gate
+  (pitch no `avaliar()`) e para de depender de memória; se não confirmar, o problema é
+  outro e a frase sai. Em nenhum dos dois cenários ela é o desfecho, e esta seção **não
+  está fechada** — está esperando medição.
+  A frase de biometria do produto hoje (`js/rh.js`, área de cadastro) lista "boné, óculos
+  escuros ou máscara" e **não menciona capacete** — justamente o item que todo mundo usa.
+  A parte da distância, por contraste, é folgada: `0,257` contra um limiar de `0,45`
+  passa com margem, e passa nos dois sentidos (template limpo × rosto de capacete, ou o
+  inverso). O problema é achar o rosto, não medir.
+
+Registrado aqui porque nasceu deste contrato e **não estava em nenhum cartão da fase**;
+a decisão de o que fazer com a operação é do Orquestrador com o cliente, não minha.
 
 ⚠ **Muda o que existe hoje:** `js/rh.js:508` usa `coer > 0.55` + `confirm()`
 ("Salvar assim mesmo?"). Fica superado — 0,45 é recusa dura e não existe opção de
@@ -1191,9 +1446,52 @@ exceção é `consumido`, que `abrir` devolve como estado (`200`), para a pessoa
 recarregou depois de terminar ver "já recebemos" em vez de um erro — e essa
 distinção não vaza nada, porque só é alcançável por quem já tem o token.
 
-Limites: 5 envios recusados por convite → `bloqueado`. Rate limit por IP em
-`convite/abrir` → `429 LIMITE_CONVITE` + `Retry-After`. Com 256 bits, adivinhar é
-impossível; o limite é contra volume, não contra sorte.
+**Limites, e a chave deles importa mais que o número.** Achado do DevOps: a versão
+anterior desta linha cravava rate limit em `convite/abrir` **por IP**, e IP é a chave
+errada para esta população.
+
+`Por quê IP não serve aqui:` o colaborador abre o link em dados móveis, a operadora
+faz NAT em escala, e uma turma no mesmo canteiro compartilha um punhado de endereços.
+Com limite apertado por IP, **eles se trancam mutuamente** — o colaborador lê "tente
+mais tarde", não entende, e liga para o RH. Ou seja: o limite produziria exatamente o
+volume de ligação que esta fase existe para desafogar. E o próprio contrato entrega o
+argumento de que ele não precisa ser apertado: com 256 bits, adivinhar é impossível, o
+limite é contra **volume**, não contra sorte — logo não precisa morar na rota nem ser
+severo.
+
+**Sem proxy, os dois limites vivem na rota** — e é isto que a resposta do cliente
+mudou. O DevOps já havia avisado que "nenhum proxy" muda a recomendação, porque a camada
+da rota passa a carregar **também** o custo de execução da instância. Duas chaves, dois
+códigos, e **não se unificam num contador só**:
+
+| Limite | Chave | Limiar | Código |
+|---|---|---|---|
+| Regra de produto | **o convite** (o token já vem em `Authorization`) | 5 envios recusados → `bloqueado`; aberturas não limitadas | `CONVITE_BLOQUEADO` |
+| Guarda de volume e custo | **IP** | generoso, ordem de **centenas por minuto** | `LIMITE_VOLUME` + `Retry-After` |
+
+`Por quê o limite por IP volta, depois de eu o ter tirado:` o problema do NAT era o
+limite **apertado** por IP, que tranca uma turma no mesmo canteiro. Limiar generoso não
+alcança usuário legítimo — e, sem proxy, passa a ser a única coisa protegendo a
+instância de queimar execução. O que eu tirei foi o aperto, não o teto.
+
+`Por quê chaves e códigos distintos:` a propriedade que precisa sobreviver é cada `429`
+ter causa única e legível. Com um contador só, o suporte não sabe qual regra disparou e
+o número na tela não corresponde a nada que alguém escreveu. Com dois: veio do convite,
+é aquele link; veio do volume, é a instância se protegendo.
+
+`LIMITE_CONVITE` sai do catálogo da rota: a rota não limita abertura.
+
+**Alternativa condicionada, pré-aprovada — se não houver proxy capaz de limitar.** A
+guarda de volume acima pressupõe infraestrutura na frente do n8n. Gatilho explícito:
+*se a resposta do cliente for que não existe proxy, ou que o proxy não faz rate
+limit*, a guarda de volume passa para a rota, chaveada no **`pessoa_id` do convite** —
+nunca em IP — com limiar generoso.
+`Por quê `pessoa_id` e não IP:` é a chave que não sofre NAT de operadora, então uma
+turma no mesmo canteiro não se tranca mutuamente; e mantém a propriedade que motivou
+as chaves distintas, porque cada `429` continua tendo causa única e legível (aquela
+pessoa, aquele convite). Está escrito aqui, e não guardado para quando a resposta
+chegar, porque **alternativa que existe só na cabeça de alguém é alternativa que se
+perde.**
 
 **Uso único com Data Table, honestamente.** O consumo é um compare-and-set
 `aberto → consumido` que, sem índice único nem transação, é leitura-e-escrita e
@@ -1501,43 +1799,61 @@ São eixos independentes: a mesma pessoa pode ter `versao: 3` com `modelo_id` no
 duas pessoas diferentes têm `versao: 1` com o mesmo `modelo_id`. Nomes distintos de
 propósito.
 
-**Como o `modelo_id` é formado.** Um `models/manifesto.json` servido junto dos pesos,
-gerado pelo mesmo passo que copia (§4.6) e, na árvore do app, no release:
+**Como o `modelo_id` é formado — hash no navegador, não manifesto de build.** Esta
+parte mudou depois de o DevOps e o Biometria apontarem que um manifesto gerado no build
+**não consegue** descrever os bytes servidos: existem pelo menos quatro camadas capazes
+de divergir um do outro (cache do service worker servindo primeiro, `Cache-Control:
+immutable` sem hash na URL, cópia de build da origem pública desatualizada, e cache de
+borda do CDN). Manifesto de build é, portanto, a própria armadilha que §4.7 existe para
+fechar — declararia o id certo sobre bytes errados.
 
-```json
-{ "modelo_id": "m-9f4c1a2b",
-  "gerado_em": "2026-08-21T12:00:00Z",
-  "motor": "face-api.js · tiny_face_detector + face_landmark_68 + face_recognition",
-  "dimensoes": 128,
-  "arquivos": [
-    { "nome": "face_recognition_model.bin", "sha256": "…", "bytes": 6444032 },
-    { "nome": "face_landmark_68_model.bin", "sha256": "…", "bytes": 356480 },
-    { "nome": "tiny_face_detector_model.bin", "sha256": "…", "bytes": 193321 }
-  ] }
-```
+> `modelo_id` = SHA-256 sobre os bytes dos **7 arquivos do pipeline**, concatenados em
+> ordem fixa: os 3 `*_model.bin`, os 3 `*-weights_manifest.json` e
+> `vendor/face-api.js`. Calculado **no navegador**, na carga da página.
 
-`modelo_id` é hash curto sobre os três `sha256` concatenados mais a versão do
-`vendor/face-api.js`. Escolhi hash de conteúdo em vez de versão carimbada à mão
-porque é o que responde à pergunta que interessa: dois deploys com bytes idênticos
-**têm** de dar o mesmo id, e um deploy com peso velho **tem** de dar id diferente
-sem depender de alguém lembrar de incrementar um número.
+Os 7, e não só os pesos, porque **versão de biblioteca diferente sobre os mesmos pesos
+pode produzir vetor diferente** — o motor é parte do pipeline tanto quanto o peso.
 
-**O manifesto é calculado sobre os bytes EFETIVAMENTE PUBLICADOS naquela origem,
-nunca sobre a árvore de origem.** É o que impede o detector de cegar.
+**Como o hash alcança os bytes que o motor usou.** `js/face.js:109-111` usa
+`loadFromUri()`, então o próprio face-api busca os arquivos e o `ArrayBuffer` não fica na
+mão de ninguém. Duas saídas foram consideradas, e a escolhida é a primeira:
 
-`Por quê, e é o modo de falha mais perigoso desta seção:` se o manifesto for gerado
-a partir do repositório enquanto os pesos vêm de camada de cache, de build anterior
-ou de cópia que não rodou, ele declara o **id certo sobre bytes errados**. Nesse
-arranjo o `modelo_id` **concorda** com a referência, nenhuma divergência é marcada, e
-o detector fica cego exatamente no único modo de falha que ele existe para pegar. É
-pior do que não ter detector, porque passa a **atestar sanidade**: o painel diria
-"tudo conforme" enquanto os templates saem incompatíveis. Detector que mente desliga
-a suspeita de quem olharia.
+- **Escolhida — `fetch` próprio dos mesmos 7 arquivos, logo após `loadFromUri`, só para
+  hashear.** O `fetch` **não** pode ignorar cache (nada de `no-store`): tem de acertar o
+  mesmo cache que o face-api acabou de popular, senão hasheia um deploy mais novo do que
+  o que o motor carregou — o inverso do que se quer. Janela teórica: o cache ser
+  despejado entre o carregamento do face-api e o hash, na mesma carga de página.
+- **Recusada — trocar o loader, buscando os buffers e entregando-os ao face-api.**
+  Garantia sem janela nenhuma, e custo alto: exige a API de baixo nível do face-api/tfjs
+  e passa a acoplar o nosso código ao caminho interno de carga da biblioteca.
 
-Logo: o passo que gera o manifesto lê os arquivos **como eles saem servidos** —
-depois da cópia, no artefato publicado — e o critério de aceite tem de **provar**
-isso, baixando os pesos da origem pública e recalculando o hash contra o manifesto
-dela (§7, item 16-B). Roda sem DNS, no segundo listener que §4.6 já desenhou.
+`Por quê a janela de milissegundos é aceitável, e por quê não vale trocar o loader:`
+duas razões, e a segunda é a decisiva.
+Primeira: o `modelo_id` é **procedência declarada pelo cliente** (o parágrafo abaixo), e
+o cliente poderia mentir sobre o hash inteiro. Fechar uma janela de milissegundos dentro
+de um mecanismo que já não é prova é comprar precisão na dimensão errada — a incerteza
+dominante é "quem afirma", não "os bytes mudaram entre dois `fetch` da mesma carga".
+Segunda: trocar o loader coloca código nosso no caminho de carga do motor. Se ele
+quebrar num bump de biblioteca, o que quebra é **o reconhecimento**, não o carimbo. É
+péssima troca arriscar a função primária para endurecer um sinal secundário e
+consultivo.
+E o modo de falha da escolhida é benigno no sentido exato que importa: ela carimba uma
+versão **real**, que estava sendo servida um instante antes — nunca lixo, nunca um id
+inventado. A divergência que ela poderia perder é entre dois deploys adjacentes durante
+os segundos de um rollout; a divergência que o carimbo existe para pegar — origem pública
+um deploy atrás por horas ou dias — é pega igual pelas duas.
+
+**Se algum dos 7 `fetch` falhar, não se fabrica id.** O cliente envia sem `modelo_id`, e
+o servidor grava marcando `modelo_desconhecido: true` (comportamento que já está na
+tabela abaixo). Melhor um "não sei" registrado do que um id que ninguém pode explicar.
+
+**De onde vem a referência.** Não de infraestrutura: por **observação**. `efrat_modelo`
+registra cada `modelo_id` visto, com primeira e última aparição e de qual caminho veio; a
+**referência** é o `modelo_id` mais recente observado no caminho do **app** — que é o
+motor que de fato reconhece. Para isso o app reporta seu `modelo_id` em `/efrat/carga`,
+uma vez por sincronismo, e é o dado mais barato desta seção. Divergência é, então,
+submissão de `link` cujo `modelo_id` difere da referência corrente. Tudo observado, nada
+declarado por build.
 
 **A armadilha, e é a mesma de §4.2.** O cliente lê o manifesto e manda `modelo_id`
 no corpo — ou seja, **é o cliente declarando algo sobre si mesmo**, exatamente o
@@ -1594,6 +1910,29 @@ divergência de modelo mostra os dois blocos, um embaixo do outro. Cada um cobre
 risco diferente — quem capturou versus com que motor — e texto fundido esconderia
 um dos dois.
 
+**A fila não recebe o decimal, e não recebe nada no lugar dele.** Os itens de
+`recadastros`, em `/efrat/rh/dados`, **não** carregam `coerencia` — nem o decimal, nem
+booleano derivado dele (§4.2: o sinal de borda caiu). O número continua gravado e continua
+na resposta das rotas de escrita, para log, teste e recalibração; só não trafega para onde
+a tela poderia renderizá-lo. Os avisos que o card mostra são dois: procedência e modelo
+divergente.
+
+**E a remoção acontece na serialização da leitura, não na gravação.** O registro guarda
+`coerencia`; quem monta a resposta de `/efrat/rh/dados` omite o campo. Achado do Biometria
+ao implementar: no servidor de teste, `estado.recadastros` é devolvido **verbatim** por
+`/rh/dados`, então hoje o decimal viaja. As duas saídas possíveis não são equivalentes:
+
+- deixar de **gravar** o campo satisfaria a regra e destruiria a instrumentação de §4.2,
+  que é a única coisa capaz de produzir a distribuição real da população;
+- **omitir na serialização** preserva as duas coisas, e é o que uma tabela de verdade com
+  uma *view* faria: a coluna existe, a leitura do RH não a expõe.
+
+`Por quê isso não é detalhe de implementação:` se o campo deixar de ser gravado, o teste
+do critério 14 passa **por vacuidade** — ele semeia um recadastro com `coerencia`
+preenchida justamente para haver algo a ser removido. Sem nada para remover, o verde não
+afirma nada. É o mesmo defeito de "passar por lista vazia" que esta rodada passou caçando,
+uma camada abaixo.
+
 `Por quê isso é melhor do que a guarda que eu tinha proposto:` na dívida anterior eu
 sugeri uma guarda comparando periodicamente a versão publicada nas duas origens. Ela
 resolve o futuro e não resolve o passado — e, pior, só dispara quando alguém roda a
@@ -1604,6 +1943,42 @@ Exigência de C2 aplicada: `modelo_id` é obrigatório nas rotas novas
 (`/efrat/rh/face/cadastrar`, `/efrat/face/convite/enviar`) e tolerado ausente na
 rota antiga `/efrat/cadastro`, para não quebrar o cadastro pelo gestor em campo antes
 de o cliente ser atualizado.
+
+---
+
+### 4.8 A superfície anônima, e o que ela exige por não haver proxy
+
+O cliente confirmou que **não há proxy: o n8n responde direto na internet**. Isso não
+muda nenhuma decisão deste contrato, e acrescenta três exigências — porque a fase está
+acrescentando a primeira superfície pública apontada para o n8n, e o teto de volume
+passou a viver **dentro** da coisa que ele protege (§4.4).
+
+As rotas alcançáveis **sem nenhuma credencial prévia** são exatamente três, e é uma lista
+fechada:
+
+1. `POST /efrat/dispositivo/registrar` — anônima por definição (primeiro contato);
+2. `POST /efrat/face/convite/abrir` — qualquer um pode chamar; o token é o que separa;
+3. `POST /efrat/face/convite/enviar` — idem.
+
+Exigências, todas por não existir camada anterior:
+
+- **Ordem de execução é contrato, não detalhe.** Nas três, a checagem de volume (§4.4) e
+  a validação de formato do corpo vêm **antes** de qualquer leitura de Data Table. Um
+  limitador que consulta o banco para descobrir que deve recusar já pagou o custo que
+  estava tentando evitar.
+- **Teto de corpo.** As três recusam corpo acima do tamanho esperado, com `413`:
+  `registrar` é kilobytes (`apelido` ≤ 60 caracteres, `ua` ≤ 300, `geo` numérico);
+  `enviar` é o único grande, e tem teto explícito — `miniatura` ≤ 64 KB (folgado para um
+  JPEG 128×128) e exatamente 3 vetores de 128 números, o que já limita o resto. Sem WAF
+  na frente, um corpo de dezenas de megabytes é execução queimada só em desserializar.
+- **Nada de eco.** Nenhuma das três devolve no corpo de erro qualquer parte do que
+  recebeu. Eco é amplificação barata.
+
+**O que isso não resolve, e é informação para o cliente, não decisão nossa:** sem camada
+independente, o limitador compartilha destino com o que protege — instância sobrecarregada
+é limitador sobrecarregado. A expectativa honesta é que a guarda de volume contenha abuso
+acidental e uso anômalo comum, **não** um flood determinado. Registrado aqui para que a
+decisão de publicar seja tomada sabendo disso.
 
 ---
 
@@ -1630,15 +2005,19 @@ texto normalizado.
 `recebido_em` precisa existir separado (§1.6).
 
 `efrat_template` (+): `origem` (`rh_camera` | `rh_upload` | `link` | `gestor`),
-`coerencia` (**calculada pelo servidor**, §4.2), `convite_id`, `descartado_em`,
+`coerencia` (**calculada pelo servidor**, §4.2 — persistida para instrumentação, nunca
+enviada ao payload que o RH lê), `convite_id`, `descartado_em`,
 `modelo_id`, `modelo_divergente`, `modelo_desconhecido` (§4.7). `estado` ganha o
 valor `descartado`. `modelo_id` **não** substitui nem se confunde com `versao`, que
 segue sendo contador de template por pessoa.
 
-`efrat_modelo` (nova): `modelo_id`, `gerado_em`, `motor`, `dimensoes`, `arquivos`
-(JSON com nome/sha256/bytes), `origem_servida` (`app` | `publica`), `referencia`
-(booleano — qual modelo o caminho de reconhecimento usa). Alimentada pelo
-`models/manifesto.json` de cada deploy (§4.7).
+`efrat_modelo` (nova): `modelo_id`, `primeira_aparicao_em`, `ultima_aparicao_em`,
+`origem_observada` (`app` | `publica`), `referencia` (booleano — qual modelo o caminho de
+reconhecimento usa). **Alimentada por observação**: cada `modelo_id` que chega numa
+requisição é registrado, e a referência é o mais recente visto no caminho do `app`
+(§4.7). **Não existe `models/manifesto.json` como fonte** — era o mecanismo antigo, e ele
+era a própria armadilha que §4.7 fecha (achado do Biometria ao ler as duas seções lado a
+lado). Não há coluna alimentada por build nesta tabela.
 
 `efrat_face_convite` (nova): `convite_id`, `pessoa_id`, `token_hash`, `estado`
 (`emitido` | `aberto` | `consumido` | `expirado` | `revogado` | `substituido` |
@@ -1664,7 +2043,7 @@ como está (§2.4).
 | Código | HTTP | Onde |
 |---|---|---|
 | `CODIGO_COM_LETRA_INVALIDA` | 422 | rh/aparelho/aprovar |
-| `CODIGO_NAO_ENCONTRADO` | 404 | rh/aparelho/aprovar |
+| `CODIGO_INVALIDO` | 404 | rh/aparelho/aprovar — inexistente, expirado, recusado ou já ativo |
 | `CODIGO_AMBIGUO` | 409 | rh/aparelho/aprovar |
 | `ESCOPO_VAZIO` | 422 | aprovar, escopo |
 | `EQUIPE_INVALIDA` | 422 | aprovar, escopo |
@@ -1691,8 +2070,10 @@ como está (§2.4).
 | `PESSOA_INATIVA` | 422 | rh/face/convite |
 | `CONVITE_INVALIDO` | 404 | face/convite/abrir, face/convite/enviar |
 | `CONVITE_CONSUMIDO` | 409 | face/convite/enviar |
-| `LIMITE_CONVITE` | 429 | face/convite/abrir |
 | `MODELO_AUSENTE` | 400 | rh/face/cadastrar, face/convite/enviar |
+| `CONVITE_BLOQUEADO` | 429 | face/convite/enviar (5 recusas, §4.4) |
+| `LIMITE_VOLUME` | 429 | as três rotas anônimas de §4.8 |
+| `CORPO_GRANDE` | 413 | as três rotas anônimas de §4.8 |
 | `IDEMPOTENCIA_AUSENTE` | 400 | toda rota nova de escrita |
 
 `motivo_codigo` de item de lote (§1.6), que **não** é erro HTTP:
@@ -1780,23 +2161,14 @@ Contrato (servidor falso + workflows):
       "harmoniza" os dois depois (§4.2);
     - 2 ou 4 vetores, ou vetor com 127 números → `422 VETORES_INVALIDOS`;
     - o `coerencia` gravado e devolvido é o do servidor;
-    - `EFRAT_CFG.limiarAceite` e a constante do workflow valem **o mesmo número**.
-15. Inativar apaga `vetores` e `miniatura` dos templates, revoga convite vivo, e
-    mantém as marcações — contadas antes e depois.
-16. **Convite:**
-    - **abrir não consome**: abrir 3 vezes e depois enviar ainda grava;
-    - **envio recusado não consome**: `422` de coerência, depois envio bom → grava;
-    - o consumo acontece no envio bem-sucedido, e o segundo envio (chave nova) →
-      `409 CONVITE_CONSUMIDO`;
-    - mesmo envio com a mesma `Idempotency-Key` → repete a resposta, não consome
-      de novo;
-    - expiração só pela emissão (60 min); **não existe** janela contada da
-      abertura;
-    - revogação, reemissão marcando o anterior `substituido`, e um convite vivo
-      por pessoa;
-    - inválido/expirado/revogado/substituído/bloqueado produzem a **mesma**
-      mensagem de `404`; `consumido` responde `200 { estado: "consumido" }` sem
-      `primeiro_nome`.
+    - **não existe sinal de borda:** os itens de `recadastros` em `/rh/dados` não
+      carregam `coerencia` **nem** booleano derivado dela — asserção de que a chave não
+      existe naquele payload, semeando antes um recadastro **com** `coerencia` preenchida,
+      para o teste não passar por lista vazia;
+    - o decimal **continua persistido** em `efrat_template.coerencia`: o mesmo teste
+      afirma que ele está no registro e ausente do payload, porque persistir e exibir são
+      coisas diferentes (§4.2). A remoção é na **serialização** da leitura, nunca na
+      gravação — se o campo deixar de ser gravado, este teste passa por vacuidade;
 16-A. **Procedência do modelo (§4.7), que subiu de dívida a critério:**
     - as duas rotas novas sem `modelo_id` → `400 MODELO_AUSENTE`;
     - `modelo_id` igual ao de referência → grava limpo;
@@ -1813,13 +2185,16 @@ Contrato (servidor falso + workflows):
       campos separados para ninguém colapsar um no outro;
     - dois deploys com os mesmos bytes de `models/` produzem o **mesmo**
       `modelo_id`; um deploy com um `.bin` trocado produz outro.
-16-B. **O manifesto descreve o que está publicado, e o teste prova isso.** Baixa os
-    três `.bin` **da origem pública** (segundo listener, §4.6), recalcula o `sha256`
-    de cada um e compara com o `models/manifesto.json` **daquela origem**; qualquer
-    divergência reprova. O caso que o teste tem de pegar é o pior: manifesto novo
-    servido junto de peso velho — id certo sobre bytes errados, que não marca
-    divergência nenhuma e faz o detector atestar sanidade em vez de detectar (§4.7).
-    Teste que só confira "existe manifesto" não serve.
+16-B. **As duas origens servem o mesmo pipeline, e o teste compara bytes — não
+    manifesto.** Baixa os 7 arquivos do pipeline (3 `.bin`, 3 `*-weights_manifest.json`,
+    `vendor/face-api.js`) **da origem pública** e **da origem do app** (segundo listener,
+    §4.6), calcula o digest em ordem fixa nas duas e afirma que são **iguais**. Depois
+    afirma que o `modelo_id` que o cliente envia é exatamente esse digest.
+    `Por quê sem manifesto:` o mecanismo antigo comparava contra um `manifesto.json` de
+    build, e um manifesto de build não descreve bytes servidos (§4.7) — o teste herdaria
+    a mesma cegueira que a seção existe para fechar. Comparar as duas origens byte a byte
+    não tem intermediário para mentir, e é exatamente a divergência que o carimbo existe
+    para pegar: origem pública um deploy atrás.
 17. **Template de link é `pendente` mesmo sem template anterior.** Pessoa sem
     biometria nenhuma + envio por link → `template_estado: "pendente"`, e
     `tem_biometria` da pessoa continua falso até a decisão do RH.
@@ -1859,7 +2234,9 @@ Critérios de UI que são contrato, não estética:
 28. O campo de aprovação é **digitação livre** — sem `<select>`, sem `datalist`,
     sem autocomplete a partir da lista de pendentes.
 29. A lista de pendentes rotula `apelido`/`ua`/`geo` como informados pelo
-    aparelho, e mostra `pedidos_da_mesma_rede_1h`.
+    aparelho, e sinaliza concentração de pedidos por **frase com a ação**, não pelo
+    contador cru — o `pedidos_da_mesma_rede_1h` continua na resposta e no log, para
+    investigação (§1.2).
 30. A confirmação de revogar diz que o aparelho ainda entrega e que cada marcação
     cai na mesa do RH com as duas horas.
 31. A confirmação de inativar diz que reativar exige cadastrar o rosto de novo.
@@ -1922,6 +2299,11 @@ Critérios de UI que são contrato, não estética:
 | Devolver o motivo da recusa para o aparelho | Texto interno do RH renderizado num aparelho que ele acabou de declarar não confiável (§1.4) |
 | Telefone do RH na resposta de `/dispositivo/estado` | Dado da organização entregue a quem ainda não foi liberado; `config.js` resolve melhor (§1.8) |
 | `Access-Control-Allow-Origin: *` nas rotas de face | Barato demais para não fazer a lista, e a lista impede sondagem conduzida pelo navegador de terceiro (§4.6) |
+| **Distinguir `CODIGO_EXPIRADO` de `CODIGO_NAO_ENCONTRADO`** (era a minha segunda versão, achado do Orquestrador) | Conta se aquele código específico chegou a existir — oráculo mesmo com força bruta inviável, porque um insider com acesso de RH confirma que um aparelho plantado foi recebido. A frase única do Designer resolve o problema que me fez separar, sem separar (§1.3) |
+| **Rate limit de `convite/abrir` por IP** (era o que eu havia escrito, achado do DevOps) | NAT de operadora faz uma turma no mesmo canteiro se trancar mutuamente; o colaborador lê "tente mais tarde" e liga para o RH — o limite produziria o volume de ligação que a fase existe para desafogar. E contradizia o meu próprio parágrafo seguinte: se com 256 bits o limite é contra volume, não precisa ser severo nem morar na rota (§4.4) |
+| **Entidade `efrat_local` com id próprio** (era o que eu havia escrito, pergunta do Full-Stack) | Terceiro conceito para um RH leigo e um passo a mais em duas telas, para agrupar por id o que já agrupa por texto. E o único poder exclusivo da entidade — aparelho seguir o lugar, equipe nova entrando no escopo sozinha — é o Cenário 3 com a API cumprida (§2.4) |
+| **Sinal de borda dentro da faixa aceita** (`coerencia_no_limite`, especificado por mim em `0,30`, corrigido para `0,34`, e **derrubado** por decisão do Orquestrador sobre medição que nenhum de nós havia usado) | A tabela de adornos do `README.md` mostra que a faixa aceita está **legitimamente ocupada** por variação da mesma pessoa até quase encostar em `0,45`: capacete de obra sozinho custa `0,257`, e num cliente de engenharia capacete é o estado normal de quem bate ponto. `0,257` mais qualquer outra variação passa de `0,30` num cadastro legítimo, então o aviso acenderia no caso comum e treinaria o RH a ignorar — degradando a conferência humana que compensa a ausência de liveness. **Duas coisas são verdade ao mesmo tempo, e quem ler daqui a seis meses precisa das duas:** a conclusão original do Orquestrador ("o número sai e nada entra no lugar") estava certa, por um motivo que ele não tinha na época; e o meu diagnóstico ("você raciocinou sobre a decisão, não sobre a tarefa") também estava certo — existe uma necessidade de tarefa ali. O que a medição mostrou é que **nenhum mecanismo dentro da faixa atende essa necessidade**, não que a necessidade não existisse. Por isso o corte não volta com outro número: condição de entrada para qualquer sinal nessa faixa é distribuição medida de mesma pessoa na população real (§4.2) |
+| **Mostrar o número de coerência no card do RH** (decisão anterior do Orquestrador, caducada) | Fazia sentido com limiar `0,55` e `confirm()`, quando o número decidia se o RH seguia. Com o servidor recusando em `0,45`, o número passou a variar numa faixa em que a resposta é sempre a mesma — decoração numérica de nome técnico (§4.3). Continua gravado para auditoria e recalibração |
 
 ---
 
@@ -1965,7 +2347,13 @@ Critérios de UI que são contrato, não estética:
    contra `adr-acesso-v3.md` § Persistência e locais, pelo custo de tela num usuário
    leigo. Vira `efrat_local` quando N crescer ou quando o geofence por local importar;
    a normalização de §2.3 é o que mantém essa migração mecânica.
-9. **A exceção de telefone compartilhado é decisão humana sem verificação.** O RH
+9. **A faixa aceita de coerência não tem sinal interno, e não deveria ter sem dados.**
+   `efrat_template.coerencia` é persistida por cadastro exatamente para produzir a
+   distribuição da população real da Efrat, que hoje não existe. Enquanto ela não
+   existir, qualquer corte dentro da faixa é juízo — e §4.2 registra a condição de
+   entrada. A dívida é o piloto terminar sem ninguém olhar esses números, que é o
+   desfecho mais provável se não houver quem pergunte.
+10. **A exceção de telefone compartilhado é decisão humana sem verificação.** O RH
    autoriza, fica registrado quem autorizou, e ninguém confere se o
    compartilhamento é real. É o desenho certo (recusar sem saída produz número
    falso, §3.1), e é dívida: a única defesa é a autorização estar registrada e
