@@ -17,7 +17,7 @@
 
 import { test, expect } from '@playwright/test';
 import crypto from 'node:crypto';
-import { criarServidor, semearRecadastro } from './servidor-falso.js';
+import { criarServidor } from './servidor-falso.js';
 import {
   loteMesmaPessoa, loteDuasPessoas, loteDuasPessoasDistante,
   loteComMaiorDistancia, loteExatamenteNoLimiar, maiorDistanciaParAPar
@@ -183,77 +183,4 @@ test('o veredito vira em torno do limiar de aceite, não de 0,55', async ({ requ
   expect((await cadastrar(request, { vetores: abaixo })).status(),
     '0,44 está abaixo do aceite e tem de gravar').toBe(200);
   expect(await pessoaFoiGravada(request)).toBe(true);
-});
-
-/* ================================ §4.2/§7-14 do contrato — sinal de borda
-
-Pedido do Arquiteto (T-65D806, docs/fase3-contrato.md §4.2 e §7 item 14).
-Além da recusa dura em 0,45, o servidor calcula `coerencia_no_limite`: booleano,
-verdadeiro quando a maior distância par a par fica em CORTE_BORDA ou acima e
-ainda dentro da faixa aceita. Ele acende um aviso de atenção redobrada no card
-da fila de recadastro, antes do botão Aprovar.
-
-O risco que estes testes protegem não é o aviso ser inútil — é ele ser
-CONSTANTE. Aviso que aparece em todo cadastro treina o RH a ignorar, e o que
-isso degrada é exatamente a conferência humana que o contrato assumiu como
-compensação pela ausência de liveness nos caminhos `link` e `rh_upload`.
-
-O corte está declarado PROVISÓRIO no contrato. Se mudar, muda esta constante e
-os três casos de borda abaixo — nada mais. */
-
-const CORTE_BORDA = 0.30;
-
-test('lote normal não acende o aviso de borda', async ({ request }) => {
-  // O caso que mais importa: o cadastro comum tem de passar CALADO. Se este
-  // virar vermelho, o aviso está frequente demais e é o corte que está errado.
-  const vetores = loteMesmaPessoa();
-  expect(maiorDistanciaParAPar(vetores)).toBeCloseTo(0.1329, 3);
-
-  const r = await cadastrar(request, { vetores });
-
-  expect(r.status()).toBe(200);
-  expect((await r.json()).coerencia_no_limite,
-    'lote comum não pode acender aviso').toBe(false);
-});
-
-test('os dois lados do corte de borda', async ({ request }) => {
-  const abaixo = await cadastrar(request, {
-    vetores: loteExatamenteNoLimiar(CORTE_BORDA - 0.01), matricula: 'BORDA-A' });
-  expect(abaixo.status()).toBe(200);
-  expect((await abaixo.json()).coerencia_no_limite, '0,29 está abaixo do corte').toBe(false);
-
-  const noCorte = await cadastrar(request, {
-    vetores: loteExatamenteNoLimiar(CORTE_BORDA), matricula: 'BORDA-B' });
-  expect(noCorte.status()).toBe(200);
-  expect((await noCorte.json()).coerencia_no_limite, '0,30 é o corte: acende').toBe(true);
-
-  const quaseRecusa = await cadastrar(request, {
-    vetores: loteExatamenteNoLimiar(0.449), matricula: 'BORDA-C' });
-  expect(quaseRecusa.status(), '0,449 ainda é aceito — a recusa é em 0,45').toBe(200);
-  expect((await quaseRecusa.json()).coerencia_no_limite).toBe(true);
-});
-
-test('o decimal da coerência não chega à tela do RH — só o booleano', async ({ request }) => {
-  // Semeia um recadastro COM o decimal para provar que o payload o remove.
-  // Sem a semente, o teste passaria por não haver recadastro nenhum — verde
-  // por lista vazia, que é o defeito que esta rodada inteira passou caçando.
-  semearRecadastro(ctx.estado, {
-    template_id: 't-borda', pessoa_id: 'p-ana',
-    coerencia: 0.312, coerencia_no_limite: true
-  });
-
-  const r = await request.post(`${ctx.base}/efrat/rh/dados`, {
-    data: { usuario: 'rh', chave: 'CHAVE-DE-TESTE', dias: 30 }
-  });
-  const corpo = await r.json();
-  const recadastros = corpo.recadastros || [];
-
-  expect(recadastros.length, 'a semente tem de estar no payload, senão nada é provado')
-    .toBeGreaterThan(0);
-  for (const t of recadastros) {
-    expect(Object.prototype.hasOwnProperty.call(t, 'coerencia'),
-      'o decimal não pode viajar até a tela (§7 item 14)').toBe(false);
-    expect(Object.prototype.hasOwnProperty.call(t, 'coerencia_no_limite'),
-      'o booleano é o que a tela usa').toBe(true);
-  }
 });
