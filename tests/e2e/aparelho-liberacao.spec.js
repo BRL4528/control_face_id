@@ -224,11 +224,15 @@ test('T-87615C · pendente além de 24h não é mais aprovável, nem com o códi
 
 Guarda contra uma classe de defeito, não contra um bug pontual.
 
-MEDIDO no navegador, com o aparelho PENDENTE (nunca aprovado):
+MEDIDO no navegador, com o aparelho PENDENTE (nunca aprovado), quando este
+guarda foi escrito:
 
     ultimo_estado  : "pendente"
     #porta          : escondido
     #btnPonto.disabled : false        <-- habilitado mesmo trancado
+
+CORRIGIDO DEPOIS: `index.html:29` passou a nascer `disabled`, e hoje o botão
+também discrimina. As duas assertivas abaixo travam as duas propriedades.
 
 `expect(locator).toBeEnabled()` NÃO olha visibilidade — só o atributo. Então
 `await expect(page.locator('#btnPonto')).toBeEnabled()` PASSA com o aparelho
@@ -257,10 +261,12 @@ test('sinal de aceite: #porta escondido enquanto pendente, e por isso btnPonto h
   // O aparelho nunca foi aprovado. O sinal CERTO tem de ser falso agora.
   await expect(page.locator('#porta'), 'porta não pode abrir com aparelho pendente').toBeHidden();
 
-  // E o sinal ERRADO, o que estava em uso, é verdadeiro agora — é essa
-  // diferença que faz dele um sinal que não discrimina.
-  const habilitadoEnquantoPendente = await page.evaluate(
-    () => document.getElementById('btnPonto').disabled === false);
-  expect(habilitadoEnquantoPendente,
-    'se isto virar false, btnPonto passou a discriminar e este guarda pode ser revisto').toBe(true);
+  // E agora o botão também discrimina: `index.html:29` passou a nascer
+  // `disabled` e só `irParaPorta()` habilita, o que só acontece com o aparelho
+  // ativo. Este guarda nasceu documentando o defeito (o botão vinha habilitado
+  // embaixo da tela escondida) e a própria mensagem de falha dele mandava
+  // revisá-lo se isso mudasse. Mudou. Então ele vira o contrário: trava a
+  // correção para ela não regredir.
+  await expect(page.locator('#btnPonto'),
+    'botão de ponto não pode estar habilitado com o aparelho pendente').toBeDisabled();
 });
