@@ -292,7 +292,18 @@ function abrirLoginRh() {
   limparCodigoAguardando();
   mostrar('loginRh');
   $('rhSenha').value = '';
-  setTimeout(() => $('rhUsuario').focus(), 100);
+  // SEM setTimeout aqui de propósito — já existiu um, e ele é o tipo de
+  // defeito que não dá erro, dá mensagem errada. mostrar('loginRh') acima já
+  // deixou o campo visível, então o focus() não precisa esperar nada; um
+  // atraso arbitrário só abre uma janela onde o refoco pode disparar NO MEIO
+  // de alguém preenchendo os campos (Playwright, um RH digitando rápido, ou
+  // um gerenciador de senha preenchendo os dois quase juntos) e roubar o
+  // foco de volta para #rhUsuario a meio da digitação — o texto que sobra
+  // cai no campo errado, e entrarRh() lê os dois campos, acha um vazio, e
+  // mostra "Informe usuário e senha" com a tela aparentando preenchida.
+  // Achado assim: #rhUsuario acabou com "rherrada" e #rhSenha vazio no DOM
+  // capturado no instante da falha.
+  $('rhUsuario').focus();
 }
 
 async function entrarRh() {

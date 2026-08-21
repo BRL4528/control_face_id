@@ -105,6 +105,20 @@ export function headersPara(pathname) {
   return saida;
 }
 
+// T-D30529/§4.6: cabeçalhos da origem pública vêm de publico/vercel.json
+// (formato Vercel, não `_headers`) — fonte única, mesmo raciocínio de
+// `headersPara` acima. `source` já é um padrão de regex utilizável direto
+// (`/(.*)`, `/vendor/(.*)`), então não precisa do mesmo escape de `_headers`.
+export function headersPublicoPara(pathname) {
+  const vercelJson = JSON.parse(fs.readFileSync(path.join(RAIZ, 'publico', 'vercel.json'), 'utf8'));
+  const saida = {};
+  for (const bloco of (vercelJson.headers || [])) {
+    const re = new RegExp('^' + bloco.source + '$');
+    if (re.test(pathname)) for (const h of bloco.headers) saida[h.key] = h.value;
+  }
+  return saida;
+}
+
 // T-B1D7F6: este servidor e de teste, e servidor de teste nunca pode entregar o
 // app apontando para producao — registro de aparelho e marcacao de ponto sao
 // efeitos colaterais reais e irreversiveis. npm run serve fazia exatamente isso.
@@ -176,6 +190,12 @@ export function criarServidor(opts = {}) {
     sessoesGestor: new Map(),
     correcoes: [],
     auditoriaIdentificacao: [],
+    // T-81C721 (§2.1e docs/fase3-seguranca.md, docs/adr-acesso-v3.md
+    // efrat_auditoria_identificacao): toda tentativa de aprovar aparelho,
+    // certa ou errada, com ou sem estourar LIMITE_APROVACAO — nunca só o
+    // 429, senão o padrão paciente (poucas tentativas por dia, todo dia,
+    // nunca batendo o teto) fica invisível. Nunca guarda o código tentado.
+    auditoriaAprovacao: [],
     limitesIdentificacao: new Map(),
     limitesCadastro: new Map(),
     tokenLegadoConsumido: false,
@@ -197,7 +217,14 @@ export function criarServidor(opts = {}) {
     // é o modelo_id mais recente visto no caminho do APP (o motor que de fato
     // reconhece) — atualizada só por /efrat/carga, nunca pelas rotas de cadastro.
     modelosObservados: new Map(),
-    referenciaModeloApp: null
+    referenciaModeloApp: null,
+    // T-D30529/§4.4: convite_id -> registro completo (com token_hash — o valor
+    // claro nunca fica gravado, só aparece uma vez, na resposta da emissão).
+    convites: new Map(),
+    tokenHashParaConvite: new Map(),
+    // §4.8: teto de volume por IP, generoso, nas 3 rotas anônimas — sem proxy,
+    // é a única coisa protegendo a instância de queimar execução.
+    limitesVolumeAnonimo: new Map()
   };
 
   for (const marcacao of (opts.marcacoes || [])) semearMarcacao(estado, marcacao);
@@ -328,6 +355,19 @@ export function criarServidor(opts = {}) {
     return Math.max(1, Math.ceil((JANELA_LIMITE_APROVACAO_MS - (Date.now() - maisAntiga)) / 1000));
   };
 
+  // T-81C721 (§2.1e, docs/adr-acesso-v3.md efrat_auditoria_identificacao):
+  // TODA tentativa de aprovar, certa ou errada, com ou sem 429 — nunca só o
+  // limite estourando, senão o padrão paciente (poucas tentativas por dia,
+  // nunca batendo o teto) não deixa rastro nenhum. NUNCA guarda o código
+  // tentado — ele não serve para investigar, só transformaria o log numa
+  // lista de códigos para quem ler o log.
+  const registrarAuditoriaAprovacao = (resultado, pendenteId) => {
+    estado.auditoriaAprovacao.push({
+      usuario_rh: rhUsuario.usuario, instante: new Date().toISOString(),
+      pendente_id: pendenteId || null, resultado, request_id: requestId()
+    });
+  };
+
   // C1-C3 do contrato (fase3-contrato.md §0): chave de idempotência no CORPO
   // pras rotas /efrat/rh/* (credencial já é corpo). Mesma chave + mesmo corpo
   // repete a resposta gravada; mesma chave + corpo diferente é conflito.
@@ -395,6 +435,53 @@ export function criarServidor(opts = {}) {
     if (modeloId === referenciaAnterior) return { modelo_divergente: false, modelo_desconhecido: false };
     return { modelo_divergente: jaConhecido, modelo_desconhecido: !jaConhecido };
   };
+
+  // T-D30529/§4.4: máquina de estados do convite. Token de 256 bits, CSPRNG;
+  // só o hash mora no servidor (mesma regra do código curto de aparelho,
+  // §1.1) — o valor claro aparece uma única vez, na resposta da emissão.
+  const ORIGEM_PUBLICA = opts.origemPublica || 'https://ORIGEM-PUBLICA-A-DEFINIR';
+  const EXPIRA_CONVITE_MS = opts.expiraConviteMs || 60 * 60 * 1000;
+  const LIMITE_ENVIOS_RECUSADOS = 5;
+  const gerarTokenConvite = () => crypto.randomBytes(32).toString('base64url');
+  const hashToken = token => crypto.createHash('sha256').update(String(token)).digest('base64url');
+
+  /** Expiração é computada NA LEITURA — nunca gravada por um timer de fundo. */
+  function estadoEfetivoConvite(c) {
+    if ((c.estado === 'emitido' || c.estado === 'aberto') && Date.now() > Date.parse(c.expira_em)) return 'expirado';
+    return c.estado;
+  }
+
+  /** "Um convite vivo por pessoa" — vivo = emitido/aberto, considerando expiração. */
+  function convitesVivos(pessoaId) {
+    return [...estado.convites.values()]
+      .filter(c => c.pessoa_id === pessoaId && ['emitido', 'aberto'].includes(estadoEfetivoConvite(c)));
+  }
+
+  /** Resolve pelo TOKEN CLARO do Authorization — nunca grava nem loga o valor claro. */
+  function convitePorToken(token) {
+    if (!token) return null;
+    const id = estado.tokenHashParaConvite.get(hashToken(token));
+    return id ? estado.convites.get(id) : null;
+  }
+
+  /**
+   * §4.8: teto de volume por IP nas rotas anônimas — generoso (ordem de
+   * centenas por minuto), porque sem proxy é a única coisa protegendo a
+   * instância de queimar execução; não é defesa contra flood determinado
+   * (registrado no contrato como limite conhecido). Devolve segundos de
+   * `Retry-After` se estourou, `null` se não.
+   */
+  function limiteVolumeAnonimo(req) {
+    const ip = (req.socket && req.socket.remoteAddress) || 'desconhecido';
+    const janelaMs = opts.volumeAnonimoJanelaMs || 60_000;
+    const limite = opts.volumeAnonimoLimite || 300;
+    const agora = Date.now();
+    let contador = estado.limitesVolumeAnonimo.get(ip);
+    if (!contador || agora - contador.inicio >= janelaMs) contador = { inicio: agora, total: 0 };
+    contador.total++;
+    estado.limitesVolumeAnonimo.set(ip, contador);
+    return contador.total > limite ? Math.max(1, Math.ceil((janelaMs - (agora - contador.inicio)) / 1000)) : null;
+  }
 
   // T-8188C6: forma pública de uma pessoa, para corpo de erro (CADASTRO_DESATUALIZADO)
   // e pra base do cálculo de telefone_compartilhado — a mesma forma que /rh/dados devolve.
@@ -474,7 +561,42 @@ export function criarServidor(opts = {}) {
       res.end(JSON.stringify(obj));
     };
 
+    // §4.6/critério 20: as duas rotas do convite público são as únicas que a
+    // página pública (origem própria) chama — CORS de LISTA, nunca `*`, e sem
+    // Allow-Credentials (o token viaja em header, não em cookie). As demais
+    // rotas continuam com `*` (nenhuma delas é alcançada de origem alheia hoje).
+    const ROTAS_FACE_PUBLICA = ['/webhook/efrat/face/convite/abrir', '/webhook/efrat/face/convite/enviar'];
+    const origemPermitidaFace = origemHeader => {
+      if (!origemHeader) return null;
+      if (opts.origensPublicoPermitidas) return opts.origensPublicoPermitidas.includes(origemHeader) ? origemHeader : null;
+      // e2e: qualquer porta local é uma "origem de teste" válida (§4.6 exige
+      // que a lista inclua as origens de teste, senão o e2e não roda).
+      return /^https?:\/\/127\.0\.0\.1:\d+$/.test(origemHeader) ? origemHeader : null;
+    };
+    const responderFace = (cod, obj, extras) => {
+      const origem = origemPermitidaFace(req.headers.origin);
+      const headers = Object.assign(
+        { 'Content-Type': 'application/json', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, Idempotency-Key' },
+        extras || {}
+      );
+      if (origem) headers['Access-Control-Allow-Origin'] = origem;
+      res.writeHead(cod, headers);
+      res.end(JSON.stringify(obj));
+    };
+
     if (req.method === 'OPTIONS') {
+      if (ROTAS_FACE_PUBLICA.includes(url.pathname)) {
+        const origem = origemPermitidaFace(req.headers.origin);
+        const headers = {
+          'Access-Control-Allow-Headers': 'Authorization, Content-Type, Idempotency-Key',
+          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Max-Age': '600'
+        };
+        if (origem) headers['Access-Control-Allow-Origin'] = origem;
+        res.writeHead(204, headers);
+        res.end();
+        return;
+      }
       res.writeHead(204, {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Authorization, Content-Type, Idempotency-Key',
@@ -496,9 +618,14 @@ export function criarServidor(opts = {}) {
       const rotaV3Autenticada = rotaEstado
         || url.pathname === '/webhook/efrat/identificar'
         || url.pathname.startsWith('/webhook/efrat/gestor/');
+      // T-D30529/§4.8: as duas rotas do convite público são alcançáveis sem
+      // credencial prévia (o token é a credencial delas, checado dentro de
+      // cada rota) — não passam pelo gate de token/dispositivo/RH genérico.
+      const rotaConvitePublico = url.pathname === '/webhook/efrat/face/convite/abrir'
+        || url.pathname === '/webhook/efrat/face/convite/enviar';
       // RH conserva usuario + chave nesta rodada. Rotas v3 usam bearer proprio.
       const ehRh = url.pathname.startsWith('/webhook/efrat/rh/');
-      if (!ehRh && !rotaRegistrar && !rotaV3Autenticada) {
+      if (!ehRh && !rotaRegistrar && !rotaV3Autenticada && !rotaConvitePublico) {
         const token = body.token || url.searchParams.get('token');
         const dispositivo = body.dispositivo_id && dispositivoAutenticado(req, body.dispositivo_id);
         if (token !== estado.token && !dispositivo) {
@@ -1123,6 +1250,7 @@ export function criarServidor(opts = {}) {
 
           if (tentativasApovacaoRestantes(rhUsuario.usuario).bloqueado) {
             res.setHeader('Retry-After', String(retryAfterAprovacao(rhUsuario.usuario)));
+            registrarAuditoriaAprovacao('limitado');
             return responder(429, erro('LIMITE_APROVACAO', 'muitas tentativas de código errado — espere e tente de novo'));
           }
 
@@ -1134,6 +1262,7 @@ export function criarServidor(opts = {}) {
           const bruto = String(body.codigo || '').toUpperCase();
           const semFormatacao = bruto.replace(/[\s-]+/g, '');
           if (/[^A-Z0-9]/.test(semFormatacao) || [...semFormatacao].some(c => 'OIL01'.includes(c))) {
+            registrarAuditoriaAprovacao('letra_invalida');
             return responder(422, erro('CODIGO_COM_LETRA_INVALIDA',
               'Esse código tem uma letra que a gente nunca usa (O, I, L, 0, 1). Confira na tela do aparelho.', 'codigo'));
           }
@@ -1146,12 +1275,14 @@ export function criarServidor(opts = {}) {
             erro('CODIGO_NAO_ENCONTRADO', 'Código inválido ou expirado. Confira no aparelho e digite de novo.');
           if (!codigo) {
             registrarTentativaAprovacaoErrada(rhUsuario.usuario);
+            registrarAuditoriaAprovacao('codigo_nao_encontrado');
             return responder(404, RESPOSTA_CODIGO_NAO_ENCONTRADO());
           }
           const dispositivoId = estado.codigosPendentes.get(codigo);
           const dispositivo = dispositivoId && estado.dispositivos.get(dispositivoId);
           if (!dispositivo || dispositivo.estado !== 'pendente' || codigoExpirado(dispositivo)) {
             registrarTentativaAprovacaoErrada(rhUsuario.usuario);
+            registrarAuditoriaAprovacao('codigo_nao_encontrado');
             return responder(404, RESPOSTA_CODIGO_NAO_ENCONTRADO());
           }
           // CODIGO_AMBIGUO (409, §1.3) fica sem caminho de teste: codigosPendentes
@@ -1161,20 +1292,24 @@ export function criarServidor(opts = {}) {
 
           const equipesIds = Array.isArray(body.equipes_ids) ? body.equipes_ids : [];
           if (equipesIds.length === 0) {
+            registrarAuditoriaAprovacao('escopo_vazio', dispositivo.pendente_id);
             return responder(422, erro('ESCOPO_VAZIO', 'Selecione ao menos uma equipe antes de liberar o aparelho.', 'equipes_ids'));
           }
           const equipesSelecionadas = equipesIds.map(id => estado.equipes.get(id));
           if (equipesSelecionadas.some(e => !e || !e.ativo)) {
+            registrarAuditoriaAprovacao('equipe_invalida', dispositivo.pendente_id);
             return responder(422, erro('EQUIPE_INVALIDA', 'uma das equipes selecionadas não existe ou está inativa', 'equipes_ids'));
           }
           const unidades = new Set(equipesSelecionadas.map(e => normalizarUnidade(e.unidade)));
           if (unidades.size > 1) {
+            registrarAuditoriaAprovacao('equipes_de_unidades_diferentes', dispositivo.pendente_id);
             return responder(422, erro('EQUIPES_DE_UNIDADES_DIFERENTES', 'as equipes escolhidas são de unidades diferentes', 'equipes_ids'));
           }
           // Unidade é DERIVADA das equipes, nunca enviada pelo cliente (§2.4/§8-A).
           const unidade = equipesSelecionadas[0].unidade;
 
           estado.codigosPendentes.delete(codigo);
+          const pendenteIdAprovado = dispositivo.pendente_id;
           dispositivo.estado = 'ativo';
           dispositivo.equipes_ids = equipesIds;
           dispositivo.unidade = unidade;
@@ -1182,6 +1317,7 @@ export function criarServidor(opts = {}) {
           dispositivo.aprovado_por = rhUsuario.usuario;
           dispositivo.aprovado_em = new Date().toISOString();
           dispositivo.codigo_curto = null;
+          registrarAuditoriaAprovacao('aprovado', pendenteIdAprovado);
 
           const resposta = {
             ok: true, dispositivo_id: dispositivo.dispositivo_id, apelido: dispositivo.apelido,
@@ -1335,7 +1471,197 @@ export function criarServidor(opts = {}) {
           gravarIdempotencia(body.idempotency_key, idem.hash, 200, resposta);
           return responder(200, resposta);
         }
+        if (url.pathname.endsWith('/face/convite')) {
+          // Emissão do link de uso único (§4.4/§4.5).
+          const idem = idempotente(body.idempotency_key, body, true);
+          if (idem.bloqueado) return responder(idem.bloqueado.status, idem.bloqueado.resposta);
+          if (idem.cache) return responder(idem.cache.status, idem.cache.resposta);
+
+          const pessoa = pessoas.find(p => p.pessoa_id === body.pessoa_id);
+          if (!pessoa) return responder(404, { ok: false, erro: 'pessoa nao encontrada' });
+          if (estado.inativos.has(pessoa.pessoa_id)) {
+            return responder(422, erro('PESSOA_INATIVA', 'pessoa inativa não recebe convite de face'));
+          }
+          if (!pessoa.telefone) {
+            return responder(422, erro('PESSOA_SEM_TELEFONE', 'pessoa sem telefone válido', 'telefone'));
+          }
+          const pessoasBase = pessoas.map(p => ({
+            pessoa_id: p.pessoa_id, ativo: !estado.inativos.has(p.pessoa_id), telefone: p.telefone || ''
+          }));
+          if (telefonesCompartilhados(pessoasBase)[pessoa.pessoa_id]) {
+            return responder(422, erro('TELEFONE_COMPARTILHADO_SEM_LINK',
+              'Este celular é de mais de uma pessoa, então o link não pode ser enviado — não há como saber quem vai ' +
+              'abrir. Cadastre o rosto aqui, pela câmera, ou envie três fotos.'));
+          }
+
+          // Um convite vivo por pessoa (§4.4): qualquer emitido/aberto anterior
+          // vira substituído — reemitir revoga o antigo sozinho.
+          const anteriores = convitesVivos(pessoa.pessoa_id);
+          for (const c of anteriores) c.estado = 'substituido';
+
+          const token = gerarTokenConvite();
+          const convite_id = 'cv-' + crypto.randomUUID().slice(0, 8);
+          const criadoEm = new Date().toISOString();
+          const expiraEm = new Date(Date.now() + EXPIRA_CONVITE_MS).toISOString();
+          const registro = {
+            convite_id, pessoa_id: pessoa.pessoa_id, token_hash: hashToken(token),
+            estado: 'emitido', canal: body.canal || 'copiar', criado_por: rhUsuario.usuario,
+            criado_em: criadoEm, expira_em: expiraEm, aberto_em: null, tentativas: 0,
+            consumido_em: null, revogado_por: null, revogado_em: null, substituido_por: null
+          };
+          estado.convites.set(convite_id, registro);
+          estado.tokenHashParaConvite.set(registro.token_hash, convite_id);
+          for (const c of anteriores) c.substituido_por = convite_id;
+
+          const mTel = /^\+55(\d{2})(\d{5})(\d{4})$/.exec(pessoa.telefone);
+          const telefoneMascarado = mTel ? '(' + mTel[1] + ') ' + mTel[2][0] + '****-' + mTel[3] : pessoa.telefone;
+          const resposta = Object.assign({
+            ok: true, convite_id, url: ORIGEM_PUBLICA + '/#c=' + token,
+            expira_em: expiraEm, telefone_mascarado: telefoneMascarado, request_id: requestId()
+          }, anteriores.length ? { substituiu: anteriores[0].convite_id } : {});
+          gravarIdempotencia(body.idempotency_key, idem.hash, 201, resposta);
+          return responder(201, resposta);
+        }
+        if (url.pathname.endsWith('/face/convites')) {
+          // Listagem — SEM token, sem URL, nunca (mesma regra do código curto).
+          return responder(200, {
+            ok: true,
+            convites: [...estado.convites.values()].map(c => ({
+              convite_id: c.convite_id, pessoa_id: c.pessoa_id, estado: estadoEfetivoConvite(c),
+              criado_em: c.criado_em, criado_por: c.criado_por, expira_em: c.expira_em,
+              aberto_em: c.aberto_em, tentativas: c.tentativas
+            }))
+          });
+        }
+        if (url.pathname.endsWith('/face/convite/revogar')) {
+          const idem = idempotente(body.idempotency_key, body, true);
+          if (idem.bloqueado) return responder(idem.bloqueado.status, idem.bloqueado.resposta);
+          if (idem.cache) return responder(idem.cache.status, idem.cache.resposta);
+          const c = estado.convites.get(body.convite_id);
+          if (!c) return responder(404, { ok: false, erro: 'convite nao encontrado' });
+          if (['emitido', 'aberto'].includes(estadoEfetivoConvite(c))) {
+            c.estado = 'revogado'; c.revogado_por = rhUsuario.usuario; c.revogado_em = new Date().toISOString();
+          }
+          const resposta = { ok: true, convite_id: c.convite_id, estado: c.estado };
+          gravarIdempotencia(body.idempotency_key, idem.hash, 200, resposta);
+          return responder(200, resposta);
+        }
         return responder(404, { ok: false, erro: 'rota rh desconhecida' });
+      }
+
+      // §4.8: as três rotas alcançáveis sem credencial prévia — esta e
+      // /face/convite/enviar são as duas de face; a terceira é
+      // dispositivo/registrar (T-87615C, outro cartão). Nas duas, volume e
+      // formato são checados ANTES de qualquer leitura de convite — um
+      // limitador que consulta o Map pra descobrir que deve recusar já pagou
+      // o custo que tentava evitar.
+      if (url.pathname === '/webhook/efrat/face/convite/abrir') {
+        if (corpo.length > 4096) return responderFace(413, erro('CORPO_GRANDE', 'corpo maior que o esperado'));
+        const retryAfter = limiteVolumeAnonimo(req);
+        if (retryAfter != null) {
+          return responderFace(429, erro('LIMITE_VOLUME', 'muitas tentativas, tente novamente em instantes'), { 'Retry-After': String(retryAfter) });
+        }
+
+        const c = convitePorToken(bearer(req));
+        const efetivo = c ? estadoEfetivoConvite(c) : null;
+        // Erro único pra inválido/expirado/revogado/substituído/inexistente
+        // (§4.4): distinguir os casos transforma a rota em oráculo.
+        if (!c || !['emitido', 'aberto', 'consumido'].includes(efetivo)) {
+          return responderFace(404, erro('CONVITE_INVALIDO', 'Este link não vale mais. Peça um novo ao RH.'));
+        }
+        if (efetivo === 'consumido') {
+          return responderFace(200, { ok: true, estado: 'consumido', request_id: requestId() });
+        }
+        // 1ª abertura grava aberto_em; aberturas seguintes não regravam nada
+        // e não encurtam a janela (§4.4).
+        if (efetivo === 'emitido') { c.estado = 'aberto'; c.aberto_em = new Date().toISOString(); }
+
+        const pessoa = pessoas.find(p => p.pessoa_id === c.pessoa_id);
+        return responderFace(200, {
+          ok: true, estado: 'aberto', primeiro_nome: (pessoa && pessoa.nome ? pessoa.nome.split(' ')[0] : ''),
+          fotos_exigidas: 3, coerencia_maxima: limiarAceiteCadastro,
+          expira_em: c.expira_em, request_id: requestId()
+        });
+      }
+
+      if (url.pathname === '/webhook/efrat/face/convite/enviar') {
+        // Teto explícito (§4.8): miniatura ≤ 64KB + exatamente 3 vetores de
+        // 128 números já limita o resto; a checagem grossa do corpo inteiro
+        // vem primeiro, antes de qualquer coisa que precise do token.
+        if (corpo.length > 200_000) return responderFace(413, erro('CORPO_GRANDE', 'corpo maior que o esperado'));
+        const retryAfter = limiteVolumeAnonimo(req);
+        if (retryAfter != null) {
+          return responderFace(429, erro('LIMITE_VOLUME', 'muitas tentativas, tente novamente em instantes'), { 'Retry-After': String(retryAfter) });
+        }
+
+        const c = convitePorToken(bearer(req));
+        const efetivo = c ? estadoEfetivoConvite(c) : null;
+        if (!c || !['emitido', 'aberto', 'consumido', 'bloqueado'].includes(efetivo)) {
+          return responderFace(404, erro('CONVITE_INVALIDO', 'Este link não vale mais. Peça um novo ao RH.'));
+        }
+
+        // Idempotency-Key ANTES dos estados terminais, de propósito: "mesma
+        // chave repete a resposta gravada" (§4.4) precisa valer mesmo depois
+        // que o PRÓPRIO envio bem-sucedido virou o convite pra 'consumido' —
+        // senão o retry do cliente (rede caiu na volta, ele tenta de novo)
+        // bate no 409 de "consumido" em vez de ver a resposta 200 de novo.
+        const idemKey = req.headers['idempotency-key'];
+        const idem = idempotente(idemKey, body, true);
+        if (idem.bloqueado) return responderFace(idem.bloqueado.status, idem.bloqueado.resposta);
+        if (idem.cache) return responderFace(idem.cache.status, idem.cache.resposta);
+
+        // bloqueado/consumido ganham código PRÓPRIO — ao contrário do grupo
+        // acima, aqui não há risco de oráculo: quem tem o token já passou
+        // por um estado real, não está adivinhando.
+        if (efetivo === 'bloqueado') {
+          return responderFace(429, erro('CONVITE_BLOQUEADO', 'Muitas tentativas recusadas. Peça um novo link ao RH.'));
+        }
+        if (efetivo === 'consumido') {
+          return responderFace(409, erro('CONVITE_CONSUMIDO', 'Já recebemos suas fotos. O RH vai conferir.'));
+        }
+
+        if (!body.modelo_id) return responderFace(400, erro('MODELO_AUSENTE', 'modelo_id é obrigatório nesta rota'));
+        if (typeof body.miniatura === 'string' && Buffer.byteLength(body.miniatura, 'utf8') > 64 * 1024) {
+          return responderFace(413, erro('CORPO_GRANDE', 'miniatura maior que o esperado'));
+        }
+
+        // Mesma função pura de sempre — se esta rota guardasse cópia própria
+        // da regra de coerência, o bug de T-8ADD9C só mudaria de lugar.
+        const avaliacao = avaliarLoteFace(body.vetores, limiarAceiteCadastro);
+        if (!avaliacao.ok) {
+          // Recusa é RETORNO, não consumo (§4.4): conta uma tentativa, não
+          // gasta o link. 5 recusas seguidas bloqueiam.
+          c.tentativas = (c.tentativas || 0) + 1;
+          if (c.tentativas >= LIMITE_ENVIOS_RECUSADOS) c.estado = 'bloqueado';
+          return responderFace(422, {
+            ok: false,
+            erro: { codigo: avaliacao.codigo, mensagem: avaliacao.mensagem, maior_distancia: avaliacao.maiorDistancia }
+          });
+        }
+
+        const modeloClassificado = classificarModelo(body.modelo_id, 'publica');
+        const pessoa = pessoas.find(p => p.pessoa_id === c.pessoa_id);
+        const versaoNova = ((pessoa && pessoa.versao) || 0) + 1;
+        const criadoEm = new Date().toISOString();
+        // Sempre pendente, inclusive no primeiro cadastro (§4.3) — ninguém do
+        // RH viu a captura acontecer, um humano confere antes de valer.
+        estado.recadastros.push({
+          template_id: 't-' + c.pessoa_id, pessoa_id: c.pessoa_id, versao: versaoNova,
+          coerencia: avaliacao.maiorDistancia, miniatura: body.miniatura || '',
+          vetores: body.vetores, origem: 'link', convite_id: c.convite_id, criado_em: criadoEm,
+          modelo_id: body.modelo_id, modelo_divergente: modeloClassificado.modelo_divergente,
+          modelo_desconhecido: modeloClassificado.modelo_desconhecido
+        });
+
+        c.estado = 'consumido';
+        c.consumido_em = criadoEm;
+
+        const resposta = {
+          ok: true, estado: 'recebido', template_estado: 'pendente',
+          coerencia: avaliacao.maiorDistancia, request_id: requestId()
+        };
+        gravarIdempotencia(idemKey, idem.hash, 200, resposta);
+        return responderFace(200, resposta);
       }
 
       if (url.pathname === '/webhook/efrat/cadastro') {
@@ -1434,6 +1760,64 @@ export function subir(opts = {}) {
   return new Promise(res => {
     servidor.listen(0, '127.0.0.1', () => {
       res({ url: 'http://127.0.0.1:' + servidor.address().port, servidor, estado, pessoas });
+    });
+  });
+}
+
+// T-D30529/§4.6: segundo listener, servindo SOMENTE o fecho da página
+// pública. Porta diferente é origem diferente pro navegador — o mesmo
+// isolamento de produção (subdomínio) reproduzido localmente, sem precisar
+// de DNS: só a fiação do domínio real espera o cliente (§4.6, "como se testa
+// isso sem DNS").
+//
+// Simula o build da Vercel (publico/copiar-assets.sh): js/face.js,
+// js/regras.js e js/ui.js vêm do app (fonte única, nunca segunda cópia
+// commitada); vendor/face-api.js e models/* também. O resto — index.html,
+// js/config-face.js, js/api-face.js, js/pagina.js — é a própria publico/.
+// modelo.js entra além do fecho original do contrato: js/face.js importa
+// calcularModeloId de lá (T-8ADD9C § 4.7) — dependência transitiva que o
+// diagrama de §4.6 não previu quando foi escrito, antes do carimbo existir.
+const FECHO_COPIADO_DO_APP = new Set(['face.js', 'regras.js', 'ui.js', 'modelo.js']);
+
+export function criarServidorPublico(opts = {}) {
+  const PUBLICO = path.join(RAIZ, 'publico');
+  const servidor = http.createServer((req, res) => {
+    const url = new URL(req.url, 'http://localhost');
+    const p = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
+
+    let arq;
+    if (p === '/vendor/face-api.js') arq = path.join(RAIZ, 'vendor', 'face-api.js');
+    else if (p.startsWith('/models/')) arq = path.join(RAIZ, p);
+    else if (p.startsWith('/js/') && FECHO_COPIADO_DO_APP.has(p.slice(4))) arq = path.join(RAIZ, 'js', p.slice(4));
+    else arq = path.join(PUBLICO, p);
+
+    if ((!arq.startsWith(RAIZ)) || !fs.existsSync(arq) || fs.statSync(arq).isDirectory()) {
+      res.writeHead(404); res.end('nao encontrado'); return;
+    }
+    const headers = Object.assign(
+      { 'Content-Type': TIPOS[path.extname(arq)] || 'application/octet-stream' },
+      headersPublicoPara(p)
+    );
+    // T-B1D7F6-like, aplicado aqui: publico/vercel.json trava connect-src no
+    // host de PRODUÇÃO (n8n.samasc.com.br). Em teste a API é o primeiro
+    // listener, noutra porta — sem isto o navegador bloqueia a chamada por
+    // CSP e o e2e falha por um motivo que não é o que está sob teste.
+    // Produção nunca passa `apiOrigemTeste`, então o CSP real não muda.
+    if (opts.apiOrigemTeste && headers['Content-Security-Policy']) {
+      headers['Content-Security-Policy'] = headers['Content-Security-Policy']
+        .replace(/connect-src[^;]*/, m => m + ' ' + opts.apiOrigemTeste);
+    }
+    res.writeHead(200, headers);
+    fs.createReadStream(arq).pipe(res);
+  });
+  return servidor;
+}
+
+export function subirPublico(opts = {}) {
+  const servidor = criarServidorPublico(opts);
+  return new Promise(res => {
+    servidor.listen(0, '127.0.0.1', () => {
+      res({ url: 'http://127.0.0.1:' + servidor.address().port, servidor });
     });
   });
 }
