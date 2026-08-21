@@ -794,3 +794,68 @@ dentro da decisão que já foi tomada, e é honesto sobre o que garante.
 - **O limiar 0,45 não foi calibrado com a população da Efrat** — as invariantes de §4 são
   corretas para o limiar configurado, seja ele qual for, e é por isso que 4.2c exige fonte
   única.
+
+---
+
+## Apêndice · Três padrões de teste que esta fase produziu
+
+Não são teoria: cada um saiu de um defeito real desta rodada, e os três são a
+mesma família — **verde que não prova o que o nome do teste promete**. Ficam aqui
+porque as invariantes acima só valem se os testes que as sustentam não mentirem.
+
+### 1. Guarda que documenta um defeito declara a própria obsolescência
+
+Um teste escrito para travar um comportamento **errado** (para que ninguém dependa
+dele sem saber) vira mentira no dia em que o comportamento é consertado. A
+mensagem de falha dele é o lugar certo para dizer isso — ela é lida exatamente por
+quem estiver olhando quando acontecer.
+
+Instância: a guarda 2.1g afirmava que `#btnPonto` vinha habilitado embaixo da tela
+escondida, com a mensagem *"se isto virar false, btnPonto passou a discriminar e
+este guarda pode ser revisto"*. `index.html` passou a nascer `disabled`, a guarda
+ficou vermelha, e a mensagem disse o que fazer: inverter a afirmação para
+`toBeDisabled()` e travar a correção. Sem essa frase, o vermelho pareceria
+regressão e alguém "consertaria" o produto de volta.
+
+**Regra:** todo teste cuja asserção descreve um defeito aceito carrega, na
+mensagem, a instrução para o dia em que o defeito morrer.
+
+### 2. Não inferir de ausência
+
+Afirmar que algo **não** aconteceu só vale se algo positivo provar que o caminho
+rodou. Sem essa âncora, o verde não distingue *"foi impedido"* de *"ninguém correu
+ainda"* — e sob CPU disputada a segunda hipótese fica mais provável, então o teste
+fica mais verde justamente quando a máquina está pior.
+
+O discriminador não é a forma da asserção, é se a coisa afirmada ausente **era
+possível naquele instante**:
+
+- `expect(locator).toHaveClass(/hide/)` re-tenta até o timeout: afirma "continuou
+  escondido o tempo todo". Sólida.
+- `expect(valorJs).toBeFalsy()` / `toBe(0)` fotografa um instante. Frágil **se** o
+  tempo tornar possível o que ela nega.
+- Uma ausência garantida por contrato (a operação é proibida) é permanente:
+  esperar mais não a torna presente. Sólida.
+
+Instâncias desta fase, todas do mesmo formato: o teste de offline verde porque a
+checagem de dispositivo travava contra produção; `toBeEnabled()` que não olha
+visibilidade; o critério 5b, cuja tela já estava visível antes do passo; e o
+`chamadas.carga === 0` lido como fotografia. Consertos: âncora positiva antes da
+negativa — a mensagem que só o ramo de falha escreve, ou o contador do caminho que
+tinha de ter rodado.
+
+### 3. Contraprova antes da negação
+
+Um teste que só nega **passa contra uma rota que não existe** — `404` não ativa
+nada. Verde por ausência de implementação mente pior que vermelho, porque não pede
+atenção de ninguém.
+
+Instância: os testes armados de 2.1 provam primeiro o caminho feliz (com o código
+certo, ativa) e só então negam. Foi essa ordem que pegou um erro meu no mesmo dia —
+uma substituição de constante falhou calada e os testes apontavam para a rota
+antiga; sem a contraprova eles teriam ficado verdes contra o `404`.
+
+**Corolário para ler resultado sob concorrência:** contenção de CPU degrada a
+rodada inteira, não escolhe um teste. Verde geral sob concorrência é mais forte,
+não mais fraco; um vermelho **isolado** entre verdes também é confiável. O que
+exige repetir com a pista limpa é vermelho **espalhado**.
