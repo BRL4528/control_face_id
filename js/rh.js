@@ -622,8 +622,6 @@ export const Rh = {
       euclidiana(c[0].descritor, c[1].descritor),
       euclidiana(c[0].descritor, c[2].descritor),
       euclidiana(c[1].descritor, c[2].descritor));
-    if (coer > 0.55 && !confirm('As 3 capturas estão pouco parecidas entre si (' + coer.toFixed(3) +
-      ').\n\nIsso costuma virar falso negativo depois. Salvar assim mesmo?')) return;
     $('btnSalvarBio').disabled = true;
     const p = this.alvoCadastro;
     const r = await ApiRh.colaborador(this.cred, {

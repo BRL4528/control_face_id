@@ -121,3 +121,31 @@ conflito de git e sairia com cache velho sem aviso (DevOps).
 
 **Bloqueio restante:** falta a **string do hostname** de produção. O cliente opera o
 DNS e o CORS do n8n ele mesmo; o DevOps está escrevendo as duas folhas em `docs/`.
+
+## Atualização 3 · suíte verde, medida por mim
+
+`integra/v3-r3` com DevOps, Designer, QA, Full-Stack, Biometria e contrato integrados.
+Instalei o Playwright no worktree para parar de somar relatos: **77 unitários + 65 e2e
+passando, 5 skipped, zero falhas**. Os 8 vermelhos de coerência fecharam — o servidor
+calcula, recusa em 0,45, e o bug que estava em produção morreu. `offline.spec.js` verde
+e agora medindo o que promete.
+
+Merge resolvido por mim: `sw.js` para `v9` (a colisão em `v8` que o DevOps previu) e os
+testes do QA mantidos na versão dele, mais nova — a do Biometria não tinha a correção
+do fixture de fronteira (0,45011 por deslocamento ortogonal → três pontos colineares).
+
+**Cortes de escopo desta rodada:** entidade `locais` recusada (fica `unidade` como
+texto, com normalização e seletor) — o Arquiteto concordou e o argumento decisivo foi
+que o único poder exclusivo da entidade é o que não queremos: aparelho seguindo o lugar,
+equipe nova entrando no escopo sozinha. E o número de coerência sai da tela do RH
+(derrubou uma decisão minha): com recusa em 0,45, o número só varia onde a resposta é
+sempre a mesma. Persiste no banco e na resposta, para auditoria e recalibração.
+
+**Achados de terceiros aceitos nesta rodada:** rate limit por IP é a chave errada para
+quem abre link em dados móveis (NAT de operadora tranca uma turma inteira) → duas
+camadas com chaves diferentes; `#porta` é a única seção que nasce visível, então
+asserção positiva sobre ela passa pelo flash do boot → `class="hide"` + try/catch no
+boot + guarda "nenhuma seção nasce visível".
+
+**Bloqueios com o cliente:** a string do hostname de produção, e qual proxy está na
+frente do n8n (a resposta "nenhum" muda a recomendação de rate limit).
