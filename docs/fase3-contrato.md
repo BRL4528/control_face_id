@@ -620,11 +620,40 @@ O que fica gravado é só a autorização (`telefone_autorizado_por`,
 `telefone_autorizado_em`, `telefone_autorizacao_motivo`), porque autorização é
 fato histórico.
 
-**Requisito de texto, para o Designer:** a tela tem de dizer a consequência **no
-momento em que o RH autoriza**, não depois. Algo como "Autorizando, esta pessoa
-fica cadastrada com o mesmo celular — e **não vai poder receber o link de cadastro
-de face**. O rosto dela terá de ser cadastrado aqui, pela câmera ou por upload de
-fotos." Descobrir isso na hora de mandar o link é descobrir tarde.
+`/efrat/rh/dados` devolve, em cada pessoa, **com quem** o número é compartilhado:
+
+```json
+{ "pessoa_id": "p-1", "…": "…",
+  "telefone_compartilhado": true,
+  "telefone_compartilhado_com": [{ "pessoa_id": "p-7", "nome": "João Souza" }] }
+```
+
+`Por quê nomear:` o texto aprovado pelo Designer diz "mesmo celular de **João
+Souza**" no diálogo de autorização e "compartilhado com **João Souza**" ao lado do
+botão de link. Sem esse campo o texto não tem dado por trás e vira "compartilhado
+com outra pessoa", que obriga o RH a caçar quem. Nomear é seguro: quem lê está
+autenticado como RH e já enxerga a lista inteira de pessoas. Lista, não campo
+único, porque três pessoas no mesmo número é raro e não é impossível.
+
+**Texto, fechado com o Designer.** A consequência aparece **no momento em que o RH
+autoriza**, não depois — descobrir na hora de mandar o link é descobrir tarde. E
+nenhum dos textos usa linguagem de sentença, porque o estado é derivado:
+
+- diálogo, aviso fixo antes do campo: "Autorizando, esta pessoa fica cadastrada
+  com o mesmo celular de **\<nome\>** — e não vai poder receber o link de cadastro
+  de face **enquanto o número for compartilhado**. O rosto dela terá de ser
+  cadastrado aqui, pela câmera do computador ou por upload de fotos.";
+- campo obrigatório, 10 a 200 caracteres: "Por que autorizar mesmo assim?", com
+  exemplo "pai e filho no mesmo canteiro, um celular só". O botão só destrava com
+  10+ caracteres;
+- na ficha e na lista: tag neutra "telefone compartilhado" — estado, não punição;
+- ao lado do botão de enviar link, desabilitado **com a razão visível**, nunca em
+  silêncio: "Link de cadastro indisponível — telefone compartilhado com
+  **\<nome\>**. Cadastre o rosto pela câmera ou por upload."
+
+O campo de motivo substitui o checkbox de confirmação que o desenho anterior tinha:
+checkbox prova que alguém clicou, motivo prova **o quê** — e esta é uma decisão que
+fica registrada e pode ser auditada depois.
 
 **Sem migração de dados.** `telefone` é obrigatório em **escrita** (criação e
 atualização). As linhas antigas do piloto vêm sem telefone; leitura tolera vazio
@@ -1562,7 +1591,11 @@ Critérios de UI que são contrato, não estética:
     dentro dela** (§2.1). "Trocar o `<select>` de equipe na aba de pessoas" não
     cumpre o critério, mesmo sendo a mesma escrita por baixo.
 32-B. O texto de autorização de telefone duplicado diz, **antes** de autorizar,
-    que aquela pessoa não vai poder receber o link de cadastro de face (§3.1).
+    que aquela pessoa não vai poder receber o link de cadastro de face, nomeando
+    com quem o número é compartilhado (§3.1). O botão só destrava com motivo de
+    10+ caracteres. E a asserção que prova que nada disso é selo permanente:
+    **sumiu a duplicidade, os textos somem sozinhos** — tag, aviso e botão
+    desabilitado — **sem ação de ninguém**.
 32-C. A fila de cadastros de face nunca é lista uniforme: separa primeiro cadastro
     de substituição, mostra contagem, e o Aprovar de cada card só destrava depois
     da conferência explícita (já implementado em `53136b3`; fica como critério para
