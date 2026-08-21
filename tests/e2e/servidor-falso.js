@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { avaliarLoteFace } from '../../js/coerencia.js';
-import { normalizarTelefone, telefonesCompartilhados } from '../../js/regras.js';
+import { normalizarTelefone, telefonesCompartilhados, normalizarUnidade } from '../../js/regras.js';
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -166,6 +166,13 @@ export function criarServidor(opts = {}) {
     chamadas: { carga: 0, marcacoes: 0, cadastro: 0, rh: 0, registrar: 0, estado: 0, identificar: 0 },
     dispositivos: new Map(),
     codigosPendentes: new Map(),
+    // T-C20AD3: pendente_id -> dispositivo_id, handle opaco proprio da linha
+    // pendente (defesa em profundidade de §1.1 regra 2 — recusar resolve por
+    // aqui, nunca por dispositivo_id, que e o que /rh/aparelhos expoe).
+    pendentesPorId: new Map(),
+    // usuario de RH -> lista de timestamps de codigo errado nos ultimos 5min
+    // (§1.3 LIMITE_APROVACAO).
+    limitesAprovacao: new Map(),
     sessoesGestor: new Map(),
     correcoes: [],
     auditoriaIdentificacao: [],
@@ -249,6 +256,64 @@ export function criarServidor(opts = {}) {
     if (!dispositivo || !credencial || dispositivo.credencial_hash !== hashCredencial(credencial)) return null;
     dispositivo.ultimo_uso = new Date().toISOString();
     return dispositivo;
+  };
+
+  // T-C20AD3 (§1.2 pedidos_da_mesma_rede_1h): sal fixo de teste, só para o
+  // hash não ser o IP cru. NUNCA é o sal de deploy real — este arquivo é
+  // fake server, o valor não pode viajar para configuração nenhuma que vá
+  // ao ar.
+  const SAL_IP_TESTE = 'sal-fake-servidor-de-teste-nao-e-producao';
+  const hashIp = ip => crypto.createHash('sha256').update(SAL_IP_TESTE + String(ip)).digest('base64url');
+  // `estado.ipSimulado` (não cabeçalho) para os testes forjarem "outra
+  // origem" — achado do DevOps: um cabeçalho tem forma de protocolo e é
+  // exatamente o que alguém copiaria pro workflow real do n8n sem sentir
+  // nada de errado (mesmo risco que já aconteceu aqui com `coerencia`,
+  // T-8ADD9C). Estado é dado de teste, não protocolo — não existe artefato
+  // com cara de cabeçalho HTTP neste arquivo para vazar. Precedente:
+  // cadastro-procedencia.spec.js:31 e gestor-ajustar-contrato.spec.js:14 já
+  // escrevem direto em ctx.estado. Guarda de CI do DevOps (937fed8) cobre
+  // qualquer cabeçalho x-teste-/x-fake-/x-mock-/x-dev- que apareça fora de
+  // tests/ mesmo assim, como defesa em profundidade.
+  const ipDaRequisicao = req => String(estado.ipSimulado || req.socket.remoteAddress || 'desconhecido');
+
+  // Resumo leve de UA para a tela do RH (§1.2 `ua_resumida`) — não é parser
+  // completo, só o suficiente pra distinguir "Chrome 141 · Android 14" de
+  // "Safari · iOS" nos casos comuns; UA que não casa nenhum padrão volta como
+  // veio, truncado, em vez de inventar rótulo.
+  const resumirUa = ua => {
+    const texto = String(ua || '');
+    const nav = texto.match(/(Chrome|Firefox|Edg|OPR|Safari)\/(\d+)/);
+    const so =
+      texto.match(/Android\s*([\d.]+)/) ? 'Android ' + texto.match(/Android\s*([\d.]+)/)[1] :
+      texto.match(/iPhone OS ([\d_]+)/) ? 'iOS ' + texto.match(/iPhone OS ([\d_]+)/)[1].replace(/_/g, '.') :
+      texto.match(/Windows NT ([\d.]+)/) ? 'Windows' :
+      texto.match(/Mac OS X/) ? 'macOS' :
+      texto.match(/Linux/) ? 'Linux' : null;
+    const nomeNav = nav && (nav[1] === 'Edg' ? 'Edge' : nav[1] === 'OPR' ? 'Opera' : nav[1]);
+    if (!nomeNav && !so) return texto.slice(0, 60);
+    return [nomeNav && (nomeNav + ' ' + nav[2]), so].filter(Boolean).join(' · ');
+  };
+
+  // §1.3 LIMITE_APROVACAO: mais de 10 códigos errados do mesmo usuário de RH
+  // em 5 minutos. Contagem é por usuário, não por aparelho — é sobre alguém
+  // tentando adivinhar código, não sobre um aparelho específico.
+  const JANELA_LIMITE_APROVACAO_MS = 5 * 60 * 1000;
+  const LIMITE_APROVACAO_TENTATIVAS = 10;
+  const tentativasApovacaoRestantes = usuario => {
+    const agora = Date.now();
+    const lista = (estado.limitesAprovacao.get(usuario) || []).filter(t => agora - t < JANELA_LIMITE_APROVACAO_MS);
+    estado.limitesAprovacao.set(usuario, lista);
+    return { bloqueado: lista.length >= LIMITE_APROVACAO_TENTATIVAS, lista, agora };
+  };
+  const registrarTentativaAprovacaoErrada = usuario => {
+    const { lista, agora } = tentativasApovacaoRestantes(usuario);
+    lista.push(agora);
+    estado.limitesAprovacao.set(usuario, lista);
+  };
+  const retryAfterAprovacao = usuario => {
+    const lista = estado.limitesAprovacao.get(usuario) || [];
+    const maisAntiga = Math.min(...lista);
+    return Math.max(1, Math.ceil((JANELA_LIMITE_APROVACAO_MS - (Date.now() - maisAntiga)) / 1000));
   };
 
   // C1-C3 do contrato (fase3-contrato.md §0): chave de idempotência no CORPO
@@ -430,6 +495,13 @@ export function criarServidor(opts = {}) {
           if (existente.credencial_hash !== body.credencial_publica) {
             return responder(409, erro('DISPOSITIVO_CONFLITO', 'dispositivo ja cadastrado'));
           }
+          // §1.1 regra 4/§1.2: novo pedido do mesmo aparelho ainda pendente
+          // conta como tentativa e atualiza o "visto por ultimo" que
+          // /rh/aparelhos mostra — o RH ve que o aparelho continua insistindo.
+          if (existente.estado === 'pendente') {
+            existente.tentativas = (existente.tentativas || 1) + 1;
+            existente.ultimo_pedido_em = new Date().toISOString();
+          }
           return responder(202, {
             ok: true, estado: existente.estado, dispositivo_id: body.dispositivo_id,
             codigo_curto: existente.codigo_curto, consultar_apos_s: 10, request_id: requestId()
@@ -437,15 +509,23 @@ export function criarServidor(opts = {}) {
         }
         const codigo = novoCodigoUnico();
         if (!codigo) return responder(503, erro('CODIGO_INDISPONIVEL', 'nao foi possivel gerar codigo'));
+        const agoraIso = new Date().toISOString();
         const dispositivo = {
           dispositivo_id: body.dispositivo_id, credencial_hash: body.credencial_publica,
           estado: 'pendente', codigo_curto: codigo, apelido: body.apelido, ua: body.ua,
           geo: body.geo || null, tentativas: 1, local_id: null, equipes_ids: [],
           configuracao_versao: 0, aprovado_por: null, aprovado_em: null,
-          criado_em: new Date().toISOString(), ultimo_uso: null
+          criado_em: agoraIso, ultimo_uso: null,
+          // T-C20AD3 (§1.1 regra 2, §1.2): pendente_id e o unico handle que
+          // /rh/aparelhos expoe pros pendentes — recusar resolve por ele,
+          // nunca por dispositivo_id.
+          pendente_id: 'pend-' + crypto.randomUUID().slice(0, 8),
+          ip_hash: hashIp(ipDaRequisicao(req)),
+          primeiro_pedido_em: agoraIso, ultimo_pedido_em: agoraIso
         };
         estado.dispositivos.set(body.dispositivo_id, dispositivo);
         estado.codigosPendentes.set(codigo, body.dispositivo_id);
+        estado.pendentesPorId.set(dispositivo.pendente_id, body.dispositivo_id);
         return responder(202, {
           ok: true, estado: 'pendente', dispositivo_id: body.dispositivo_id,
           codigo_curto: codigo, consultar_apos_s: 10, request_id: requestId()
@@ -463,6 +543,7 @@ export function criarServidor(opts = {}) {
             if (novo) {
               dispositivo.codigo_curto = novo;
               dispositivo.criado_em = new Date().toISOString();
+              dispositivo.tentativas = (dispositivo.tentativas || 1) + 1;
               estado.codigosPendentes.set(novo, dispositivo.dispositivo_id);
             }
           }
@@ -785,14 +866,11 @@ export function criarServidor(opts = {}) {
               const { coerencia, ...semCoerencia } = t;
               return semCoerencia;
             }),
-            // Aba Aparelhos (T-87615C): codigo_curto NUNCA sai daqui — é prova
-            // de posse física do aparelho. Se aparecesse numa leitura do RH,
-            // deixaria de provar que alguém está olhando a tela de verdade e
-            // viraria só enfeite; quem aprova tem que digitar o código lido lá.
-            dispositivos: [...estado.dispositivos.values()].map(d => ({
-              dispositivo_id: d.dispositivo_id, apelido: d.apelido, estado: d.estado,
-              criado_em: d.criado_em, ultimo_uso: d.ultimo_uso
-            })),
+            // T-C20AD3 (§1.2): a lista de aparelhos sai daqui, pra /efrat/rh/aparelhos
+            // — a aba muda enquanto o RH olha e precisa de refresh próprio, sem
+            // recarregar marcações/pessoas/equipes a cada 15s por 3 linhas.
+            // /rh/dados fica só com o contador pro badge.
+            aparelhos_pendentes: [...estado.dispositivos.values()].filter(d => d.estado === 'pendente').length,
             servidor_hora: new Date().toISOString()
           });
         }
@@ -965,47 +1043,125 @@ export function criarServidor(opts = {}) {
           }
           return responder(200, { ok: true, alvo_tipo: body.tipo, alvo_id: body.id, acao: body.acao });
         }
-        if (url.pathname.endsWith('/aparelho')) {
-          // 'aprovar' e o unico caminho que ATIVA um aparelho, e resolve
-          // SOMENTE pelo codigo digitado — nunca por dispositivo_id. E a prova
-          // de posse fisica (docs/adr-acesso-v3.md): quem aprova tem que estar
-          // vendo a tela do aparelho, nao so clicando num item de lista.
-          if (body.acao === 'aprovar') {
-            const codigo = String(body.codigo || '').trim().toUpperCase();
-            if (!codigo) return responder(422, { ok: false, erro: 'Digite o código mostrado no aparelho.' });
-            const dispositivoId = estado.codigosPendentes.get(codigo);
-            const dispositivo = dispositivoId && estado.dispositivos.get(dispositivoId);
-            if (!dispositivo || dispositivo.estado !== 'pendente' || codigoExpirado(dispositivo)) {
-              // "inválido" e "expirado" viram UMA mensagem só de propósito
-              // (docs/fase3-contrato.md §1.3): separar as duas contaria pro RH
-              // se aquele código já existiu algum dia — oráculo de código
-              // válido. Texto provisório: troca quando o Designer fechar o dele.
-              return responder(422, { ok: false, erro: 'Código inválido. Confira com a pessoa e digite de novo.' });
-            }
-            estado.codigosPendentes.delete(codigo);
-            dispositivo.estado = 'ativo';
-            // Sem tela de escopo por aparelho ainda nesta fase (fora do
-            // contrato de T-87615C): aprovar libera para todas as equipes
-            // ATIVAS conhecidas, senão o aparelho fica ativo e sem escopo —
-            // /efrat/carga devolveria DISPOSITIVO_SEM_ESCOPO e o deadlock só
-            // mudaria de lugar. Dinâmico porque T-8188C6 torna equipe real.
-            dispositivo.equipes_ids = [...estado.equipes.values()].filter(e => e.ativo).map(e => e.equipe_id);
-            dispositivo.configuracao_versao = 1;
-            dispositivo.aprovado_por = rhUsuario.usuario;
-            dispositivo.aprovado_em = new Date().toISOString();
-            return responder(200, { ok: true, dispositivo_id: dispositivo.dispositivo_id, estado: dispositivo.estado });
+        // T-C20AD3 (docs/fase3-contrato.md §1.3-1.5): três rotas dedicadas no
+        // lugar do /aparelho+acao antigo. 'aprovar' é o único caminho que
+        // ATIVA um aparelho, e resolve SOMENTE pelo código digitado — nunca
+        // por dispositivo_id nem pendente_id. É a prova de posse física
+        // (docs/adr-acesso-v3.md): quem aprova tem que estar vendo a tela do
+        // aparelho, não só clicando num item de lista. 'recusar' resolve por
+        // pendente_id (defesa em profundidade de §1.1 regra 2 — a lista de
+        // pendentes não carrega nenhum identificador que ative nada).
+        // 'revogar' segue por dispositivo_id: já é ativo e visível, não tem
+        // segredo de posse para proteger.
+        if (url.pathname.endsWith('/aparelho/aprovar')) {
+          const idem = idempotente(body.idempotency_key, body, true);
+          if (idem.bloqueado) return responder(idem.bloqueado.status, idem.bloqueado.resposta);
+          if (idem.cache) return responder(idem.cache.status, idem.cache.resposta);
+
+          if (tentativasApovacaoRestantes(rhUsuario.usuario).bloqueado) {
+            res.setHeader('Retry-After', String(retryAfterAprovacao(rhUsuario.usuario)));
+            return responder(429, erro('LIMITE_APROVACAO', 'muitas tentativas de código errado — espere e tente de novo'));
           }
-          // Recusar e revogar nao ativam nada — não exigem prova de posse,
-          // então continuam endereçáveis por dispositivo_id (linha da lista).
-          if (!body.dispositivo_id) return responder(422, { ok: false, erro: 'dispositivo_id obrigatorio' });
-          const dispositivo = estado.dispositivos.get(body.dispositivo_id);
-          if (!dispositivo) return responder(404, { ok: false, erro: 'aparelho nao encontrado' });
-          if (body.acao === 'recusar') {
-            if (dispositivo.estado !== 'pendente') return responder(422, { ok: false, erro: 'aparelho nao esta pendente' });
+
+          // Normalização (§1.3): caixa alta, formatação (traço/espaço) fora
+          // do alfabeto é descartada. Letra que o alfabeto nunca usa (O I L
+          // 0 1) é sempre erro de digitação — checagem estática da string,
+          // ANTES de qualquer busca, porque não conta nada sobre se aquele
+          // código já existiu (achado do QA: não pode virar oráculo).
+          const bruto = String(body.codigo || '').toUpperCase();
+          const semFormatacao = bruto.replace(/[\s-]+/g, '');
+          if (/[^A-Z0-9]/.test(semFormatacao) || [...semFormatacao].some(c => 'OIL01'.includes(c))) {
+            return responder(422, erro('CODIGO_COM_LETRA_INVALIDA',
+              'Esse código tem uma letra que a gente nunca usa (O, I, L, 0, 1). Confira na tela do aparelho.', 'codigo'));
+          }
+          const codigo = semFormatacao;
+          // "não existe", "expirou", "já foi recusado" e "já está ativo"
+          // colapsam numa mensagem só (§1.3): distinguir contaria pro RH se
+          // aquele código específico chegou a existir — oráculo de código
+          // válido, mesmo com força bruta inviável (insider com acesso de RH).
+          const RESPOSTA_CODIGO_NAO_ENCONTRADO = () =>
+            erro('CODIGO_NAO_ENCONTRADO', 'Código inválido ou expirado. Confira no aparelho e digite de novo.');
+          if (!codigo) {
+            registrarTentativaAprovacaoErrada(rhUsuario.usuario);
+            return responder(404, RESPOSTA_CODIGO_NAO_ENCONTRADO());
+          }
+          const dispositivoId = estado.codigosPendentes.get(codigo);
+          const dispositivo = dispositivoId && estado.dispositivos.get(dispositivoId);
+          if (!dispositivo || dispositivo.estado !== 'pendente' || codigoExpirado(dispositivo)) {
+            registrarTentativaAprovacaoErrada(rhUsuario.usuario);
+            return responder(404, RESPOSTA_CODIGO_NAO_ENCONTRADO());
+          }
+          // CODIGO_AMBIGUO (409, §1.3) fica sem caminho de teste: codigosPendentes
+          // é um Map indexado pelo próprio código, então duas linhas pendentes
+          // com o mesmo código são estruturalmente impossíveis aqui — a
+          // colisão só existiria com outro armazenamento (banco real).
+
+          const equipesIds = Array.isArray(body.equipes_ids) ? body.equipes_ids : [];
+          if (equipesIds.length === 0) {
+            return responder(422, erro('ESCOPO_VAZIO', 'Selecione ao menos uma equipe antes de liberar o aparelho.', 'equipes_ids'));
+          }
+          const equipesSelecionadas = equipesIds.map(id => estado.equipes.get(id));
+          if (equipesSelecionadas.some(e => !e || !e.ativo)) {
+            return responder(422, erro('EQUIPE_INVALIDA', 'uma das equipes selecionadas não existe ou está inativa', 'equipes_ids'));
+          }
+          const unidades = new Set(equipesSelecionadas.map(e => normalizarUnidade(e.unidade)));
+          if (unidades.size > 1) {
+            return responder(422, erro('EQUIPES_DE_UNIDADES_DIFERENTES', 'as equipes escolhidas são de unidades diferentes', 'equipes_ids'));
+          }
+          // Unidade é DERIVADA das equipes, nunca enviada pelo cliente (§2.4/§8-A).
+          const unidade = equipesSelecionadas[0].unidade;
+
+          estado.codigosPendentes.delete(codigo);
+          dispositivo.estado = 'ativo';
+          dispositivo.equipes_ids = equipesIds;
+          dispositivo.unidade = unidade;
+          dispositivo.configuracao_versao = 1;
+          dispositivo.aprovado_por = rhUsuario.usuario;
+          dispositivo.aprovado_em = new Date().toISOString();
+          dispositivo.codigo_curto = null;
+
+          const resposta = {
+            ok: true, dispositivo_id: dispositivo.dispositivo_id, apelido: dispositivo.apelido,
+            unidade, equipes_ids: equipesIds, request_id: requestId()
+          };
+          gravarIdempotencia(body.idempotency_key, idem.hash, 200, resposta);
+          return responder(200, resposta);
+        }
+
+        if (url.pathname.endsWith('/aparelho/recusar')) {
+          const idem = idempotente(body.idempotency_key, body, true);
+          if (idem.bloqueado) return responder(idem.bloqueado.status, idem.bloqueado.resposta);
+          if (idem.cache) return responder(idem.cache.status, idem.cache.resposta);
+
+          const dispositivoId = estado.pendentesPorId.get(body.pendente_id);
+          const dispositivo = dispositivoId && estado.dispositivos.get(dispositivoId);
+          if (!dispositivo) return responder(404, erro('PENDENTE_NAO_ENCONTRADO', 'linha pendente não encontrada', 'pendente_id'));
+          if (dispositivo.estado === 'ativo') return responder(409, erro('APARELHO_JA_ATIVO', 'este aparelho já foi aprovado'));
+          // Idempotente por pendente_id: recusar duas vezes devolve o mesmo
+          // 200, mesmo sem idempotency_key novo — já era 'negado'.
+          if (dispositivo.estado !== 'negado') {
             estado.codigosPendentes.delete(dispositivo.codigo_curto);
             dispositivo.estado = 'negado';
-          } else if (body.acao === 'revogar') {
-            if (dispositivo.estado !== 'ativo') return responder(422, { ok: false, erro: 'aparelho nao esta ativo' });
+            dispositivo.recusado_por = rhUsuario.usuario;
+            dispositivo.recusado_em = new Date().toISOString();
+            dispositivo.motivo_decisao = String(body.motivo || '').trim() || null;
+          }
+          const resposta = { ok: true, dispositivo_id: dispositivo.dispositivo_id, estado: dispositivo.estado, request_id: requestId() };
+          gravarIdempotencia(body.idempotency_key, idem.hash, 200, resposta);
+          return responder(200, resposta);
+        }
+
+        if (url.pathname.endsWith('/aparelho/revogar')) {
+          const idem = idempotente(body.idempotency_key, body, true);
+          if (idem.bloqueado) return responder(idem.bloqueado.status, idem.bloqueado.resposta);
+          if (idem.cache) return responder(idem.cache.status, idem.cache.resposta);
+
+          const dispositivo = estado.dispositivos.get(body.dispositivo_id);
+          if (!dispositivo) return responder(404, erro('APARELHO_NAO_ENCONTRADO', 'aparelho não encontrado', 'dispositivo_id'));
+          if (dispositivo.estado !== 'ativo' && dispositivo.estado !== 'revogado') {
+            return responder(422, erro('APARELHO_NAO_ATIVO', 'aparelho não está ativo', 'dispositivo_id'));
+          }
+          if (dispositivo.estado !== 'revogado') {
             dispositivo.estado = 'revogado';
             dispositivo.equipes_ids = [];
             // §1.5/§1.6: revogado_em é a âncora da janela de drenagem de 30
@@ -1015,10 +1171,44 @@ export function criarServidor(opts = {}) {
             dispositivo.revogado_por = rhUsuario.usuario;
             dispositivo.motivo_decisao = String(body.motivo || '').trim() || null;
             dispositivo.retidasPosRevogacao = 0;
-          } else {
-            return responder(422, { ok: false, erro: 'acao desconhecida' });
           }
-          return responder(200, { ok: true, dispositivo_id: dispositivo.dispositivo_id, estado: dispositivo.estado });
+          const resposta = { ok: true, dispositivo_id: dispositivo.dispositivo_id, estado: dispositivo.estado, request_id: requestId() };
+          gravarIdempotencia(body.idempotency_key, idem.hash, 200, resposta);
+          return responder(200, resposta);
+        }
+
+        if (url.pathname.endsWith('/aparelhos')) {
+          const agora = Date.now();
+          const listaDispositivos = [...estado.dispositivos.values()];
+          const pendentesDaMesmaRede = ipHash => listaDispositivos.filter(d =>
+            d.estado === 'pendente' && d.ip_hash === ipHash &&
+            (agora - Date.parse(d.primeiro_pedido_em || 0)) < 3600_000
+          ).length;
+          const pendentes = listaDispositivos.filter(d => d.estado === 'pendente')
+            .sort((a, b) => String(a.criado_em || '').localeCompare(String(b.criado_em || '')))
+            .map(d => ({
+              pendente_id: d.pendente_id, apelido_declarado: d.apelido, ua_resumida: resumirUa(d.ua),
+              geo_declarada: d.geo || null, primeiro_pedido_em: d.primeiro_pedido_em,
+              ultimo_pedido_em: d.ultimo_pedido_em, tentativas: d.tentativas || 1,
+              pedidos_da_mesma_rede_1h: pendentesDaMesmaRede(d.ip_hash)
+            }));
+          const ativos = listaDispositivos.filter(d => d.estado === 'ativo')
+            .sort((a, b) => String(b.ultimo_uso || '').localeCompare(String(a.ultimo_uso || '')))
+            .map(d => ({
+              dispositivo_id: d.dispositivo_id, apelido: d.apelido, unidade: d.unidade || null,
+              equipes_ids: d.equipes_ids, configuracao_versao: d.configuracao_versao,
+              ultimo_uso_em: d.ultimo_uso, aprovado_por: d.aprovado_por, aprovado_em: d.aprovado_em
+            }));
+          // §1.2: encerrados cobre 30 dias — não é histórico eterno.
+          const encerrados = listaDispositivos.filter(d =>
+            (d.estado === 'negado' && d.recusado_em && (agora - Date.parse(d.recusado_em)) < JANELA_DRENAGEM_MS) ||
+            (d.estado === 'revogado' && d.revogado_em && (agora - Date.parse(d.revogado_em)) < JANELA_DRENAGEM_MS)
+          ).map(d => ({
+            dispositivo_id: d.dispositivo_id, apelido: d.apelido, estado: d.estado,
+            em: d.estado === 'negado' ? d.recusado_em : d.revogado_em,
+            por: d.estado === 'negado' ? d.recusado_por : d.revogado_por
+          }));
+          return responder(200, { ok: true, pendentes, ativos, encerrados, request_id: requestId() });
         }
         return responder(404, { ok: false, erro: 'rota rh desconhecida' });
       }

@@ -56,11 +56,29 @@ async function logarRh(page) {
 async function abrirAbaAparelhos(page) {
   await page.click('#rh nav button[data-aba="aparelhos"]');
   await expect(page.locator('#rh-aparelhos')).not.toHaveClass(/hide/);
+  // T-C20AD3: pintarAparelhos() agora busca /rh/aparelhos antes de montar o
+  // HTML. Sem esperar o conteúdo de verdade, um teste que checa "o código
+  // não aparece na aba" poderia passar vazio — ausência por não ter
+  // carregado ainda, não por a aba estar correta (mesma armadilha de
+  // asserção de ausência temporal já vista neste projeto). O <h2> só existe
+  // depois do fetch resolver e o innerHTML ser escrito.
+  await expect(page.locator('#rh-aparelhos h2').first()).toBeVisible({ timeout: 8000 });
 }
 
+/**
+ * T-C20AD3: aprovar não é mais um clique só — Liberar abre a tela de escopo
+ * (§1.3, "Quem bate ponto neste aparelho?") e só confirma depois de marcar
+ * ao menos uma equipe. Sem equipe marcada o cliente nem chega a mandar o
+ * código pro servidor (ESCOPO_VAZIO é checado antes, no próprio botão), por
+ * isso mesmo os testes de código ERRADO/expirado precisam passar por aqui
+ * pra ver o servidor responder. beforeEach sempre semeia eq-1/eq-2 ativas,
+ * então a primeira equipe da lista sempre existe.
+ */
 async function digitarCodigo(page, codigo) {
   await page.fill('#aparelhoCodigo', codigo);
   await page.click('#btnLiberarAparelho');
+  await page.locator('#aparelhoLiberarConf input[type=checkbox]').first().check();
+  await page.click('#btnConfirmarLiberar');
 }
 
 test('o código do pendente nunca aparece na aba Aparelhos do RH, nem no HTML nem na resposta de /rh/dados', async ({ page }) => {
@@ -140,12 +158,23 @@ test('RH recusa aparelho pendente pela linha da lista: some da fila e o aparelho
   await logarRh(page);
   await abrirAbaAparelhos(page);
 
+  // T-C20AD3: pendentes[] de /rh/aparelhos não expõe dispositivo_id (§1.1
+  // regra 2 — a lista de pendentes não carrega nenhum identificador que
+  // outra rota aceite como alvo de ativação). A linha só mostra apelido, que
+  // é o mesmo texto por trás — só lido direto do estado do servidor, nunca
+  // do DOM.
   const dispositivoId = [...ctx.estado.dispositivos.values()][0].dispositivo_id;
-  const linhaPendente = page.locator('.linha-item', { hasText: dispositivoId.slice(0, 8) });
+  const apelido = ctx.estado.dispositivos.get(dispositivoId).apelido;
+  const linhaPendente = page.locator('.linha-item', { hasText: apelido });
   await expect(linhaPendente).toBeVisible();
   await linhaPendente.getByRole('button', { name: 'Recusar' }).click();
   await expect(page.locator('#toast')).toContainText('recusado', { timeout: 8000 });
-  await expect(page.locator('.linha-item', { hasText: dispositivoId.slice(0, 8) })).toHaveCount(0, { timeout: 8000 });
+  // T-C20AD3 (§1.2): recusado não some da TELA inteira — sai da lista
+  // ACIONÁVEL (Pedindo liberação) e vira linha só-leitura em Encerrados (30
+  // dias de auditoria). "some da tela inteira" deixou de ser a garantia
+  // certa; a garantia certa agora é "não sobra em pé nem clicável".
+  await expect(page.locator('#aparelhoPendentesLista .linha-item', { hasText: apelido })).toHaveCount(0, { timeout: 8000 });
+  await expect(page.locator('.linha-item', { hasText: apelido }).getByRole('button', { name: 'Recusar' })).toHaveCount(0);
 
   expect(ctx.estado.dispositivos.get(dispositivoId).estado).toBe('negado');
 
@@ -171,7 +200,11 @@ test('RH revoga aparelho já liberado: sai da lista de liberados e o aparelho pe
   await expect(page.locator('#btnConfirmarRevogar')).toBeVisible({ timeout: 8000 });
   await page.click('#btnConfirmarRevogar');
   await expect(page.locator('#toast')).toContainText('revogado', { timeout: 8000 });
-  await expect(page.locator('.linha-item', { hasText: dispositivoId.slice(0, 8) })).toHaveCount(0, { timeout: 8000 });
+  // T-C20AD3 (§1.2): mesma mudança de garantia do teste de recusar — revogado
+  // sai da lista ACIONÁVEL (Liberados), não da tela inteira; reaparece em
+  // Encerrados, sem botão.
+  await expect(page.locator('#aparelhoAtivosLista .linha-item', { hasText: dispositivoId.slice(0, 8) })).toHaveCount(0, { timeout: 8000 });
+  await expect(page.locator('.linha-item', { hasText: dispositivoId.slice(0, 8) }).getByRole('button', { name: 'Revogar' })).toHaveCount(0);
 
   expect(ctx.estado.dispositivos.get(dispositivoId).estado).toBe('revogado');
 });
