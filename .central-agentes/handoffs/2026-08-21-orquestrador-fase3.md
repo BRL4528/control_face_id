@@ -362,3 +362,31 @@ cliente como **limite conhecido e nomeado**.
 
 Os 3 vermelhos do QA passariam com qualquer das duas fórmulas erradas — ele vai declarar no
 arquivo que não cobrem viés antropométrico.
+
+## Estado final do dia
+
+`integra/v3-r3` em **c0f7937**, `sw.js` em v16: **102 unitários · 173 e2e · 16 guardas —
+zero falhas nas três coberturas.**
+
+**Entregue:** equipes com membros geridos de dentro da equipe · colaborador com telefone
+obrigatório, edição e inativar sem apagar histórico · liberação de aparelho por código
+digitado · cadastro de face pela câmera do PC e por upload de 3 fotos · marcação de
+aparelho revogado retida na mesa do RH · link do celular construído e testado, aguardando
+só o hostname · consistência de pose entre as 3 fotos como função pura testada e **não
+ligada** (ligação fica cliente-side, cartão em backlog).
+
+**Quatro defeitos que já estavam em produção, consertados com teste que os pega:** app
+nascendo trancado · coerência aceitando duas pessoas no mesmo template · aprovação de
+aparelho dando acesso a todas as equipes · refoco atrasado no login escrevendo a senha no
+campo de usuário.
+
+**Aberto e documentado:** rastro de tentativa errada de código (T-81C721 fechado; a lacuna
+2.1e segue em `docs/fase3-seguranca.md`) · unidade sem seletor nem normalização (T-13FDDF) ·
+ligar `avaliarPoseLote` no cliente (T-A17B32) · `fluxo.spec.js:245` falhou uma vez sem
+reproduzir e **sem ser de margem apertada** (T-D13271 — hipótese: estado compartilhado do
+servidor falso entre specs) · e as quatro decisões do cliente.
+
+**O que não vai existir nesta versão, por decisão e não por falta de trabalho:** gate
+absoluto de pose. Em 2D exige constante antropométrica, e ela recusaria umas anatomias mais
+que outras. Cegueira uniforme é o defeito justo. O eixo relativo cobre o cadastro (3 fotos)
+e não a portaria (1 captura, sem referência reconstruível do descritor 128d).
