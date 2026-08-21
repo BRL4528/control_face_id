@@ -383,8 +383,15 @@ campo de usuário.
 **Aberto e documentado:** rastro de tentativa errada de código (T-81C721 fechado; a lacuna
 2.1e segue em `docs/fase3-seguranca.md`) · unidade sem seletor nem normalização (T-13FDDF) ·
 ligar `avaliarPoseLote` no cliente (T-A17B32) · `fluxo.spec.js:245` falhou uma vez sem
-reproduzir e **sem ser de margem apertada** (T-D13271 — hipótese: estado compartilhado do
-servidor falso entre specs) · e as quatro decisões do cliente.
+reproduzir e **sem ser de margem apertada** (T-D13271). A hipótese de estado compartilhado
+está **morta**, medida por leitura: o servidor falso é recriado a cada teste e não há estado
+mutável em escopo de módulo. O mecanismo que sobrou é melhor: **9 dos 21 specs fecham o
+servidor sem aguardar** (`close()` sem `await`), contra 12 que aguardam — e `fluxo.spec.js`
+está no grupo que não aguarda e é o maior arquivo da suíte (26 testes). Isso explica o que
+"flake de timing" não explicava: não é o teste ser lento, é pressão de recurso **acumulada**
+que só existe na suíte inteira; e quem cai primeiro é quem faz mais rede — o `:245` tem uma
+ida e volta a mais que os vizinhos. Conserto candidato: alinhar os 9 com os 12, uma linha por
+arquivo, sem mudar o que nenhum teste afirma · e as quatro decisões do cliente.
 
 **O que não vai existir nesta versão, por decisão e não por falta de trabalho:** gate
 absoluto de pose. Em 2D exige constante antropométrica, e ela recusaria umas anatomias mais
