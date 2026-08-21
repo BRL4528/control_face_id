@@ -94,7 +94,7 @@ test('digitar um código errado não ativa o aparelho', async ({ page }) => {
   await abrirAbaAparelhos(page);
 
   await digitarCodigo(page, 'ZZZZZZ');
-  await expect(page.locator('#toast')).toContainText('invalido', { timeout: 5000 });
+  await expect(page.locator('#toast')).toContainText('inválido', { timeout: 5000 });
   const dispositivo = [...ctx.estado.dispositivos.values()][0];
   expect(dispositivo.estado).toBe('pendente');
 });
@@ -125,6 +125,10 @@ test('aparelho pede liberação, RH digita o código na aba Aparelhos, e a tela 
     // js/app.js já reagenda sozinho é que pode fazer a tela virar.
     await expect(page.locator('#porta')).not.toHaveClass(/hide/, { timeout: 30000 });
     await expect(page.locator('#aguardando')).toHaveClass(/hide/);
+    // #porta e o sinal que discrimina: fica escondido enquanto o aparelho
+    // esta pendente. btnPonto habilitado, sozinho, ja e verdadeiro antes de
+    // aprovar (toBeEnabled ignora visibilidade) e por isso nao prova nada.
+    await expect(page.locator('#porta')).toBeVisible();
     await expect(page.locator('#btnPonto')).toBeEnabled();
   } finally {
     await rhContexto.close();
@@ -179,7 +183,7 @@ test('código pendente expira em 24h: aparelho recebe um novo sozinho e o antigo
   dispositivo.criado_em = new Date(Date.now() - 25 * 3600 * 1000).toISOString();
 
   await digitarCodigo(page, codigoAntigo);
-  await expect(page.locator('#toast')).toContainText('invalido', { timeout: 5000 });
+  await expect(page.locator('#toast')).toContainText('inválido', { timeout: 5000 });
   expect(dispositivo.estado).toBe('pendente');
 
   // a próxima consulta de estado do próprio aparelho troca o código sozinha —

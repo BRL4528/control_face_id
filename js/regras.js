@@ -255,6 +255,71 @@ export function separarAparelhos(dispositivos) {
   return { pendentes, aprovados };
 }
 
+/* ------------------------------------------------------------ colaborador */
+
+const TELEFONE_INVALIDO = { ok: false, codigo: 'TELEFONE_INVALIDO', mensagem: 'Telefone inválido', campo: 'telefone' };
+const TELEFONE_NAO_MOVEL = {
+  ok: false, codigo: 'TELEFONE_NAO_MOVEL', campo: 'telefone',
+  mensagem: 'Precisa ser um celular: é por ele que a gente manda o link do cadastro de face.'
+};
+
+// DDD (2 dígitos) + 9 dígitos do celular, sem o +55.
+function validarCelularBr(onze) {
+  if (onze.length !== 11) return TELEFONE_INVALIDO;
+  const ddd = onze.slice(0, 2);
+  if (ddd.includes('0') || Number(ddd) < 11 || Number(ddd) > 99) return TELEFONE_INVALIDO;
+  if (onze[2] !== '9') return TELEFONE_NAO_MOVEL;
+  return { ok: true, e164: '+55' + onze, estrangeiro: false };
+}
+
+/**
+ * Normaliza um telefone bruto para E.164 e classifica o resultado — contrato
+ * docs/fase3-contrato.md § 3.1. Compartilhada entre servidor e tela: as duas
+ * pontas têm de concordar sobre o que é um celular válido, senão o cliente
+ * aceita o que o servidor recusa (ou vice-versa) e alguém descobre tarde.
+ */
+export function normalizarTelefone(bruto) {
+  const limpo = String(bruto == null ? '' : bruto).replace(/[\s\-.()]/g, '');
+  if (!limpo) return { ok: false, codigo: 'TELEFONE_OBRIGATORIO', mensagem: 'Telefone é obrigatório', campo: 'telefone' };
+
+  if (limpo.startsWith('+')) {
+    const digitos = limpo.slice(1);
+    if (!/^\d+$/.test(digitos)) return TELEFONE_INVALIDO;
+    if (digitos.startsWith('55')) return validarCelularBr(digitos.slice(2));
+    if (digitos.length < 8 || digitos.length > 15) return TELEFONE_INVALIDO;
+    return { ok: true, e164: '+' + digitos, estrangeiro: true };
+  }
+
+  if (!/^\d+$/.test(limpo)) return TELEFONE_INVALIDO;
+  if (limpo.length === 11) return validarCelularBr(limpo);
+  if (limpo.length === 13 && limpo.startsWith('55')) return validarCelularBr(limpo.slice(2));
+  if (limpo.length === 10 || (limpo.length === 12 && limpo.startsWith('55'))) return TELEFONE_NAO_MOVEL;
+  return TELEFONE_INVALIDO;
+}
+
+/**
+ * Quem mais, entre pessoas ATIVAS, usa o mesmo telefone — derivado na leitura,
+ * nunca persistido (§3.1): o estado se cura sozinho quando alguém troca de
+ * número ou é inativado, sem ninguém precisar desfazer nada.
+ * Devolve um mapa `pessoa_id -> [{pessoa_id, nome}, …]` só para quem compartilha;
+ * pessoa sem par não entra no mapa.
+ */
+export function telefonesCompartilhados(pessoas) {
+  const porTelefone = {};
+  for (const p of (pessoas || [])) {
+    if (!p || !p.ativo || !p.telefone) continue;
+    (porTelefone[p.telefone] = porTelefone[p.telefone] || []).push(p);
+  }
+  const mapa = {};
+  for (const grupo of Object.values(porTelefone)) {
+    if (grupo.length < 2) continue;
+    for (const p of grupo) {
+      mapa[p.pessoa_id] = grupo.filter(x => x.pessoa_id !== p.pessoa_id).map(x => ({ pessoa_id: x.pessoa_id, nome: x.nome }));
+    }
+  }
+  return mapa;
+}
+
 /**
  * Pendências agrupadas por motivo, para as barras. Uma mesma marcação pode
  * disparar mais de um motivo (manual E relógio fora): conta em cada um, então

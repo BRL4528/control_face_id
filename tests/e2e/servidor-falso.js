@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { avaliarLoteFace } from '../../js/coerencia.js';
+import { normalizarTelefone, telefonesCompartilhados } from '../../js/regras.js';
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -118,7 +119,13 @@ export function criarServidor(opts = {}) {
     colaboradoresCriados: [],
     decisoes: [],
     lotesSimultaneos: 0,
-    maxLotesSimultaneos: 0
+    maxLotesSimultaneos: 0,
+    // T-8188C6: equipe real, não mais hardcoded no corpo de /rh/dados —
+    // senão criar/inativar equipe não tem onde persistir (docs/fase3-contrato.md §2.3).
+    equipes: new Map([
+      ['eq-1', { equipe_id: 'eq-1', nome: 'Equipe Um', unidade: 'Unidade A', ativo: true }],
+      ['eq-2', { equipe_id: 'eq-2', nome: 'Equipe Dois', unidade: 'Unidade A', ativo: true }]
+    ])
   };
 
   for (const marcacao of (opts.marcacoes || [])) semearMarcacao(estado, marcacao);
@@ -136,7 +143,15 @@ export function criarServidor(opts = {}) {
     { pessoa_id: 'p-bruno', nome: 'Bruno Lima', matricula: '002', equipe_id: 'eq-1', papel: 'colaborador' },
     { pessoa_id: 'p-carla', nome: 'Carla Dias', matricula: '003', equipe_id: 'eq-2', papel: 'colaborador' },
     { pessoa_id: 'p-gestor', nome: 'Gestor Piloto', matricula: 'G01', equipe_id: 'eq-1', papel: 'gestor' }
-  ]).map(p => Object.assign({ versao: 1, vetores: [vetorDe(p.pessoa_id)], miniatura: '' }, p));
+  ]).map(p => Object.assign({
+    versao: 1, vetores: [vetorDe(p.pessoa_id)], miniatura: '',
+    // T-8188C6: telefone vazio é tolerado na leitura (§3.1, "sem migração de
+    // dados") — só passa a ser exigido na escrita, então o piloto antigo continua
+    // legível sem backfill.
+    telefone: '', versao_cadastro: 1,
+    telefone_autorizado_por: null, telefone_autorizado_em: null, telefone_autorizacao_motivo: null,
+    inativado_em: null, inativado_por: null, motivo_inativacao: null
+  }, p));
 
   const alfabetoCodigo = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   const requestId = () => crypto.randomUUID();
@@ -175,6 +190,68 @@ export function criarServidor(opts = {}) {
     if (!dispositivo || !credencial || dispositivo.credencial_hash !== hashCredencial(credencial)) return null;
     dispositivo.ultimo_uso = new Date().toISOString();
     return dispositivo;
+  };
+
+  // C1-C3 do contrato (fase3-contrato.md §0): chave de idempotência no CORPO
+  // pras rotas /efrat/rh/* (credencial já é corpo). Mesma chave + mesmo corpo
+  // repete a resposta gravada; mesma chave + corpo diferente é conflito.
+  // Só as rotas NOVAS de escrita exigem a chave (C2) — por isso quem chama
+  // decide se `obrigatoria` é true.
+  const idempotente = (chave, corpo, obrigatoria) => {
+    if (!chave) {
+      if (obrigatoria) return { bloqueado: { status: 400, resposta: erro('IDEMPOTENCIA_AUSENTE', 'chave de idempotência obrigatória') } };
+      return { hash: null };
+    }
+    const hash = hashCredencial(JSON.stringify(corpo));
+    const anterior = estado.idempotencia.get(chave);
+    if (anterior && anterior.hash !== hash) {
+      return { bloqueado: { status: 409, resposta: erro('IDEMPOTENCIA_CONFLITANTE', 'chave reutilizada com outro corpo') } };
+    }
+    if (anterior) return { cache: anterior };
+    return { hash };
+  };
+  const gravarIdempotencia = (chave, hash, status, resposta) => {
+    if (chave && hash) estado.idempotencia.set(chave, { hash, status, resposta });
+  };
+
+  // T-8188C6: forma pública de uma pessoa, para corpo de erro (CADASTRO_DESATUALIZADO)
+  // e pra base do cálculo de telefone_compartilhado — a mesma forma que /rh/dados devolve.
+  const pessoaParaResposta = p => ({
+    pessoa_id: p.pessoa_id, matricula: p.matricula, nome: p.nome,
+    equipe_id: p.equipe_id, papel: p.papel, ativo: !estado.inativos.has(p.pessoa_id),
+    telefone: p.telefone || '', versao_cadastro: p.versao_cadastro,
+    tem_biometria: !!(p.vetores && p.vetores.length)
+  });
+
+  /**
+   * Normaliza e valida telefone (js/regras.js, compartilhado com o cliente);
+   * se colide com pessoa ativa diferente, exige autorizar_telefone_duplicado +
+   * motivo de 10-200 chars (§3.1). `pessoaIdAtual` exclui a própria pessoa da
+   * checagem de colisão (edição/reativação não colide consigo mesma).
+   */
+  const validarTelefoneOuDuplicado = (corpo, pessoaIdAtual) => {
+    const r = normalizarTelefone(corpo.telefone);
+    if (!r.ok) return { ok: false, status: 422, corpo: erro(r.codigo, r.mensagem, r.campo) };
+    const outra = pessoas.find(p => p.pessoa_id !== pessoaIdAtual && p.telefone === r.e164 && !estado.inativos.has(p.pessoa_id));
+    if (!outra) return { ok: true, e164: r.e164, autorizacao: null };
+    if (corpo.autorizar_telefone_duplicado === true) {
+      const motivo = String(corpo.motivo_telefone_duplicado || '').trim();
+      if (motivo.length < 10 || motivo.length > 200) {
+        return { ok: false, status: 422, corpo: erro('MOTIVO_INVALIDO', 'o motivo precisa ter entre 10 e 200 caracteres', 'motivo_telefone_duplicado') };
+      }
+      return {
+        ok: true, e164: r.e164,
+        autorizacao: {
+          telefone_autorizado_por: rhUsuario.usuario, telefone_autorizado_em: new Date().toISOString(),
+          telefone_autorizacao_motivo: motivo
+        }
+      };
+    }
+    return {
+      ok: false, status: 409,
+      corpo: Object.assign(erro('TELEFONE_DUPLICADO', 'esse telefone já é de ' + outra.nome, 'telefone'),
+        { pessoa_id: outra.pessoa_id, nome: outra.nome })
+    };
   };
 
   const distancia = (a, b) => Math.sqrt(a.reduce((soma, valor, i) => {
@@ -567,19 +644,36 @@ export function criarServidor(opts = {}) {
             requer_revisao: !!m.requer_revisao,
             marcado_dia: String(m.marcado_em).slice(0, 10)
           }));
+          // T-8188C6: telefone_compartilhado é derivado na leitura (§3.1),
+          // nunca gravado — calcula sobre a lista completa de pessoas ativas
+          // antes de montar a resposta.
+          const pessoasBase = pessoas.map(p => ({
+            pessoa_id: p.pessoa_id, matricula: p.matricula, nome: p.nome,
+            equipe_id: p.equipe_id, papel: p.papel, ativo: !estado.inativos.has(p.pessoa_id),
+            telefone: p.telefone || '', versao_cadastro: p.versao_cadastro,
+            equipes_geridas: '', tem_biometria: !!(p.vetores && p.vetores.length), miniatura: p.miniatura || null
+          }));
+          const compartilhados = telefonesCompartilhados(pessoasBase);
           return responder(200, {
             ok: true, usuario: { usuario: rhUsuario.usuario, nome: rhUsuario.nome },
             periodo_dias: body.dias || 30,
-            equipes: [
-              { equipe_id: 'eq-1', nome: 'Equipe Um', unidade: 'Unidade A', lat: 0, lng: 0, raio_m: 500, ativo: true },
-              { equipe_id: 'eq-2', nome: 'Equipe Dois', unidade: 'Unidade A', lat: 0, lng: 0, raio_m: 500, ativo: true }
-            ],
-            pessoas: pessoas.map(p => ({
-              pessoa_id: p.pessoa_id, matricula: p.matricula, nome: p.nome,
-              equipe_id: p.equipe_id, papel: p.papel, ativo: !estado.inativos.has(p.pessoa_id),
-              equipes_geridas: '', tem_biometria: !!(p.vetores && p.vetores.length), miniatura: p.miniatura || null
+            equipes: [...estado.equipes.values()].map(e => Object.assign({}, e)),
+            pessoas: pessoasBase.map(p => Object.assign({}, p, {
+              telefone_compartilhado: !!compartilhados[p.pessoa_id],
+              telefone_compartilhado_com: compartilhados[p.pessoa_id] || []
             })),
-            marcacoes: marcs, recadastros: estado.recadastros,
+            marcacoes: marcs,
+            // O decimal de coerência NUNCA sai daqui, de propósito (correção do
+            // Orquestrador sobre T-8ADD9C/js/rh.js): a faixa aceita (abaixo de
+            // 0,45) é ocupada por variação legítima de adorno (capacete, boné,
+            // máscara) até encostar no limiar — não há corte dentro dela que
+            // sirva de sinal, então não vira nem número nem booleano, só some.
+            // O valor cru continua persistido e volta nas rotas de ESCRITA
+            // (auditoria/recalibração) — só a leitura de /rh/dados o esconde.
+            recadastros: estado.recadastros.map(t => {
+              const { coerencia, ...semCoerencia } = t;
+              return semCoerencia;
+            }),
             // Aba Aparelhos (T-87615C): codigo_curto NUNCA sai daqui — é prova
             // de posse física do aparelho. Se aparecesse numa leitura do RH,
             // deixaria de provar que alguém está olhando a tela de verdade e
@@ -592,16 +686,162 @@ export function criarServidor(opts = {}) {
           });
         }
         if (url.pathname.endsWith('/equipe')) {
-          if (!String(body.nome || '').trim()) return responder(422, { ok: false, erro: 'nome da equipe e obrigatorio' });
-          estado.equipesCriadas.push(body.nome);
-          return responder(200, { ok: true, equipe_id: 'eq-nova', nome: body.nome });
+          const nome = body.nome != null ? String(body.nome).trim() : null;
+          const nomeValido = n => n && n.length >= 2 && n.length <= 60;
+
+          if (body.equipe_id) {
+            // atualizar (§2.3) — inclui inativar, que é um `ativo: false` neste corpo.
+            const equipe = estado.equipes.get(body.equipe_id);
+            if (!equipe) return responder(404, { ok: false, erro: 'equipe nao encontrada' });
+            if (nome != null && nome !== equipe.nome) {
+              if (!nomeValido(nome)) return responder(422, erro('NOME_INVALIDO', 'nome precisa ter entre 2 e 60 caracteres', 'nome'));
+              const duplicada = [...estado.equipes.values()]
+                .some(e => e.equipe_id !== equipe.equipe_id && e.ativo && e.nome.toLowerCase() === nome.toLowerCase());
+              if (duplicada) return responder(409, erro('EQUIPE_DUPLICADA', 'já existe uma equipe ativa com esse nome', 'nome'));
+              equipe.nome = nome;
+            }
+            if (body.unidade != null) equipe.unidade = String(body.unidade).trim();
+            if (body.ativo === false && equipe.ativo) {
+              const membrosAtivos = pessoas.filter(p => p.equipe_id === equipe.equipe_id && !estado.inativos.has(p.pessoa_id)).length;
+              if (membrosAtivos > 0) {
+                return responder(422, Object.assign(
+                  erro('EQUIPE_COM_MEMBROS', 'inative os membros antes de inativar a equipe'),
+                  { membros_ativos: membrosAtivos }));
+              }
+              equipe.ativo = false;
+              // Equipe inativa sai do escopo de todo aparelho que a tinha (§2.3).
+              for (const d of estado.dispositivos.values()) {
+                if (d.equipes_ids && d.equipes_ids.includes(equipe.equipe_id)) {
+                  d.equipes_ids = d.equipes_ids.filter(id => id !== equipe.equipe_id);
+                  d.configuracao_versao = (d.configuracao_versao || 0) + 1;
+                }
+              }
+            } else if (body.ativo === true) {
+              equipe.ativo = true;
+            }
+            return responder(200, { ok: true, equipe_id: equipe.equipe_id, nome: equipe.nome });
+          }
+
+          // criar
+          if (!nomeValido(nome)) {
+            return responder(422, erro(nome ? 'NOME_INVALIDO' : 'NOME_OBRIGATORIO',
+              nome ? 'nome precisa ter entre 2 e 60 caracteres' : 'nome da equipe é obrigatório', 'nome'));
+          }
+          const duplicada = [...estado.equipes.values()].some(e => e.ativo && e.nome.toLowerCase() === nome.toLowerCase());
+          if (duplicada) return responder(409, erro('EQUIPE_DUPLICADA', 'já existe uma equipe ativa com esse nome', 'nome'));
+          const novoId = 'eq-' + crypto.randomUUID().slice(0, 8);
+          estado.equipes.set(novoId, { equipe_id: novoId, nome, unidade: String(body.unidade || '').trim(), ativo: true });
+          estado.equipesCriadas.push(nome);
+          return responder(200, { ok: true, equipe_id: novoId, nome });
+        }
+        if (url.pathname.endsWith('/colaborador/inativar') || url.pathname.endsWith('/colaborador/reativar')) {
+          const reativando = url.pathname.endsWith('/reativar');
+          const idem = idempotente(body.idempotency_key, body, true);
+          if (idem.bloqueado) return responder(idem.bloqueado.status, idem.bloqueado.resposta);
+          if (idem.cache) return responder(idem.cache.status, idem.cache.resposta);
+
+          const pessoa = pessoas.find(p => p.pessoa_id === body.pessoa_id);
+          if (!pessoa) return responder(404, { ok: false, erro: 'pessoa nao encontrada' });
+          const estaInativa = estado.inativos.has(pessoa.pessoa_id);
+          const jaNoEstadoPedido = reativando ? !estaInativa : estaInativa;
+
+          if (!jaNoEstadoPedido) {
+            if (body.versao_cadastro !== pessoa.versao_cadastro) {
+              const resp = Object.assign(erro('CADASTRO_DESATUALIZADO', 'alguém alterou esta pessoa enquanto você decidia'),
+                { registro_atual: pessoaParaResposta(pessoa) });
+              return responder(409, resp);
+            }
+            if (reativando) {
+              // §3.3.5: reativar exige telefone válido no corpo — devolve sem biometria.
+              const r = validarTelefoneOuDuplicado(body, pessoa.pessoa_id);
+              if (!r.ok) return responder(r.status, r.corpo);
+              estado.inativos.delete(pessoa.pessoa_id);
+              pessoa.telefone = r.e164;
+              Object.assign(pessoa, r.autorizacao || {});
+              pessoa.inativado_em = null; pessoa.inativado_por = null; pessoa.motivo_inativacao = null;
+            } else {
+              const motivo = String(body.motivo || '').trim();
+              if (motivo.length < 10 || motivo.length > 500) {
+                return responder(422, erro('MOTIVO_INVALIDO', 'o motivo precisa ter entre 10 e 500 caracteres', 'motivo'));
+              }
+              estado.inativos.add(pessoa.pessoa_id);
+              pessoa.inativado_em = new Date().toISOString();
+              pessoa.inativado_por = rhUsuario.usuario;
+              pessoa.motivo_inativacao = motivo;
+              // Biometria descartada ao inativar (§3.3.4) — o histórico de ponto
+              // fica; o vetor/miniatura, não. Reativar exige cadastro novo.
+              pessoa.vetores = [];
+              pessoa.miniatura = '';
+            }
+            pessoa.versao_cadastro++;
+          }
+
+          const resposta = { ok: true, pessoa_id: pessoa.pessoa_id, ativo: !estado.inativos.has(pessoa.pessoa_id), versao_cadastro: pessoa.versao_cadastro };
+          gravarIdempotencia(body.idempotency_key, idem.hash, 200, resposta);
+          return responder(200, resposta);
         }
         if (url.pathname.endsWith('/colaborador')) {
-          if (!String(body.nome || '').trim() || !String(body.matricula || '').trim()) {
-            return responder(422, { ok: false, erro: 'nome e matricula sao obrigatorios' });
+          // Campos derivados/imutáveis nunca aceitos na escrita (§3.2).
+          if (body.ativo !== undefined) {
+            return responder(400, erro('CAMPO_NAO_EDITAVEL', 'ativo não é editável por aqui — use inativar/reativar', 'ativo'));
           }
-          estado.colaboradoresCriados.push(body.nome);
-          return responder(200, { ok: true, pessoa_id: body.pessoa_id || 'ps-novo', nome: body.nome });
+          const derivado = ['tem_biometria', 'sem_equipe', 'miniatura', 'telefone_compartilhado', 'telefone_compartilhado_com']
+            .find(c => body[c] !== undefined);
+          if (derivado) return responder(400, erro('CAMPO_DERIVADO', derivado + ' é calculado, não pode ser gravado', derivado));
+
+          if (body.pessoa_id) {
+            // edição (§3.2)
+            const pessoa = pessoas.find(p => p.pessoa_id === body.pessoa_id);
+            if (!pessoa) return responder(404, { ok: false, erro: 'pessoa nao encontrada' });
+            if (body.versao_cadastro !== pessoa.versao_cadastro) {
+              const resp = Object.assign(erro('CADASTRO_DESATUALIZADO', 'alguém alterou esta pessoa enquanto você editava'),
+                { registro_atual: pessoaParaResposta(pessoa) });
+              return responder(409, resp);
+            }
+            const novaMatricula = body.matricula != null ? String(body.matricula).trim() : pessoa.matricula;
+            if (novaMatricula !== pessoa.matricula) {
+              const temMarcacao = [...estado.marcacoes.values()].some(m => m.pessoa_id === pessoa.pessoa_id);
+              if (temMarcacao) return responder(422, erro('MATRICULA_IMUTAVEL', 'matrícula não pode mudar depois da primeira marcação', 'matricula'));
+              if (!novaMatricula) return responder(422, { ok: false, erro: 'matricula e obrigatoria' });
+            }
+            const nome = body.nome != null ? String(body.nome).trim() : pessoa.nome;
+            if (!nome) return responder(422, { ok: false, erro: 'nome e obrigatorio' });
+
+            let telefoneFinal = pessoa.telefone;
+            let autorizacao = null;
+            if (body.telefone !== undefined) {
+              const r = validarTelefoneOuDuplicado(body, pessoa.pessoa_id);
+              if (!r.ok) return responder(r.status, r.corpo);
+              telefoneFinal = r.e164;
+              autorizacao = r.autorizacao;
+            }
+
+            pessoa.nome = nome;
+            pessoa.matricula = novaMatricula;
+            pessoa.telefone = telefoneFinal;
+            if (autorizacao) Object.assign(pessoa, autorizacao);
+            if (body.equipe_id !== undefined) pessoa.equipe_id = body.equipe_id;   // inclusive null: §2.1, sem equipe é estado válido
+            if (body.papel !== undefined) pessoa.papel = body.papel;
+            pessoa.versao_cadastro++;
+            return responder(200, { ok: true, pessoa_id: pessoa.pessoa_id, nome: pessoa.nome, versao_cadastro: pessoa.versao_cadastro });
+          }
+
+          // criação
+          const nome = String(body.nome || '').trim();
+          const matricula = String(body.matricula || '').trim();
+          if (!nome || !matricula) return responder(422, { ok: false, erro: 'nome e matricula sao obrigatorios' });
+          const r = validarTelefoneOuDuplicado(body, null);
+          if (!r.ok) return responder(r.status, r.corpo);
+          const novoId = 'p-' + crypto.randomUUID().slice(0, 8);
+          pessoas.push({
+            pessoa_id: novoId, nome, matricula, equipe_id: body.equipe_id || null, papel: body.papel || 'colaborador',
+            telefone: r.e164, versao: 0, vetores: [], miniatura: '', versao_cadastro: 1,
+            inativado_em: null, inativado_por: null, motivo_inativacao: null,
+            telefone_autorizado_por: null, telefone_autorizado_em: null, telefone_autorizacao_motivo: null,
+            ...(r.autorizacao || {})
+          });
+          estado.colaboradoresCriados.push(nome);
+          return responder(200, { ok: true, pessoa_id: novoId, nome });
         }
         if (url.pathname.endsWith('/decidir')) {
           if (!body.id) return responder(422, { ok: false, erro: 'id obrigatorio' });
@@ -621,19 +861,24 @@ export function criarServidor(opts = {}) {
           // vendo a tela do aparelho, nao so clicando num item de lista.
           if (body.acao === 'aprovar') {
             const codigo = String(body.codigo || '').trim().toUpperCase();
-            if (!codigo) return responder(422, { ok: false, erro: 'digite o codigo mostrado no aparelho' });
+            if (!codigo) return responder(422, { ok: false, erro: 'Digite o código mostrado no aparelho.' });
             const dispositivoId = estado.codigosPendentes.get(codigo);
             const dispositivo = dispositivoId && estado.dispositivos.get(dispositivoId);
             if (!dispositivo || dispositivo.estado !== 'pendente' || codigoExpirado(dispositivo)) {
-              return responder(422, { ok: false, erro: 'codigo invalido ou expirado' });
+              // "inválido" e "expirado" viram UMA mensagem só de propósito
+              // (docs/fase3-contrato.md §1.3): separar as duas contaria pro RH
+              // se aquele código já existiu algum dia — oráculo de código
+              // válido. Texto provisório: troca quando o Designer fechar o dele.
+              return responder(422, { ok: false, erro: 'Código inválido. Confira com a pessoa e digite de novo.' });
             }
             estado.codigosPendentes.delete(codigo);
             dispositivo.estado = 'ativo';
-            // Sem tela de equipes/local ainda nesta fase (docs/fase3-rh-pessoas.md
-            // § B, fora do escopo de T-87615C): aprovar libera para todas as
-            // equipes conhecidas, senão o aparelho fica ativo e sem escopo —
-            // /efrat/carga devolveria DISPOSITIVO_SEM_ESCOPO e o deadlock so mudaria de lugar.
-            dispositivo.equipes_ids = ['eq-1', 'eq-2'];
+            // Sem tela de escopo por aparelho ainda nesta fase (fora do
+            // contrato de T-87615C): aprovar libera para todas as equipes
+            // ATIVAS conhecidas, senão o aparelho fica ativo e sem escopo —
+            // /efrat/carga devolveria DISPOSITIVO_SEM_ESCOPO e o deadlock só
+            // mudaria de lugar. Dinâmico porque T-8188C6 torna equipe real.
+            dispositivo.equipes_ids = [...estado.equipes.values()].filter(e => e.ativo).map(e => e.equipe_id);
             dispositivo.configuracao_versao = 1;
             dispositivo.aprovado_por = rhUsuario.usuario;
             dispositivo.aprovado_em = new Date().toISOString();
