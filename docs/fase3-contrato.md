@@ -119,7 +119,41 @@ implementação vira mentira na primeira limpeza, e pior: continua verde enquant
 | decimal fora da tela (§7 item 14) | ausência do campo no registro | ausência do campo **no payload**, com o registro semeado |
 
 Os três foram consertados no mesmo dia, e nos três o defeito era o mesmo: a asserção olhava
-para como a coisa é feita, e o que importa é o que sai.
+para como a coisa é feita, e o que importa é o que sai. **Quarto caso, encontrado pelo DevOps
+ao auditar as 15 guardas dele procurando a *forma* e não o erro** — e era o pior, porque
+estava na fronteira da origem pública: a guarda "o service worker do operador não alcança a
+página pública" lia o **texto** do handler e comparava posições. Medido: trocar
+`if (url.pathname === FORA_DO_APP || …) return;` por
+`if (false && (url.pathname === FORA_DO_APP || …)) return;` mantinha a guarda **verde** —
+referência intacta, desvio morto. A proteção que impede o colaborador de receber o shell do
+app do operador sem rede podia estar desligada com o CI todo verde. Corrigida em `a94f22a`:
+passa a **executar** o handler com `self`/`caches`/`location`/`fetch` dublados e observar se
+`respondWith` foi chamado; seis sabotagens, todas vermelhas.
+
+**E guarda de resultado exige CONTRAPROVA, ou passa por vacuidade** — regra do DevOps, e é a
+metade que faltava no parágrafo acima. Afirmar só o que a coisa **não** faz deixa passar o
+caso em que ela não faz nada: um `sw.js` com o handler de `fetch` inteiro removido satisfaz
+"não assume os caminhos públicos". Foi preciso afirmar, no mesmo teste, que ele **ainda
+assume** `/index.html` e os modelos. As duas metades juntas — o que não faz e o que continua
+fazendo — ou virar mecanismo em resultado só troca um falso verde por outro.
+É o mesmo formato do critério 14 desta rodada, onde a ausência do decimal no payload só
+significa algo com o registro **semeado**: a semente é a contraprova. Generalizando: **toda
+asserção de ausência precisa de uma asserção de presença ao lado, no mesmo teste** — senão a
+ausência pode vir de o mecanismo não ter rodado.
+
+**Teste operacional para classificar uma guarda em trinta segundos**, também do DevOps:
+*se alguém refatorasse isto corretamente, a minha assertiva continuaria passando?* Se uma
+mudança que **preserva** comportamento pode deixá-la vermelha, ela olha para implementação; e
+vale o inverso, uma mudança que **quebra** comportamento pode passar. Não exige reconhecer o
+caso, o que é o que o torna aplicável em série.
+
+**E "mecanismo" é relativo à propriedade.** Quando a propriedade **é** textual — por exemplo
+o mesmo prefixo de caminho aparecendo nos três arquivos que precisam concordar — conferir
+texto *é* conferir resultado, e a guarda está correta. Duas das quinze do DevOps seguem sendo
+proxy, declaradas como proxy: essa, e a do HTML inicial, cuja versão de resultado exigiria
+navegador no CI para uma propriedade que o atributo representa fielmente. **Proxy declarado
+como proxy é aceitável; proxy passando por resultado não é** — e a diferença entre os dois é
+só alguém ter escrito qual dos dois é.
 
 Os últimos quatro casos não são do produto — dois são do nosso canal e dois do nosso
 instrumento de acompanhamento — e é por isso que o princípio ficou visível: o mesmo defeito aparece igual quando o "sistema" é a equipe. E os dois casos do quadro merecem nota, porque a forma deles é diferente: ali a ausência não
