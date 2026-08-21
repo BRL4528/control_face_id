@@ -1,6 +1,9 @@
 # FASE 3 · Contrato de dados e rotas
 
-- **Status:** aceito para implementação (T-65D806)
+- **Status:** aceito em review (T-65D806), com quatro decisões do Orquestrador
+  incorporadas — mecanismo da origem pública (§4.6), exceção de telefone
+  duplicado (§3.1), escopo da tela de equipes (§2.1) e fronteira exata de `0,45`
+  no cadastro (§4.2)
 - **Data:** 2026-08-21
 - **Fonte da fase:** [`fase3-rh-pessoas.md`](fase3-rh-pessoas.md) — diagnóstico e as 6 decisões já tomadas
 - **Contrato normativo do v3:** [`adr-acesso-v3.md`](adr-acesso-v3.md) — este documento **estende**, não substitui
@@ -17,8 +20,8 @@ paralelas da Fase 3 compartilham:
 | Tarefa | Quem | O que tira daqui |
 |---|---|---|
 | T-87615C | Full-Stack | §1 inteiro — aba de aparelhos e liberação |
-| T-8188C6 | Full-Stack | §2 e §3 — equipes com membros, colaborador com telefone e edição |
-| T-D30529 | Full-Stack | §4 — três caminhos de cadastro de face |
+| T-8188C6 | Full-Stack | §2 e §3 — equipes com membros (a **tela** de membros continua obrigatória, §2.1), colaborador com telefone e edição |
+| T-D30529 | Full-Stack | §4 — três caminhos de cadastro de face, **incluindo `/efrat/rh/face/cadastrar` (§4.3), que sobe de prioridade: vai junto, não depois** |
 | T-AABCC9 | DevOps | §4.6 — **origem própria** da página pública: host, CSP, cache, CORS e guarda de CI |
 | T-AED04B | Revisor QA | §4.4, §4.6 e §7 — máquina de estados e superfície de ataque do link |
 
@@ -478,7 +481,15 @@ equipe.** Não existe `/efrat/rh/equipe/membro`.
    pessoa. Rota própria de remoção sugeriria que existe algo a excluir.
 
 "Adicionar membro", na tela da equipe, é portanto: escolher a pessoa e gravar a
-nova `equipe_id` dela. A tela pode ser a da equipe; a escrita é na pessoa.
+nova `equipe_id` dela. A tela é a da equipe; a escrita é na pessoa.
+
+**"Sem rota de membro" não é "sem gestão de membro".** A tela continua
+obrigatória, exatamente como o cliente pediu: abrir a equipe, ver os membros,
+**adicionar e remover de dentro dela**. Esta decisão muda a **forma da API**, não o
+**escopo da tela** — quem implementar T-8188C6 entrega a gestão de membros na aba
+de equipes, usando `/efrat/rh/colaborador` por baixo. Mandar o RH sair da equipe,
+procurar a pessoa na aba de pessoas e trocar um `<select>` de equipe **não** cumpre
+o pedido, mesmo sendo a mesma escrita.
 
 **Sem equipe é estado válido.** `equipe_id: null` mantém a pessoa cadastrada,
 com histórico, fora de toda carga — logo sem poder bater ponto. É a resposta
@@ -569,7 +580,7 @@ Depois:
 | qualquer outro tamanho, ou sobrou não-dígito | `422 TELEFONE_INVALIDO`, `campo: "telefone"` |
 | DDD com `0` em qualquer posição, ou fora de 11–99 | `422 TELEFONE_INVALIDO` |
 | ausente ou vazio | `422 TELEFONE_OBRIGATORIO` |
-| já existe pessoa **ativa** com o mesmo E.164 | `409 TELEFONE_DUPLICADO` |
+| já existe pessoa **ativa** com o mesmo E.164 | `409 TELEFONE_DUPLICADO`, salvo autorização explícita (abaixo) |
 
 **Tem de ser celular.** No Brasil, celular é DDD + `9` + 8 dígitos; fixo tem 8
 dígitos começando em 2–5. Fixo é recusado com mensagem própria: "Precisa ser um
@@ -578,10 +589,42 @@ celular: é por ele que a gente manda o link do cadastro de face."
 RH, e o canal concreto que este contrato constrói (§4.5) manda link por
 WhatsApp/SMS. Um fixo satisfaz a coluna e não satisfaz a função.
 
-**Duplicado é recusado** porque dois colaboradores no mesmo número significa link
-de cadastro de face entregue à pessoa errada — e é justamente o link que produz
-template. A mensagem pode nomear quem já usa o número: quem pergunta está
-autenticado como RH.
+**Duplicado é recusado, com uma saída autorizada.** O corpo pode trazer
+`autorizar_telefone_duplicado: true` e `motivo_telefone_duplicado` (10 a 200
+caracteres); nesse caso grava, e registra **quem** autorizou, **quando** e **por
+quê**. Sem isso, `409 TELEFONE_DUPLICADO`. A mensagem pode nomear quem já usa o
+número: quem pergunta está autenticado como RH.
+
+`Por quê a exceção existe:` recusar sem saída faz o RH digitar número falso para
+conseguir salvar a ficha, e número falso é pior que número compartilhado — é uma
+mentira na base que ninguém consegue detectar depois. Marido e mulher na mesma
+obra com um celular é situação real, e o cadastro tem de aceitá-la.
+
+**E a exceção para aí: pessoa com telefone compartilhado não recebe link de
+face.** A exceção é sobre **poder existir na ficha**, nunca sobre **poder receber
+o link**. Para ela sobram os outros dois caminhos de §4.3 — câmera do PC e upload
+—, que é exatamente o que a situação pede: se as duas pessoas atendem o mesmo
+aparelho, a entrega remota não tem como distinguir quem abriu.
+
+`Por quê essa é a linha:` o telefone é o **canal de entrega** do link, e link no
+número errado entrega template para a pessoa errada — o pior caso do produto,
+descrito em §4.3. Um número compartilhado não é um cadastro incompleto, é um canal
+ambíguo. Ambiguidade no cadastro é administrável; ambiguidade na entrega de
+biometria não é.
+
+**`telefone_compartilhado` é derivado, não gravado:** vale para toda pessoa ativa
+cujo E.164 é usado por outra pessoa ativa, contado na leitura. Assim o estado
+**se cura sozinho** — no dia em que uma das duas ganha número próprio ou é
+inativada, a outra volta a poder receber link, sem ninguém ter de desfazer nada.
+O que fica gravado é só a autorização (`telefone_autorizado_por`,
+`telefone_autorizado_em`, `telefone_autorizacao_motivo`), porque autorização é
+fato histórico.
+
+**Requisito de texto, para o Designer:** a tela tem de dizer a consequência **no
+momento em que o RH autoriza**, não depois. Algo como "Autorizando, esta pessoa
+fica cadastrada com o mesmo celular — e **não vai poder receber o link de cadastro
+de face**. O rosto dela terá de ser cadastrado aqui, pela câmera ou por upload de
+fotos." Descobrir isso na hora de mandar o link é descobrir tarde.
 
 **Sem migração de dados.** `telefone` é obrigatório em **escrita** (criação e
 atualização). As linhas antigas do piloto vêm sem telefone; leitura tolera vazio
@@ -629,6 +672,8 @@ protege contra duas pessoas do RH editando a mesma ficha em abas diferentes, que
 | `pessoa_id` | imutável, sempre. É a chave para onde toda marcação aponta. Tentativa de trocar → `422 PESSOA_ID_IMUTAVEL` |
 | `matricula` | mutável **enquanto a pessoa tiver zero marcações**; a partir da primeira, `422 MATRICULA_IMUTAVEL` |
 
+Aprovado pelo Orquestrador: o corte na primeira marcação é a fronteira certa.
+
 `Por quê a matrícula assim:` ela é a chave de negócio que sai no espelho e no
 AFD, e `/efrat/cadastro` cria pessoa por matrícula — mudar depois de existir
 ponto torna relatório antigo irreconciliável. Mas travar desde o primeiro
@@ -644,7 +689,8 @@ efeito para frente: a próxima sessão de gestor simplesmente não é emitida, e
 sessão viva morre no TTL de 10 min do ADR.
 
 **Derivados não são graváveis:** `tem_biometria`, `sem_equipe`, `miniatura`,
-`ativo`. Vêm na leitura, recusados na escrita (`400 CAMPO_DERIVADO`).
+`ativo`, `telefone_compartilhado`. Vêm na leitura, recusados na escrita
+(`400 CAMPO_DERIVADO`).
 `versao_cadastro` é exceção de leitura-e-envio: vai no corpo como **pré-condição**
 (o valor que o operador tinha na tela), nunca como valor a gravar — quem
 incrementa é o servidor.
@@ -769,8 +815,25 @@ diferentes **0,61** e **0,80**; aceite do produto **0,45**.
 | Faixa da maior distância par a par | Decisão |
 |---|---|
 | `< 0,02` | **recusa** — `422 FOTOS_IGUAIS` |
-| `0,02` a `0,45` | **grava** |
-| `> 0,45` | **recusa** — `422 COERENCIA_INSUFICIENTE` |
+| `>= 0,02` e `< 0,45` | **grava** |
+| `>= 0,45` | **recusa** — `422 COERENCIA_INSUFICIENTE` |
+
+**Em exatamente `0,45` o cadastro recusa.** Isso diverge por um fio de
+`vereditoPorDistancia` (`js/regras.js:14`), que faz
+`if (dist <= cfg.limiarAceite) return 'aceito'` — ou seja, no reconhecimento a
+fronteira exata **aceita**. A assimetria é intencional e está escrita aqui para
+ninguém "harmonizar" as duas depois achando que é inconsistência:
+
+> No reconhecimento, a decisão de fronteira é sobre **um evento**: uma marcação,
+> reversível, que na dúvida cai na mesa do RH e pode ser corrigida por lançamento
+> novo. No cadastro, a decisão de fronteira é sobre **o template**: grava uma vez
+> e passa a valer para toda verificação futura daquela pessoa. Quando o erro é
+> reversível, empatar a favor de seguir custa pouco; quando o erro se instala na
+> referência, empatar a favor de recusar custa uma recaptura de 30 segundos.
+
+Mesmo raciocínio, sinais opostos, porque o que está em jogo em cada ponta é
+diferente. `coerencia_maxima` na resposta de `abrir` (§4.5) é, portanto,
+"estritamente abaixo deste número".
 
 - **Teto em 0,45.** É o `limiarAceite` do produto inteiro. Três fotos da mesma
   pessoa mediram 0,094, então o teto não aperta ninguém de verdade: quem bate
@@ -870,9 +933,14 @@ o único lugar em que ele aparece.
 rodando. Isso contraria a regra que `api-piloto.md` abre com ela ("o RH **nunca**
 precisa do token de um aparelho") e, num PC de RH que nunca se cadastrou como
 aparelho, `_dispositivo` é `null`: o cadastro de face pela câmera do PC **não
-funciona hoje**. Com a rota nova, o painel do RH deixa de tocar `/efrat/cadastro`,
+funciona hoje** — e a câmera do PC é justamente uma das três funcionalidades que o
+cliente pediu. Com a rota nova, o painel do RH deixa de tocar `/efrat/cadastro`,
 que continua existindo apenas para o caminho do **aparelho** em campo (gestor
 cadastrando, `origem: "gestor"`, template `pendente` como já é).
+
+**Prioridade (decisão do Orquestrador):** esta rota entra junto com T-D30529, não
+depois. Sem ela, dois dos três caminhos de cadastro de face não têm por onde
+gravar — o caminho do link tem rota própria, mas câmera e upload dependem desta.
 
 Regras do caminho 3 (upload), de cliente e não de rota:
 
@@ -1005,9 +1073,19 @@ deduplicação de marcação.
 ```
 
 `canal` ∈ `whatsapp` | `sms` | `copiar` — registro de intenção para auditoria, não
-instrução de envio. Recusa `422 PESSOA_SEM_TELEFONE` se a pessoa não tem telefone
-válido (é aqui que a obrigatoriedade de §3.1 cobra a conta) e `422 PESSOA_INATIVA`
-para desligado.
+instrução de envio. Três recusas:
+
+| Situação | Resposta |
+|---|---|
+| pessoa sem telefone válido | `422 PESSOA_SEM_TELEFONE` — é aqui que a obrigatoriedade de §3.1 cobra a conta |
+| pessoa inativa | `422 PESSOA_INATIVA` |
+| **telefone compartilhado com outra pessoa ativa** | `422 TELEFONE_COMPARTILHADO_SEM_LINK` |
+
+A terceira é a consequência da exceção autorizada de §3.1, e a mensagem tem de
+apontar a saída, não só a parede: "Este celular é de mais de uma pessoa, então o
+link não pode ser enviado — não há como saber quem vai abrir. Cadastre o rosto
+aqui, pela câmera, ou envie três fotos." A condição é **derivada** (§3.1), então
+resolver o telefone da outra pessoa libera o link sozinho, sem passo extra.
 
 Resposta `201`:
 
@@ -1206,28 +1284,47 @@ face-api busca os pesos de `models/` por `fetch`; e `Referrer-Policy: no-referre
 vazar referenciador. Se os modelos não carregarem com `worker-src 'none'`,
 afrouxe para `'self'` e registre o motivo; o resto da política não se toca.
 
-**Como isso se implementa sem build** — decisão de mecanismo é de T-AABCC9, e há
-dois caminhos aceitáveis:
+**Como isso se implementa: projeto Vercel separado.** Decisão do Orquestrador,
+tomada depois de uma primeira recomendação minha que estava errada — e o erro vale
+escrito, porque é o argumento que sustenta o mecanismo.
 
-- **Projeto Vercel próprio**, mesmo repositório, *Root Directory* apontando para
-  `publico-face/`, domínio `face.<domínio>`. Root Directory é configuração de
-  painel, não passo de build. Custo: `models/` e `vendor/` duplicados no
-  repositório, com risco de deriva entre as duas cópias.
-- **Um projeto, dois hosts**, com regra por host em `vercel.json` (`has: [{ type:
-  "host" }]`): no host público resolvem **apenas** os caminhos do fecho acima,
-  todo o resto responde 404; no host do app, `publico-face/*` responde 404.
-  Custo: uma regra de roteamento a mais para revisar. Ganho: nenhuma duplicação de
-  6 MB de pesos e uma cópia só de cada arquivo para auditar.
+Eu havia recomendado **um projeto com regra por host** (`vercel.json`,
+`has: [{ type: "host" }]`), argumentando que a propriedade de segurança não
+dependia da escolha: isolamento de `IndexedDB`, escopo de service worker e
+política de mesma origem são todos por **origem**, então uma regra de rota furada
+apenas exporia arquivos, e o `index.html` do app no host público abriria um
+IndexedDB **vazio**, sem credencial.
 
-Recomendação: o segundo. **E a razão é que a propriedade de segurança não depende
-dessa escolha.** Isolamento de `IndexedDB`, escopo de service worker,
-`localStorage` e política de mesma origem são todos por **origem**. Mesmo que a
-regra de roteamento falhasse e o `index.html` do app aparecesse no host público,
-ele abriria um IndexedDB **vazio**, na origem pública, sem credencial nenhuma — o
-pior caso é um pedido de liberação de aparelho espúrio, que o RH recusa. A regra
-de roteamento é arrumação; a origem é a garantia.
+O argumento está certo quanto ao armazenamento e **incompleto quanto ao resto**.
+`js/app.js:324`:
 
-**Como se testa isso sem DNS.** `tests/e2e/servidor-falso.js` passa a subir um
+```js
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+```
+
+Sem condição nenhuma, no boot. Se o shell do app for **alcançável** no host
+público, carregá-lo **registra o service worker de raiz do app naquela origem** —
+com o precache dele e com o fallback `caches.match('./index.html')`. Ou seja: uma
+regra de rota furada não expõe só arquivos, ela deixa o bootstrap do app
+**instalar, na origem pública, exatamente o mecanismo que esta mudança inteira
+existe para tirar de lá.** Isso deixa de ser arrumação e volta a ser a falha.
+
+Logo: **isolar por ausência do arquivo, não por regra de roteamento.** Projeto
+Vercel próprio, mesmo repositório, servindo apenas o fecho público — o
+`index.html` do app simplesmente não existe naquele deploy, então não há o que
+uma regra errada possa expor nem o que possa registrar service worker.
+
+Os assets vêm por **cópia em tempo de build do projeto público**, com **fonte de
+verdade única**: `models/` e `vendor/face-api.js` continuam vivendo uma única vez
+no repositório, na árvore do app, e o build do projeto público os copia. Não
+contraria a restrição "sem build" da abertura deste documento: a restrição é sobre
+o **app** — nada de bundler, transpilação ou `process.env`, e o que é servido
+continua sendo arquivo estático puro. Copiar arquivo não é compilar. E resolve a
+deriva que a duplicação em `git` traria: existe uma cópia para auditar, e a outra
+é derivada dela a cada deploy.
+
+**Como se testa isso sem DNS** — e isto vale qualquer que seja o mecanismo.
+`tests/e2e/servidor-falso.js` passa a subir um
 **segundo listener, em outra porta**, servindo somente o fecho público. Porta
 diferente é origem diferente para o navegador — é exatamente o isolamento de
 produção, reproduzido localmente. Com isso o e2e consegue afirmar, e não supor:
@@ -1244,7 +1341,10 @@ intercepta, e que ela funciona sem nada da origem do app no ar.
 
 `efrat_pessoa` (+): `telefone` (E.164), `versao_cadastro` (número),
 `inativado_em`, `inativado_por`, `motivo_inativacao`, `atualizado_por`,
-`atualizado_em`.
+`atualizado_em`, `telefone_autorizado_por`, `telefone_autorizado_em`,
+`telefone_autorizacao_motivo`. **`telefone_compartilhado` não é coluna** — é
+derivado na leitura (§3.1), para que o estado se cure sozinho quando o número
+deixa de ser compartilhado.
 
 `efrat_equipe` (+): `local_id` (já previsto no ADR), `ativo`.
 
@@ -1295,7 +1395,8 @@ acontece por edição (§3.1) e o de `local_id` por edição de equipe (§2.3).
 | `TELEFONE_OBRIGATORIO` | 422 | rh/colaborador, colaborador/reativar |
 | `TELEFONE_INVALIDO` | 422 | rh/colaborador, colaborador/reativar |
 | `TELEFONE_NAO_MOVEL` | 422 | rh/colaborador, colaborador/reativar |
-| `TELEFONE_DUPLICADO` | 409 | rh/colaborador, colaborador/reativar |
+| `TELEFONE_DUPLICADO` | 409 | rh/colaborador, colaborador/reativar — salvo autorização explícita |
+| `TELEFONE_COMPARTILHADO_SEM_LINK` | 422 | rh/face/convite |
 | `PESSOA_ID_IMUTAVEL` | 422 | rh/colaborador |
 | `MATRICULA_IMUTAVEL` | 422 | rh/colaborador |
 | `CADASTRO_DESATUALIZADO` | 409 | rh/colaborador e as duas de ativação |
@@ -1360,9 +1461,15 @@ Contrato (servidor falso + workflows):
 7. `ultimo_uso_em` **não** muda por consulta de `estado`; muda por `carga` e por
    `marcacoes`.
 8. Inativar equipe com membro ativo → `422` com `membros_ativos` correto.
-9. Telefone: fixo, 10 dígitos, DDD com zero e duplicado recusados com o código
-   próprio de cada um; `(67) 99876-5432` e `+55 67 99876-5432` gravam o mesmo
-   E.164.
+9. Telefone: fixo, 10 dígitos e DDD com zero recusados com o código próprio de
+   cada um; `(67) 99876-5432` e `+55 67 99876-5432` gravam o mesmo E.164.
+9-A. **Telefone compartilhado, o ciclo inteiro:** duplicado sem autorização →
+   `409`; com `autorizar_telefone_duplicado` + motivo → grava e registra quem
+   autorizou; a pessoa aparece com `telefone_compartilhado: true`; emitir convite
+   para ela → `422 TELEFONE_COMPARTILHADO_SEM_LINK`; câmera e upload continuam
+   funcionando para ela; e **ao inativar a outra pessoa, o convite passa a ser
+   emitido sem nenhum passo extra** — é a prova de que o campo é derivado e não
+   gravado.
 10. Matrícula muda com zero marcações; recusa com uma marcação.
 11. `versao_cadastro` divergente → `409` e **nada é gravado**.
 12. **`ativo` no corpo de `/rh/colaborador` → `400 CAMPO_NAO_EDITAVEL`.** E o
@@ -1372,12 +1479,16 @@ Contrato (servidor falso + workflows):
     `pessoa_id` desconhecido → `rejeitado`. Os três saem da fila.
     (⚠ substitui a asserção atual de "inativo sempre rejeitado" — T-38A7C1
     precisa atualizar esse e2e.)
-14. **Coerência é do servidor:**
+14. **Coerência é do servidor, e a fronteira é fechada:**
     - corpo **sem** `coerencia` grava normalmente;
     - corpo **com** `coerencia: 0` (o que `js/fila.js:262` manda hoje) e vetores
       cuja maior distância real é 0,7 → `422 COERENCIA_INSUFICIENTE`. É o teste
       que prova que o número do cliente não decide nada;
     - maior distância 0,094 → grava; 0,50 → `422`; 0,01 → `422 FOTOS_IGUAIS`;
+    - **exatamente `0,45` → `422`** (cadastro recusa na fronteira), enquanto
+      `vereditoPorDistancia(0.45, cfg)` continua devolvendo `'aceito'`. Os dois
+      testes ficam lado a lado, com o comentário do motivo, senão alguém
+      "harmoniza" os dois depois (§4.2);
     - 2 ou 4 vetores, ou vetor com 127 números → `422 VETORES_INVALIDOS`;
     - o `coerencia` gravado e devolvido é o do servidor;
     - `EFRAT_CFG.limiarAceite` e a constante do workflow valem **o mesmo número**.
@@ -1412,6 +1523,11 @@ Origem pública (T-AABCC9), com o segundo listener do servidor falso:
 
 21. A página pública é servida em **outra origem** (outra porta no e2e) e carrega
     sem nada da origem do app no ar.
+21-A. O deploy público **não contém** `index.html` do app, `js/app.js` nem
+    `sw.js` — isolamento por ausência do arquivo, não por regra de rota (§4.6).
+    Guarda estática sobre a lista de arquivos publicados, porque
+    `js/app.js:324` registra o service worker de raiz sem condição: shell do app
+    alcançável na origem pública significa SW do app instalado na origem pública.
 22. Da página pública, `indexedDB.databases()` (ou abrir `efrat-ponto`) **não vê**
     os dados do app — o dado do app continua lá, na origem do app.
 23. O service worker do app não intercepta requisição da página pública, e a
@@ -1436,6 +1552,11 @@ Critérios de UI que são contrato, não estética:
     cai na mesa do RH com as duas horas.
 31. A confirmação de inativar diz que reativar exige cadastrar o rosto de novo.
 32. Inativar e reativar são botões próprios, fora do formulário de cadastro.
+32-A. A aba de equipes **abre a equipe, lista os membros, adiciona e remove de
+    dentro dela** (§2.1). "Trocar o `<select>` de equipe na aba de pessoas" não
+    cumpre o critério, mesmo sendo a mesma escrita por baixo.
+32-B. O texto de autorização de telefone duplicado diz, **antes** de autorizar,
+    que aquela pessoa não vai poder receber o link de cadastro de face (§3.1).
 33. A pendência de marcação retida mostra hora da batida **e** hora do
     recebimento, agrupada por aparelho, com contagem.
 34. A página de face, na tela final, não tem link nem botão para o app.
@@ -1448,6 +1569,9 @@ Critérios de UI que são contrato, não estética:
 |---|---|
 | **Página pública em caminho do mesmo domínio** (era o desenho anterior deste contrato) | Não isola nada: SW de raiz intercepta todo GET same-origin (`sw.js:57-60`), o fallback offline entrega o shell do app (`sw.js:65`), e o IndexedDB com a credencial do aparelho isola por origem, não por caminho (`js/store.js:10`). Um XSS ali deixaria de vazar um cadastro e passaria a vazar a credencial (§4.6) |
 | **Guardar o isolamento só com guarda de CI e revisão** | Guarda de CI protege contra o commit distraído, não contra XSS em tempo de execução. Origem própria é garantia do navegador; as duas coisas somam, mas só uma é garantia |
+| **Um projeto Vercel, dois hosts, com regra por host** (era a minha recomendação, revertida pelo Orquestrador) | `js/app.js:324` registra `./sw.js` sem condição no boot. Shell do app alcançável na origem pública = **service worker de raiz do app instalado na origem pública**, com precache e com o fallback para o shell do app. Uma regra de rota furada deixaria de expor arquivos e passaria a instalar exatamente o mecanismo que a mudança existe para remover. Isolar por ausência do arquivo (§4.6) |
+| **Recusar telefone duplicado sem saída nenhuma** | O RH digita número falso para conseguir salvar a ficha, e número falso é mentira indetectável na base. Exceção autorizada e registrada, com o link de face negado para quem compartilha (§3.1) |
+| **Permitir link de face para telefone compartilhado, autorizando também** | O telefone é o canal de entrega: não há como saber quem dos dois abriu o link, e o resultado é template gravado no `pessoa_id` errado — o pior caso do produto (§4.3) |
 | **`coerencia` calculada e enviada pelo cliente** | Número que o cliente informa sobre si mesmo é número que o cliente escolhe. Hoje o servidor ignora (`servidor-falso.js:544-546`) e o gestor manda `0` fixo (`js/fila.js:262`). O servidor **consegue** calcular — é aritmética, não inferência (§4.2) |
 | **Template de link ativo quando é o primeiro cadastro** | O pior caso do produto é cadastrar a própria face no `pessoa_id` de outro: o atacante bate ponto como a vítima e ela cai em registro manual, virando "problema de biometria" em vez de vítima (§4.3) |
 | **Queimar o link na abertura** | Quem perde conexão entre a 2ª e a 3ª foto ficaria sem caminho; o RH aprenderia a reemitir por qualquer motivo e o uso único morreria na prática (§4.4) |
@@ -1476,10 +1600,18 @@ Critérios de UI que são contrato, não estética:
 2. **Uso único sem transação.** Compare-and-set em Data Table pode correr; contido
    por idempotência e por dano limitado — os dois templates nascem `pendente`
    (§4.4).
-3. **Chave PBKDF2 do RH continua sendo a credencial.** Herdado, fora desta rodada,
-   já dimensionado em `ameacas-v3.md` § Dívida conhecida (2,5–3 dias). Toda rota
-   nova de RH usa o mesmo mecanismo — a troca por sessão com expiração fica sendo
-   um ponto único de mudança, e isso é de propósito.
+3. **Chave PBKDF2 do RH é credencial permanente, e é a dívida que sustenta todas
+   as outras.** `js/rh.js:22-28`: o navegador deriva a chave e ela viaja em toda
+   chamada, valendo como bearer sem expiração — quem a capturar entra sem saber a
+   senha. **Toda invariante desta fase pressupõe que quem está logado como RH é o
+   RH:** a prova de posse física do código curto (§1.1) protege contra aprovar o
+   aparelho errado, não contra alguém com a chave do RH aprovando o próprio; a
+   autorização de telefone duplicado (§3.1), a aprovação de template `pendente`
+   (§4.3) e a emissão de convite (§4.5) valem exatamente o que vale essa
+   credencial. Levantado pelo QA, assumido pelo Orquestrador. Herdado e fora desta
+   rodada, dimensionado em `ameacas-v3.md` § Dívida conhecida (2,5–3 dias). Toda
+   rota nova de RH usa o mesmo mecanismo de propósito: a troca por sessão com
+   expiração fica sendo um ponto único de mudança.
 4. **`configuracao_versao` não é observada pelo cliente.** §1.7 incrementa;
    `js/app.js` ainda não compara para forçar recarga de carga. Trabalho de
    T-87615C ou seguinte.
@@ -1487,7 +1619,14 @@ Critérios de UI que são contrato, não estética:
 6. **Duas cópias do limiar de aceite** (`config.js` e a constante do workflow),
    amarradas por teste (§7, item 14) e não por estrutura. Estrutura de verdade só
    existe quando houver serviço próprio no lugar do n8n.
-7. **A origem pública duplica ou roteia**, dependendo do mecanismo que T-AABCC9
-   escolher (§4.6). Se for projeto próprio com `Root Directory`, entra dívida de
-   deriva entre as cópias de `models/` e `vendor/`, e ela precisa de guarda de CI
-   comparando os bytes.
+7. **A cópia de assets do projeto público é passo de deploy, não de repositório**
+   (§4.6). Fonte de verdade única na árvore do app, cópia no build do projeto
+   público. A dívida é o passo poder silenciosamente parar de rodar e o público
+   servir peso velho — precisa de guarda que compare a versão publicada nas duas
+   origens, ou o cadastro de face começa a divergir do reconhecimento sem ninguém
+   perceber.
+8. **A exceção de telefone compartilhado é decisão humana sem verificação.** O RH
+   autoriza, fica registrado quem autorizou, e ninguém confere se o
+   compartilhamento é real. É o desenho certo (recusar sem saída produz número
+   falso, §3.1), e é dívida: a única defesa é a autorização estar registrada e
+   visível.
