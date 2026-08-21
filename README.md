@@ -126,6 +126,117 @@ publico/                Root Directory de OUTRO projeto da Vercel: a origem
 
 **Não há prova de vida (liveness).** É intencional: foto na tela passa. Serve para justificar liveness certificado ISO/IEC 30107-3 Level 2 no sistema real, onde o adversário é o próprio gestor.
 
+## Não inferir de ausência
+
+Leia isto antes de mexer nas guardas, e antes de escrever teste, campo ou
+protocolo novo. É o único princípio que explica todos os defeitos que esta fase
+encontrou, e eles apareceram em código, em teste, em infraestrutura, em documento
+e no nosso próprio canal de conversa.
+
+**O princípio:** falta de dado não é resultado. Quando algo está ausente — um
+atributo, uma base de comparação, um sintoma, uma resposta — o código quase sempre
+escolhe o lado otimista sozinho, e ninguém percebe, porque o otimista é o lado
+silencioso.
+
+**A regra prática:** todo campo, teste ou protocolo que trate falta de dado como
+resultado tem de **dizer qual dos dois lados a falta significa**. Se não disser,
+alguém vai ler a ausência como confirmação.
+
+O que reconhecer, com três exemplos de formas diferentes:
+
+**No código.** `#btnPonto` (`index.html:29`) nascia sem `disabled`, e só
+`irParaPorta()` (`js/app.js:53`, alcançável apenas com aparelho **ativo**) o
+desabilita. `toBeEnabled()` então passava com aparelho pendente, com aparelho
+aprovado, e antes de a página decidir coisa alguma — era o sinal de aceite de
+aprovação de aparelho em sete pontos, e não verificava nada. A ausência do
+atributo foi lida como "está habilitado porque pode".
+
+**Dentro do próprio detector**, que é o caso que fecha o argumento. A guarda de
+conteúdo do `sw.js` (`.github/workflows/ci.yml:119`) tratava "não há base para
+comparar" como "nada a verificar" e saía **verde**. Ou seja: a comparação podia
+parar de acontecer e a guarda continuaria dizendo que estava tudo bem. Hoje a
+ausência de base só é aceitável no evento que legitimamente não tem base, e nos
+outros ela **falha dizendo qual evento era**.
+
+**Num documento operacional.** Os dois hostnames (`publico/LEIA-ME.md`) precisam
+ser nomes distintos. Trocar um pelo outro ao substituir texto faz as duas origens
+virarem uma, o `IndexedDB` (`js/store.js:10`) volta a ser compartilhado, e **nada
+acende** — a página continua funcionando. A ausência de sintoma seria lida como
+isolamento em pé.
+
+O corolário que mais custa caro: **detector que mente é pior que detector
+ausente.** Um teste que não existe deixa a pessoa desconfiada; um teste verde que
+não mede nada compra confiança que não foi ganha. Vale igual para um hash
+calculado sobre bytes que o aparelho nunca recebeu, e para uma linha de conversa
+onde silêncio significou "está tudo bem".
+
+## Guardar o resultado, não o mecanismo
+
+Irmão do princípio acima, e a pergunta que decide de que lado uma guarda está:
+**se alguém refatorasse isto corretamente, a minha assertiva continuaria
+passando?** Se uma mudança que preserva o comportamento pode deixar a guarda
+vermelha, ela está olhando para a implementação — e o inverso também vale: uma
+mudança que quebra o comportamento pode passar.
+
+Foi medido aqui dentro. A guarda que garante que o service worker não alcança a
+página pública lia o **texto** do handler e comparava a posição de `FORA_DO_APP`
+com a de `respondWith`. Trocar a linha do desvio por
+`if (false && (…)) return;` — referência intacta, desvio morto — deixava a guarda
+**verde**. Hoje ela executa o handler com `self`/`caches`/`location`/`fetch`
+dublados e observa se `respondWith` foi chamado, o que também exige a contraprova:
+o service worker **tem** de assumir `/index.html` e os modelos, senão a guarda
+passaria por vacuidade e o app perderia o offline sem ninguém notar.
+
+O mesmo par aparece na guarda do `apiBase`: ela não verifica que existe um
+`Object.assign`, nem que a linha injetada está presente — ela executa o
+`js/config.js` servido e lê o `window.EFRAT_CFG.apiBase` **resolvido**. Duas URLs
+no arquivo é o estado normal e correto, então presença de string não diz nada; o
+que importa é qual sobrevive.
+
+**Duas ressalvas, e as duas impedem "consertos" errados nesta direção.**
+
+*Mecanismo é relativo à propriedade.* Quando a propriedade **é** textual — o
+mesmo prefixo tendo de aparecer nos três arquivos que precisam concordar —
+conferir texto **é** conferir resultado, e a guarda está certa. Onde o texto é só
+um retrato da propriedade, aí é proxy: a guarda do HTML inicial lê atributo em vez
+de observar o boot, e está declarada como proxy de propósito. Proxy declarado
+como proxy é aceitável; proxy passando por resultado não é — e a diferença entre
+os dois é só alguém ter escrito qual dos dois é.
+
+*Guarda de resultado exige contraprova, senão passa por vacuidade.* Afirmar só o
+que a coisa **não** faz deixa passar o caso em que ela não faz **nada**: um
+`sw.js` sem handler de fetch satisfaz "não assume os caminhos públicos". Por isso
+a guarda também exige que ele **assuma** `/index.html` e os modelos. Generalizando:
+toda assertiva de ausência precisa de uma assertiva de presença ao lado, no mesmo
+teste, ou a ausência pode vir de o mecanismo não ter rodado.
+
+Guarda de propriedade sobrevive à refatoração. Guarda de implementação vira
+mentira na primeira limpeza — **e continua verde enquanto mente**, que é o que a
+torna pior que guarda nenhuma.
+
+## Conserto que apaga a prova
+
+O terceiro modo de falha, e ele não é verde falso nem alarme falso: é trocar uma
+assertiva por outra que **parece** equivalente e não prova a mesma coisa. Não
+deixa rastro — o teste continua passando, o diff parece bom, o CI fica verde, e o
+que se perdeu foi a prova que a assertiva antiga carregava.
+
+**A regra prática:** antes de trocar uma assertiva, diga em voz alta **o que a
+antiga provava**, e confirme que a nova prova o mesmo. Se você não consegue
+enunciar o que a antiga provava, ainda não entendeu o que está trocando.
+
+`#aguardando` nasce com `class="hide"` (`index.html:51`), e `mostrar()`
+(`js/ui.js:17`) é quem remove a classe. Então `not.toHaveClass(/hide/)` sobre
+`#aguardando` só passa se o app **ativamente** tirou a classe — a assertiva é
+prova de execução, não de aparência. Trocá-la por algo mais bonito levaria a prova
+embora, com a sensação de estar melhorando o teste.
+
+**E a distinção que impede o padrão:** melhoria sem risco e conserto de defeito
+não são a mesma coisa, e não vão no mesmo cartão. Trocar um `sleep` fixo por uma
+espera por sinal, mantendo a mesma prova, é melhoria legítima — mais rápida, sem
+número arbitrário. Mas se "melhoria" e "conserto" viajam juntas, cria-se o
+precedente de trocar porque *parecia feio*, e a próxima troca leva a prova junto.
+
 ## As guardas de CI, e por que cada uma existe
 
 Guarda sem motivo escrito é guarda que alguém remove por achar burocrática. Cada
@@ -133,14 +244,33 @@ uma abaixo nasceu de um defeito real, e cada uma foi verificada **sabotando a
 própria invariante** e confirmando que o CI fica vermelho — não por leitura de
 código.
 
-**A versão do cache do `sw.js` acompanha o `ASSETS`.** O caso concreto: dois
+**A versão do cache do `sw.js` descreve o conteúdo atual.** O caso concreto: dois
 ramos mexeram no `ASSETS` e cada um subiu `efrat-ponto-v7` para `v8`. Como a
 linha da versão ficou **idêntica** nos dois lados, o git une as duas listas e
 **não dá conflito**. O merge sai com um `v8` diferente do `v8` que os celulares
 em campo já têm em disco — e como o número não mudou, o service worker não
 invalida nada: cache velho e incompleto, sem um aviso. Combinar "conferimos o
 número no merge" não resolve, porque nada avisa. A guarda compara o `ASSETS` com
-o da base e só exige número novo quando a lista mudou de fato.
+o  **com o commit que fixou a versão
+atual**, não com a base do push — a pergunta é "a versão subiu depois da última
+mudança de conteúdo?", e não "a versão subiu neste intervalo?".
+
+A versão anterior era de dois pontos e por isso cega ao caso que mais acontece: a
+versão é bumpada no commit de integração, e o ramo que já estava aberto traz
+conteúdo novo em cima dela sem tocar no número. Num push com base antiga ela via
+`v10 -> v12` e aprovava. Isso ocorreu **três vezes em um dia** (v10, v11, v12) e as
+três foram achadas por inspeção manual, que não escala. É estrutural em ramo de
+vida longa, não descuido: quem abriu o ramo antes do bump não tem como saber que
+precisa mexer no número.
+
+O segundo caminho para o mesmo estrago é o conteúdo: trocar os **bytes** de um
+asset mantendo o nome — pesos em `models/`, `vendor/face-api.js` — não mexe na
+lista. Como o handler é cache-first e esses caminhos vão com
+`max-age=31536000, immutable`, o aparelho instalado serve o arquivo antigo por
+tempo indefinido e o navegador nem revalida. A guarda compara o hash de blob do
+git, que já é hash de conteúdo. Isso sustenta o carimbo de identidade do modelo
+(T-D30529): um hash calculado no build descreveria bytes que aquele aparelho
+nunca recebeu.
 
 **O servidor de teste nunca entrega `apiBase` de produção.** `npm run serve` e
 todo o E2E serviam `js/config.js` apontando para o n8n de produção. Efeito
@@ -149,6 +279,36 @@ sem API o app cai em `#porta`, que era o que o teste afirmava. Em qualquer
 máquina com rota para o host, runner do CI incluso, o E2E fazia `POST
 /dispositivo/registrar` em produção a cada execução. Teste que passa por efeito
 colateral de rede fica vermelho no dia em que a rede melhora.
+
+**`_headers` e `vercel.json` declaram exatamente a mesma coisa.** Na Vercel o
+`_headers` **não é lido** — quem vale é o `vercel.json`. O repo mantém os dois
+porque o `_headers` é a fonte legível e o servidor falso do E2E lê dele; o preço
+é que quem editar só o `_headers` **acredita** ter mudado produção e não mudou. A
+comparação é exaustiva **por construção** — conjunto inteiro de caminhos, e para
+cada caminho o dicionário inteiro de chave→valor — e não uma lista dos
+cabeçalhos que alguém lembrou de conferir. Uma paridade que cobrisse só a CSP, ou
+só a CSP e o `Cache-Control`, ficaria verde no dia em que o próximo cabeçalho
+fosse acrescentado em um lado só, que é exatamente o dia em que produção
+divergiria em silêncio.
+
+**O servidor de teste realmente envia a política do `_headers`.** A paridade
+acima compara arquivo com arquivo; esta compara o que sai **na resposta**. A
+lacuna que fecha: o teste de CSP chama `extrairCspDeHeaders()`, que é função pura
+lendo o arquivo — se o servidor falso parasse de *aplicar* os cabeçalhos, aquele
+teste continuaria verde e o E2E passaria a validar uma política que não existe.
+Nada pegava isso, e o risco é concreto sempre que `servidor-falso.js` é
+reescrito.
+
+**Nada no HTML inicial já satisfaz o que um spec espera.** `#porta` nascia sem
+`class="hide"` e `#btnPonto` nascia sem `disabled`. Consequência medida em
+navegador: `toBeEnabled()` no botão de ponto passava com aparelho **pendente**,
+com aparelho aprovado, e antes de a página ter decidido qualquer coisa — e era o
+sinal de aceite de aprovação de aparelho em 7 pontos de 6 specs, inclusive no
+`aprovarDispositivo()` cuja docstring dizia "sinal de aceite é sempre de tela".
+Não verificava nada. Assertiva **negativa** falharia com o flash do boot; é a
+**positiva** que passa por engano, e por isso a correção é no HTML e não em cada
+spec: aqui a classe inteira de defeito fecha de uma vez, e tela nova nascendo
+visível também cai.
 
 **A origem pública é isolada por ausência do arquivo.** `publico/` é o Root
 Directory de outro projeto da Vercel e `.vercelignore` o tira do deploy do app.

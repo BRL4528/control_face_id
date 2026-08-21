@@ -64,11 +64,17 @@ export const ApiRh = {
   // T-C20AD3 (docs/fase3-contrato.md §1.2-1.5): leitura própria da aba
   // Aparelhos, e três rotas dedicadas de escrita — cada uma com o alvo que a
   // ação realmente precisa (código pro que ativa, pendente_id pro que
-  // recusa, dispositivo_id pro que revoga já-ativo).
+  // recusa, dispositivo_id pro que revoga já-ativo). Substitui a rota única
+  // com campo `acao` do T-87615C.
   aparelhos(cred) { return postRh('/efrat/rh/aparelhos', Object.assign({}, cred)); },
   aparelhoAprovar(cred, dados) { return postRh('/efrat/rh/aparelho/aprovar', Object.assign({}, cred, dados)); },
   aparelhoRecusar(cred, dados) { return postRh('/efrat/rh/aparelho/recusar', Object.assign({}, cred, dados)); },
-  aparelhoRevogar(cred, dados) { return postRh('/efrat/rh/aparelho/revogar', Object.assign({}, cred, dados)); }
+  aparelhoRevogar(cred, dados) { return postRh('/efrat/rh/aparelho/revogar', Object.assign({}, cred, dados)); },
+  // Câmera do PC e upload de 3 fotos (T-8ADD9C/T-65D806 §4.3+§4.7). Autenticada
+  // como RH, não com credencial de aparelho — corrige js/rh.js pegar
+  // emprestada a credencial de um dispositivo que pode nem existir num PC que
+  // nunca se cadastrou. `dados.idempotency_key` é obrigatório (C2 do contrato).
+  faceCadastrar(cred, dados) { return postRh('/efrat/rh/face/cadastrar', Object.assign({}, cred, dados)); }
 };
 
 /**

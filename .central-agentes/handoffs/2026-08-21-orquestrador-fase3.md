@@ -149,3 +149,157 @@ boot + guarda "nenhuma seção nasce visível".
 
 **Bloqueios com o cliente:** a string do hostname de produção, e qual proxy está na
 frente do n8n (a resposta "nenhum" muda a recomendação de rate limit).
+
+## Atualização 4 · fecho do dia (medido, não reportado)
+
+**Medição válida: 93 unitários + 106 e2e passando, 5 armados, zero falhas** (mais 15
+etapas de guarda — eram 15 e não 16; o DevOps recontou e corrigiu o próprio número), medida pelo DevOps em 9341dc9 com procedência declarada — anúncio
+de pista mais observação no fim. Substitui a minha medição anterior (95 e2e em 6151115),
+que teve um vermelho não explicado e portanto procedência contendida: reconferir só o
+vermelho responde se *ele* era real, não se a rodada era confiável.
+
+**Concluído** (10): liberação de aparelho por código digitado · coerência calculada no
+servidor com recusa em 0,45 · equipes com membros, telefone obrigatório e edição ·
+aviso de liveness também no upload · decimais fora da tela · contrato (1893+ linhas) ·
+threat model · CSP/cache/guardas de CI · guarda do `apiBase` efetivo · prova de posse
+religada.
+
+**Em construção:** cadastro de face (câmera do PC pronta no ramo do Biometria, upload
+em obra, link por último de propósito) · marcação de aparelho revogado.
+
+**Aberto com o cliente:** hostname de produção da origem pública · quatro fotos com e
+sem capacete (2 poses cada) para testar a hipótese da sombra da aba · sim/não à Parte 1
+(rotas do convite pela Vercel — recomendada: grátis, reversível, devolve a camada de
+volume para fora da aplicação).
+
+## O princípio que o dia produziu
+
+**Não inferir de ausência.** Nove instâncias em um dia, em cinco camadas:
+`offline.spec.js` verde porque a chamada à produção travava · `toBeEnabled()` que não
+olha visibilidade (26+7 asserções, incluindo um teste que não conseguia falhar) ·
+manifesto de modelo gerado antes do dado existir · meu "se eu não disser nada, está
+verde" · fim de rodada que nunca chega travando a pista · guarda do `sw.js` tratando
+base ausente como satisfeita · dois hostnames onde ausência de sintoma seria lida como
+isolamento em pé · teste que passaria por vacuidade sem campo gravado · três asserções
+de ausência temporal nos invariantes de acesso. Está no README, antes da seção das
+guardas. Regra prática: todo campo, teste ou protocolo que trate falta de dado como
+resultado tem de **dizer** qual dos dois lados a falta significa.
+
+E o meu: o quadro derivou porque eu integrava sem mover cartão, e derivou para o lado
+otimista — a conferência do Arquiteto produziu garantia falsa. `[PRONTO]` nesse CLI é
+*ready*, não *terminado*.
+
+## Atualização 5 · o que falta, e de quem depende
+
+**Entregue dos quatro pedidos do cliente:** equipes com membros geridos de dentro da
+equipe · colaborador com telefone obrigatório, edição e inativar/reativar por rota
+própria · liberação de aparelho por código digitado (a causa do app nascer trancado) ·
+cadastro de face pela **câmera do PC** — que consertou um defeito existente: `js/rh.js`
+usava a credencial do *aparelho*, então a câmera não funcionava em PC de RH nunca
+registrado.
+
+**Em construção:** upload de 3 fotos (T-92D567, Biometria, dono da região da biometria
+em `js/rh.js`) · marcação de aparelho revogado (T-D00CE0) · fatia de segurança da §1
+(T-C20AD3, fora do backlog de propósito — sua ausência é invisível).
+
+**Espera o cliente** (corrigido: o link do celular está sendo CONSTRUÍDO com placeholder
+— o hostname só publica, não desenvolve): resposta ao capacete (quatro fotos,
+com e sem, duas poses) · Parte 1 na Vercel (recomendada).
+
+**OBSOLETO — corrigido abaixo.** Dizia que oito das dez telas não tinham verificação
+visual e que os prints estavam pedidos. Os prints chegaram e eu verifiquei duas por
+imagem (equipe aberta com membros; telefone duplicado). O texto original seguia: equipe
+aberta com membros, ficha do colaborador com telefone, diálogo de telefone duplicado,
+câmera do PC. É o único requisito do cliente sem conferência de olho.
+
+**Achado aberto com conserto pronto:** `aparelhos.spec.js:102` gasta um ciclo de poll
+(15,7 s contra teto de 30) porque o servidor falso responde `consultar_apos_s` 10/15
+(`servidor-falso.js:428,444,464`) e `js/app.js:207` reagenda com esse valor. Baixar para
+1-2 s nesse cenário faz o único vermelho suspeito da suíte deixar de existir, sem tocar
+na prova. T-9C35B7 com o QA.
+
+## Medição final do dia · janela travada
+
+`integra/v3-r3` em d000718: **98 unitários + 130 e2e passando, 1 armado, zero falhas.**
+Procedência: janela travada por anúncio, os seis confirmaram parada, `pgrep` 0 no fim.
+Substitui as medições anteriores minha e do DevOps — as duas tinham observação parcial.
+**Cobertura, não arredondar:** isso mede unitário e e2e. As 15 etapas de guarda do CI
+não rodam em `node --test` nem em `playwright test`. Medidas depois, contra f0d9fc3:
+**15 de 15 verdes**, invocadas com base real (sem base, a guarda do `sw.js` falha de
+propósito — endurecimento do próprio dia contra ausência lida como satisfação) — e foi exatamente ali que apareceu o `sw.js` preso em v10 com oito
+arquivos pré-cacheados mudados depois (corrigido em f0d9fc3, v11).
+
+`pgrep` antes/depois só pega sobreposição que **começou** antes da entrada e ainda
+estava viva no fim; não pega a que começa e termina entre as duas fotos, que é o caso
+mais provável porque spec isolado dura segundos. O instrumento erra na sobreposição mais
+comum. Janela travada não tem esse buraco porque não depende de detectar nada.
+
+**Entregue e medido:** liberação de aparelho · equipes com membros · colaborador com
+telefone, edição e inativar/reativar · cadastro de face pela **câmera do PC** e por
+**upload de 3 fotos** · marcação de aparelho revogado (retida na mesa do RH, nunca
+descartada; os quatro status soltam a fila).
+
+**Falta:** link do celular (em construção com placeholder; o hostname só publica) ·
+T-C20AD3, a fatia de segurança da §1 · métrica de pose (T-55A616).
+
+## Cobertura completa do dia (as três medições)
+
+| | número | procedência |
+|---|---|---|
+| unitário | 98 / 0 falhas | janela travada |
+| e2e | 132 / 0 falhas, 1 armado | janela anunciada, sem anúncio de terceiro |
+| guardas de CI | 15 / 0 falhas | anúncio + pgrep nas duas pontas; quase insensível a contenção (nenhuma abre navegador) |
+
+Nenhuma das três é "a" medição: cada uma cobre o que cobre, e as três juntas são o
+estado. Foi o erro que eu cometi ao registrar unitário+e2e como *a* medição válida.
+
+## Auditoria do próprio checkpoint (o documento também envelhece)
+
+O QA achou um parágrafo obsoleto no documento de segurança dele — declarava uma lacuna
+que ele mesmo já havia fechado no mesmo dia — e a distinção que ele fez vale para este
+arquivo: comentário errado tem o código ao lado para desmenti-lo; **documento é a única
+fonte, e ninguém tem com o que confrontar.** Lacuna declarada que já foi fechada faz
+alguém fechar de novo, ou tratar como aberto um risco coberto.
+
+Auditei este checkpoint e achei duas afirmações minhas que ficaram falsas:
+1. "oito das dez telas não verificadas visualmente, prints pedidos" — os prints chegaram
+   e eu verifiquei duas por imagem. Marcado como obsoleto acima em vez de apagado.
+2. "link do celular espera o hostname" — ele está sendo construído com placeholder; o
+   hostname **publica**, não desenvolve. A redação antiga fazia o hostname parecer
+   bloqueio de desenvolvimento, que foi um erro meu de sequenciamento antes.
+
+**Verificado visualmente por mim, em imagem:** app destrancado · aba Aparelhos · equipe
+aberta com membros, remover e adicionar de dentro · ficha do colaborador em edição com
+telefone e o diálogo de telefone duplicado (que avisa, na hora da autorização, que a
+pessoa não poderá receber o link de cadastro de face).
+
+## Fecho: a §1 ficou completa, não "completa com ressalva"
+
+`integra/v3-r3` em d821ff3: **97 unitários · 139 e2e (zero armados) · 16 guardas** —
+zero falhas nas três coberturas. Nenhum `test.fixme` sobrou.
+
+A fatia de segurança do aparelho fechou inteira. Aprovar deixou de dar acesso a todas as
+equipes. E a última lacuna declarada, o **rastro auditável**: toda tentativa vira
+registro (quem, quando, qual aparelho, resultado) **independente de ter batido no
+limite** — registrar só o bloqueio mostraria a enxurrada e esconderia a tentativa
+paciente. O código tentado nunca é guardado.
+
+**Erro meu:** escalei um defeito ao cliente antes de ter o alcance. Disse que a câmera do
+PC provavelmente estava quebrada; o defeito estava na página do link, nunca integrada.
+Quatro leituras independentes confirmaram os dois caminhos intactos — a câmera porque o
+vídeo é **irmão** e não filho do container reescrito, o upload porque usa delegação no
+container pai, imune por construção. Fiz as perguntas certas e falei antes das respostas.
+
+**Lacuna de coordenação:** a regra de pista filtrava por Playwright e não via o navegador
+visível. Ampliada para qualquer consumo de navegador ou CPU pesada, com o recurso
+nomeado na procedência.
+
+**Limite de verificação visual do upload:** o navegador da Central não tem comando de
+upload de arquivo, e clicar num slot abre o diálogo nativo do sistema, que travaria a
+sessão. Então "as três em sequência", "retry de uma posição" e "recusa por falta de
+rosto" estão provados **funcionalmente e não vistos por olho humano**. O estado
+vazio-vs-falhou está provado em dois níveis: classe pelo teste, aparência pelo CSS
+(`css/tema.css:174-176` — tracejado vs sólido, que sobrevive a daltonismo).
+
+**Aberto:** link do celular (defeito em investigação) · métrica de pose · as quatro
+decisões do cliente.

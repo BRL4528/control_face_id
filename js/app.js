@@ -304,7 +304,6 @@ async function entrarRh() {
   try {
     const r = await Rh.entrar(u, s);
     if (!r.ok) { toast(r.erro, 'bad'); return; }
-    Rh._dispositivo = S.dispositivo;
     // Sair do RH não presume #porta (T-E3DBD4) — redescobre a tela certa,
     // porque o aparelho pode ter continuado pendente o tempo todo.
     Rh.abrir(() => verificarDispositivo(true));

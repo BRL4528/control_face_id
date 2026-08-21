@@ -197,7 +197,13 @@ export function criarServidor(opts = {}) {
     equipes: new Map([
       ['eq-1', { equipe_id: 'eq-1', nome: 'Equipe Um', unidade: 'Unidade A', ativo: true }],
       ['eq-2', { equipe_id: 'eq-2', nome: 'Equipe Dois', unidade: 'Unidade A', ativo: true }]
-    ])
+    ]),
+    // T-8ADD9C/§4.7: equivalente de efrat_modelo — modelo_id observado por
+    // OBSERVAÇÃO (nunca de build), com primeira/última aparição. A referência
+    // é o modelo_id mais recente visto no caminho do APP (o motor que de fato
+    // reconhece) — atualizada só por /efrat/carga, nunca pelas rotas de cadastro.
+    modelosObservados: new Map(),
+    referenciaModeloApp: null
   };
 
   for (const marcacao of (opts.marcacoes || [])) semearMarcacao(estado, marcacao);
@@ -245,6 +251,12 @@ export function criarServidor(opts = {}) {
   // depois de 24h o aparelho recebe um novo na próxima consulta de estado
   // (mostrarAparelhosCodigoExpirado) e o antigo para de resolver no /rh/aparelho.
   const EXPIRA_PENDENTE_MS = opts.expiraPendenteMs || 24 * 60 * 60 * 1000;
+  // Intervalo que o servidor manda o aparelho esperar antes de reconsultar.
+  // js/app.js:207 obedece o servidor de proposito, entao quem testa o ciclo de
+  // liberacao pode encurtar o passo sem enfraquecer a prova: o que esta sob
+  // teste e a tela virar SO pelo poll de fundo, nao o intervalo valer 15s.
+  // Sem a opcao, os valores continuam os mesmos de antes (10 e 15).
+  const consultarAposS = padrao => (opts.consultarAposS == null ? padrao : opts.consultarAposS);
   const codigoExpirado = dispositivo =>
     !dispositivo.criado_em || (Date.now() - Date.parse(dispositivo.criado_em)) > EXPIRA_PENDENTE_MS;
   const novoCodigoUnico = () => {
@@ -355,6 +367,52 @@ export function criarServidor(opts = {}) {
   };
   const gravarIdempotencia = (chave, hash, status, resposta) => {
     if (chave && hash) estado.idempotencia.set(chave, { hash, status, resposta });
+  };
+
+  // T-8ADD9C/§4.7: registra a observação (nunca substitui — soma). Só ISSO —
+  // não mexe na referência. `origemObservada` aqui é so o rótulo de onde o
+  // modelo_id foi visto (app | publica), para a tabela de observação.
+  const registrarModeloObservado = (modeloId, origemObservada) => {
+    const agora = new Date().toISOString();
+    const existente = estado.modelosObservados.get(modeloId);
+    if (existente) {
+      existente.ultima_aparicao_em = agora;
+      existente.origens.add(origemObservada);
+    } else {
+      estado.modelosObservados.set(modeloId, {
+        modelo_id: modeloId, primeira_aparicao_em: agora, ultima_aparicao_em: agora,
+        origens: new Set([origemObservada])
+      });
+    }
+  };
+
+  // A REFERÊNCIA só muda por /efrat/carga — é o motor de reconhecimento de
+  // verdade reportando a si mesmo a cada sincronismo, não o painel do RH
+  // submetendo um cadastro (docs/fase3-contrato.md §4.7: "para isso o app
+  // reporta seu modelo_id em /efrat/carga"). Se as rotas de cadastro também
+  // movessem a referência, elas nunca poderiam divergir dela — a checagem
+  // inteira viraria sempre-verdade.
+  const definirReferenciaModeloApp = modeloId => {
+    registrarModeloObservado(modeloId, 'app');
+    estado.referenciaModeloApp = modeloId;
+  };
+
+  /**
+   * Classifica um modelo_id contra a referência ANTES de registrar esta
+   * observação (senão "conhecido" ficaria sempre verdadeiro, porque o
+   * próprio registro que acabou de acontecer já contaria).
+   *
+   * Sem referência nenhuma ainda (nenhum /efrat/carga reportou), não há
+   * contra o que comparar — tratado como `modelo_desconhecido`, a categoria
+   * conservadora (grava e sinaliza, nunca recusa; docs/fase3-contrato.md §4.7).
+   */
+  const classificarModelo = (modeloId, origemObservada) => {
+    const referenciaAnterior = estado.referenciaModeloApp;
+    const jaConhecido = estado.modelosObservados.has(modeloId);
+    registrarModeloObservado(modeloId, origemObservada);
+    if (referenciaAnterior == null) return { modelo_divergente: false, modelo_desconhecido: true };
+    if (modeloId === referenciaAnterior) return { modelo_divergente: false, modelo_desconhecido: false };
+    return { modelo_divergente: jaConhecido, modelo_desconhecido: !jaConhecido };
   };
 
   // T-8188C6: forma pública de uma pessoa, para corpo de erro (CADASTRO_DESATUALIZADO)
@@ -523,7 +581,7 @@ export function criarServidor(opts = {}) {
           }
           return responder(202, {
             ok: true, estado: existente.estado, dispositivo_id: body.dispositivo_id,
-            codigo_curto: existente.codigo_curto, consultar_apos_s: 10, request_id: requestId()
+            codigo_curto: existente.codigo_curto, consultar_apos_s: consultarAposS(10), request_id: requestId()
           });
         }
         const codigo = novoCodigoUnico();
@@ -547,7 +605,7 @@ export function criarServidor(opts = {}) {
         estado.pendentesPorId.set(dispositivo.pendente_id, body.dispositivo_id);
         return responder(202, {
           ok: true, estado: 'pendente', dispositivo_id: body.dispositivo_id,
-          codigo_curto: codigo, consultar_apos_s: 10, request_id: requestId()
+          codigo_curto: codigo, consultar_apos_s: consultarAposS(10), request_id: requestId()
         });
       }
 
@@ -568,7 +626,7 @@ export function criarServidor(opts = {}) {
           }
           return responder(200, {
             ok: true, estado: 'pendente', codigo_curto: dispositivo.codigo_curto,
-            consultar_apos_s: 15, request_id: requestId()
+            consultar_apos_s: consultarAposS(15), request_id: requestId()
           });
         }
         if (dispositivo.estado !== 'ativo') {
@@ -599,6 +657,11 @@ export function criarServidor(opts = {}) {
           if (!dispositivo.equipes_ids.length) {
             return responder(403, erro('DISPOSITIVO_SEM_ESCOPO', 'dispositivo sem equipes'));
           }
+          // T-8ADD9C/§4.7: o app reporta o próprio modelo_id uma vez por
+          // sincronismo — é o dado mais barato da seção, e é ele que forma a
+          // REFERÊNCIA (o modelo_id mais recente visto no caminho do app).
+          // Tolerado ausente: cliente antigo não quebra o sincronismo por isso.
+          if (body.modelo_id) definirReferenciaModeloApp(body.modelo_id);
           return responder(200, {
             ok: true, versao: dispositivo.configuracao_versao,
             gerado_em: new Date().toISOString(),
@@ -1238,6 +1301,68 @@ export function criarServidor(opts = {}) {
           }));
           return responder(200, { ok: true, pendentes, ativos, encerrados, request_id: requestId() });
         }
+        if (url.pathname.endsWith('/face/cadastrar')) {
+          // T-8ADD9C/T-65D806 §4.3+§4.7: rota nova para os caminhos 2 (câmera
+          // do PC) e 3 (upload) — o painel do RH deixa de tomar emprestada a
+          // credencial de um aparelho (js/rh.js:512 hoje) para isso. A rota
+          // antiga /efrat/cadastro continua existindo só para o aparelho em
+          // campo (origem: "gestor").
+          const idem = idempotente(body.idempotency_key, body, true);
+          if (idem.bloqueado) return responder(idem.bloqueado.status, idem.bloqueado.resposta);
+          if (idem.cache) return responder(idem.cache.status, idem.cache.resposta);
+
+          const pessoa = pessoas.find(p => p.pessoa_id === body.pessoa_id);
+          if (!pessoa) return responder(404, { ok: false, erro: 'pessoa nao encontrada' });
+
+          // §4.7, C2: modelo_id é OBRIGATÓRIO nas rotas novas — só a rota
+          // antiga tolera ausência (cliente de campo ainda não atualizado).
+          if (!body.modelo_id) return responder(400, erro('MODELO_AUSENTE', 'modelo_id é obrigatório nesta rota'));
+
+          // Mesma função pura para qualquer caminho de cadastro — se cada rota
+          // guardasse cópia própria, o bug de T-8ADD9C só mudaria de lugar.
+          const avaliacao = avaliarLoteFace(body.vetores, limiarAceiteCadastro);
+          if (!avaliacao.ok) {
+            return responder(422, {
+              ok: false,
+              erro: { codigo: avaliacao.codigo, mensagem: avaliacao.mensagem, maior_distancia: avaliacao.maiorDistancia }
+            });
+          }
+
+          const modeloClassificado = classificarModelo(body.modelo_id, 'app');
+          const origem = body.origem === 'rh_upload' ? 'rh_upload' : 'rh_camera';
+          const versaoNova = (pessoa.versao || 0) + 1;
+          const criadoEm = new Date().toISOString();
+          const camposModelo = {
+            modelo_id: body.modelo_id, modelo_divergente: modeloClassificado.modelo_divergente,
+            modelo_desconhecido: modeloClassificado.modelo_desconhecido
+          };
+          const estadoTemplate = origem === 'rh_camera' ? 'ativo' : 'pendente';
+
+          if (estadoTemplate === 'ativo') {
+            // Câmera do PC: RH está vendo a pessoa ali — grava direto, como
+            // §4.3 já descreve para captura ao vivo supervisionada.
+            Object.assign(pessoa, {
+              versao: versaoNova, vetores: body.vetores, miniatura: body.miniatura || pessoa.miniatura,
+              origem, coerencia: avaliacao.maiorDistancia, criado_em: criadoEm
+            }, camposModelo);
+          } else {
+            // Upload: ninguém viu a captura acontecer — nunca sobrescreve
+            // template vigente (§1.3a), vai para a fila humana do RH.
+            estado.recadastros.push(Object.assign({
+              template_id: 't-' + pessoa.pessoa_id, pessoa_id: pessoa.pessoa_id, versao: versaoNova,
+              coerencia: avaliacao.maiorDistancia, miniatura: body.miniatura || '',
+              vetores: body.vetores, origem, criado_em: criadoEm
+            }, camposModelo));
+          }
+
+          const resposta = Object.assign({
+            ok: true, pessoa_id: pessoa.pessoa_id, template_id: 't-' + pessoa.pessoa_id,
+            versao: versaoNova, estado: estadoTemplate, coerencia: avaliacao.maiorDistancia,
+            request_id: requestId()
+          }, camposModelo);
+          gravarIdempotencia(body.idempotency_key, idem.hash, 200, resposta);
+          return responder(200, resposta);
+        }
         return responder(404, { ok: false, erro: 'rota rh desconhecida' });
       }
 
@@ -1263,33 +1388,42 @@ export function criarServidor(opts = {}) {
         const existente = pessoas.find(p => p.pessoa_id === id);
         const versaoNova = existente ? (existente.versao || 1) + 1 : 1;
         const criadoEm = new Date().toISOString();
+        // modelo_id tolerado ausente nesta rota antiga (§4.7, C2) — cliente
+        // velho (js/fila.js de campo) não quebra por não mandar. Se vier, é
+        // classificado e o resultado grava junto (nunca recusa por causa dele).
+        const modeloClassificado = body.modelo_id ? classificarModelo(body.modelo_id, 'app') : null;
+        const camposModelo = modeloClassificado
+          ? { modelo_id: body.modelo_id, modelo_divergente: modeloClassificado.modelo_divergente,
+              modelo_desconhecido: modeloClassificado.modelo_desconhecido }
+          : {};
         // Procedência do template (docs/fase3-seguranca.md § 5.1a): origem,
         // coerência calculada e instante já dá para gravar agora. Autor (qual
         // pessoa do RH) depende de identidade do RH chegar nesta rota — hoje só
         // chega dispositivo_id (o aparelho, não quem está logado); registrado
         // como limite do contrato atual, para o T-65D806 fechar.
         if (origem === 'rh' && !existente) {
-          pessoas.push({
+          pessoas.push(Object.assign({
             pessoa_id: id, nome: body.nome, matricula: body.matricula,
             equipe_id: body.equipe_id, papel: 'colaborador', versao: versaoNova,
             vetores: body.vetores, miniatura: body.miniatura || '',
             origem, coerencia: avaliacao.maiorDistancia, criado_em: criadoEm
-          });
+          }, camposModelo));
         } else if (origem !== 'rh') {
           // Caminho pendente (gestor hoje; upload/link entram aqui quando
-          // existirem — T-D30529): não sobrescreve template vigente (§ 1.3a),
-          // vai para a fila humana do RH com a coerência já calculada, senão
-          // js/rh.js:358 mostra "—" para sempre (achado do Orquestrador).
-          estado.recadastros.push({
+          // existirem — T-D30529): não sobrescreve template vigente (§ 1.3a).
+          // A coerência grava aqui para auditoria/recalibração (§4.7), mas NÃO
+          // trafega na resposta de /rh/dados — a serialização de lá é quem
+          // filtra (docs/fase3-contrato.md § 4.3 + critério 14).
+          estado.recadastros.push(Object.assign({
             template_id: 't-' + id, pessoa_id: id, versao: versaoNova,
             coerencia: avaliacao.maiorDistancia, miniatura: body.miniatura || '',
             vetores: body.vetores, origem, criado_em: criadoEm
-          });
+          }, camposModelo));
         }
-        return responder(200, {
+        return responder(200, Object.assign({
           ok: true, pessoa_id: id, template_id: 't-' + id, versao: versaoNova,
           status: origem === 'rh' ? 'ativo' : 'pendente', coerencia: avaliacao.maiorDistancia
-        });
+        }, camposModelo));
       }
       return responder(404, { ok: false, erro: 'rota desconhecida' });
     }

@@ -349,13 +349,32 @@ logado (o ADR já exige; o teste precisa cravar).
 **Teste:** para N pendentes, nenhuma função de `dispositivo_id`/`apelido`/`ua` reproduz o
 código; os códigos são distintos e vêm de CSPRNG.
 
-**Invariante 2.1e.** Tentativa de aprovação com código errado é limitada por sessão de RH e
-por janela, e o contador de tentativas é visível na linha do pendente. São ~30 bits
-(`31^6`), o que é bastante contra adivinhação cega — mas o alvo real é o RH que erra a
-digitação três vezes e o atacante que testa códigos enquanto um pendente legítimo está na
-fila.
-**Teste:** N erros na janela bloqueiam novas tentativas com `429`; a contagem aparece na
-lista de pendentes.
+**Invariante 2.1e.** Tentativa de aprovação com código errado é limitada **por usuário de
+RH** e por janela, com `429` + `Retry-After`, e **a contagem acontece depois da
+autenticação**. São ~30 bits (`31^6`), o que é bastante contra adivinhação cega — mas o
+alvo real é o RH que erra a digitação três vezes e o atacante que testa códigos enquanto
+um pendente legítimo está na fila.
+**Teste:** N erros na janela bloqueiam com `429` + `Retry-After`, e dentro da janela nem o
+código **certo** passa (sem isso, "bloqueou" pode ser só uma mensagem diferente); e 12
+tentativas com credencial errada dão `401`, nunca `429`, sem consumir cota.
+
+*Por que a ordenação virou parte da invariante:* se a contagem vier antes da checagem de
+usuário/chave, quem souber apenas o **nome** do usuário de RH derruba a aprovação de
+aparelhos pela janela inteira sem ter credencial nenhuma — a defesa vira negação de
+serviço contra o próprio RH.
+
+*Corrigido depois da implementação (T-C20AD3), e o furo era meu:* a versão anterior exigia
+que "o contador de tentativas seja visível na linha do pendente". Isso não sobreviveu ao
+desenho, e o `508cd44fd2` mostrou por quê — um código errado com frequência não resolve
+para aparelho nenhum, então não existe linha em que incrementar; o contador certo é por
+usuário de RH. Pior: o teste que eu escrevera para essa parte era **vacuoso**, procurava a
+palavra `tentativas` no payload do RH, e esse campo já existe na linha do aparelho por
+outro motivo (rotação de pedido, contrato §1.2) — passaria sempre. **Lacuna aberta,
+registrada como lacuna e não como asserção fingida:** hoje uma sequência de tentativas
+erradas não deixa rastro auditável em lugar nenhum. O lugar natural, se for fechar, é uma
+linha de auditoria no formato de `efrat_auditoria_identificacao` (ADR: dispositivo,
+instante, resultado) — mas isso é decisão de contrato, e inventar campo para satisfazer um
+teste seria deixar o teste dirigir o desenho.
 
 **Invariante 2.1f.** O pendente expira sozinho. Um pedido de aprovação que ninguém atendeu
 não pode ficar aprovável por tempo indeterminado — é o que transforma um tablet perdido em
@@ -748,6 +767,65 @@ na captura por câmera.
 **Invariante 5.1c.** O aviso é conteúdo da página, não `title`/`tooltip`/`aria-label`.
 **Teste:** o texto é encontrado no conteúdo visível da tela.
 
+### 5.1d · O gate de pose não gateia pose — medido, T-5EC67B
+
+Registrado aqui porque a qualidade do enrollment é o que sustenta as três origens
+de cadastro, e `validacao-biometrica.md` trata captura ruim como o defeito que
+contamina toda verificação futura. Não é achado de UI: é o gate que decide se uma
+captura vira template.
+
+O gate de pose inteiro é uma linha (`js/face.js:47-53`):
+
+```
+yaw = (nariz.x − meio_dos_olhos.x) / vão_horizontal_dos_olhos
+```
+
+**Só coordenadas X.** Queixo baixo é rotação em torno do eixo horizontal — move Y e
+Z, não move X. Medido, replicando a fórmula com rotação rígida:
+
+| Queixo baixo | `yaw()` | Passa? |
+|---|---|---|
+| 0° · 10° · 20° · 30° · 40° | `0.0000` em todos | sim, em todos |
+
+Zero exato em qualquer ângulo. **Não existe métrica de pitch** — 40° de queixo baixo
+são indistinguíveis de rosto perfeitamente de frente. O nome do cartão pressupõe um
+gate permissivo demais; a realidade é ausência de gate.
+
+E o gate que existe é mais frouxo do que parece:
+
+| Cabeça virada | `yaw()` | Contra `maxYaw: 0.30` |
+|---|---|---|
+| 45° | `0.2000` | passa, com dois terços do orçamento |
+| 55° | `0.2856` | passa |
+| 60° | `0.3464` | só aqui reprova |
+
+**Confiança dos dois achados é diferente, e isso importa.** A invariância sob pitch é
+**algébrica** — a fórmula não lê Y — então é certa e independente de modelo. Os
+ângulos de yaw são **indicativos**: dependem da profundidade de nariz assumida
+(`z = 20` para 100 px entre olhos), e mudam com a geometria do rosto. O que não muda
+é a ordem de grandeza: `0,30` é muito, não pouco.
+
+**Onde isto está travado:** `tests/unit/pose.test.js`, determinístico, sem navegador.
+As duas propriedades acima são asserções, e a confiança de cada uma está expressa na
+*forma* da asserção, não só em prosa: a algébrica usa **igualdade exata** contra o
+rosto de frente (sem tolerância de ponto flutuante, porque a fórmula não lê `y`); a
+indicativa usa **faixa**, não valor, porque os ângulos dependem da geometria de nariz
+assumida. Quem for "apertar a precisão" da segunda encontra o motivo escrito ali.
+
+**Verde aqui não quer dizer que o gate está bom** — quer dizer que a lacuna está
+medida e travada. Os testes afirmam o comportamento *atual*. Quando entrar percepção
+de pitch, a propriedade 1 fica vermelha de propósito, e a mensagem de falha dela manda
+trocar a asserção pela do limiar novo em vez de deixar parecer regressão.
+
+*Custou uma costura, e o primeiro pedido meu estava errado:* pedi para **exportar**
+`yaw()` de `js/face.js`, e isso não adiantava — o módulo faz `document.createElement`
+no topo (`js/face.js:9-14`), então não importa em Node de jeito nenhum; exportar só
+tornava visível uma função que continuava inalcançável. O que destravou foi **mover**
+a função para `js/regras.js`, que é onde a primeira linha daquele arquivo já mandava
+pôr regra pura. Move, não copy: duas implementações da mesma fórmula divergiriam em
+silêncio no primeiro ajuste de uma só — e o ajuste vem, porque o proxy de pitch e a
+recalibração de `maxYaw` são o próximo passo.
+
 ### 5.2 O que **não** propor
 
 - Não propor detecção de "foto de foto" no cliente (moiré, reflexo, textura). É PAD caseiro,
@@ -794,3 +872,117 @@ dentro da decisão que já foi tomada, e é honesto sobre o que garante.
 - **O limiar 0,45 não foi calibrado com a população da Efrat** — as invariantes de §4 são
   corretas para o limiar configurado, seja ele qual for, e é por isso que 4.2c exige fonte
   única.
+
+---
+
+## Apêndice · Três padrões de teste que esta fase produziu
+
+Não são teoria: cada um saiu de um defeito real desta rodada, e os três são a
+mesma família — **verde que não prova o que o nome do teste promete**. Ficam aqui
+porque as invariantes acima só valem se os testes que as sustentam não mentirem.
+
+### 1. Guarda que documenta um defeito declara a própria obsolescência
+
+Um teste escrito para travar um comportamento **errado** (para que ninguém dependa
+dele sem saber) vira mentira no dia em que o comportamento é consertado. A
+mensagem de falha dele é o lugar certo para dizer isso — ela é lida exatamente por
+quem estiver olhando quando acontecer.
+
+Instância: a guarda 2.1g afirmava que `#btnPonto` vinha habilitado embaixo da tela
+escondida, com a mensagem *"se isto virar false, btnPonto passou a discriminar e
+este guarda pode ser revisto"*. `index.html` passou a nascer `disabled`, a guarda
+ficou vermelha, e a mensagem disse o que fazer: inverter a afirmação para
+`toBeDisabled()` e travar a correção. Sem essa frase, o vermelho pareceria
+regressão e alguém "consertaria" o produto de volta.
+
+**Regra:** todo teste cuja asserção descreve um defeito aceito carrega, na
+mensagem, a instrução para o dia em que o defeito morrer.
+
+### 2. Não inferir de ausência
+
+Afirmar que algo **não** aconteceu só vale se algo positivo provar que o caminho
+rodou. Sem essa âncora, o verde não distingue *"foi impedido"* de *"ninguém correu
+ainda"* — e sob CPU disputada a segunda hipótese fica mais provável, então o teste
+fica mais verde justamente quando a máquina está pior.
+
+O discriminador não é a forma da asserção, é se a coisa afirmada ausente **era
+possível naquele instante**:
+
+- `expect(locator).toHaveClass(/hide/)` re-tenta até o timeout: afirma "continuou
+  escondido o tempo todo". Sólida.
+- `expect(valorJs).toBeFalsy()` / `toBe(0)` fotografa um instante. Frágil **se** o
+  tempo tornar possível o que ela nega.
+- Uma ausência garantida por contrato (a operação é proibida) é permanente:
+  esperar mais não a torna presente. Sólida.
+
+Instâncias desta fase, todas do mesmo formato: o teste de offline verde porque a
+checagem de dispositivo travava contra produção; `toBeEnabled()` que não olha
+visibilidade; o critério 5b, cuja tela já estava visível antes do passo; e o
+`chamadas.carga === 0` lido como fotografia. Consertos: âncora positiva antes da
+negativa — a mensagem que só o ramo de falha escreve, ou o contador do caminho que
+tinha de ter rodado.
+
+### 3. Contraprova antes da negação
+
+Um teste que só nega **passa contra uma rota que não existe** — `404` não ativa
+nada. Verde por ausência de implementação mente pior que vermelho, porque não pede
+atenção de ninguém.
+
+Instância: os testes armados de 2.1 provam primeiro o caminho feliz (com o código
+certo, ativa) e só então negam. Foi essa ordem que pegou um erro meu no mesmo dia —
+uma substituição de constante falhou calada e os testes apontavam para a rota
+antiga; sem a contraprova eles teriam ficado verdes contra o `404`.
+
+**Corolário para ler resultado sob concorrência** — corrigido depois de dois
+contra-exemplos medidos no mesmo dia, e a versão anterior deste parágrafo estava
+errada:
+
+- Verde geral sob concorrência é **mais forte**, não mais fraco: contenção não
+  produz verde falso — exceto nas asserções de ausência temporal do padrão 2, que
+  ficam *mais* verdes quando a máquina está pior.
+- Vermelho **espalhado** pede repetir com a pista limpa.
+- Vermelho **isolado** é **suspeito, não confiável** — reconfira sozinho antes de
+  acreditar. A versão anterior dizia o contrário ("contenção não é seletiva, logo
+  um vermelho isolado é real"). O raciocínio tem um furo: a contenção é uniforme,
+  mas a **margem não é**. Ela quebra primeiro o teste que está mais perto do
+  próprio limite de tempo, e só ele — o que é indistinguível de seletividade.
+  Medidos no mesmo dia: `aviso-liveness.spec.js:84`, vermelho entre 105 verdes e
+  3/3 verde isolado em 4,0s; e `aparelhos.spec.js:102`, vermelho na suíte e verde
+  sozinho em 15,7s.
+
+**O instrumento também mente.** Três vezes nesta fase o defeito estava na
+ferramenta de medir, não no medido: um painel que afirmava estado velho, uma
+guarda que lia o texto do handler em vez do efeito, e o `pgrep` de pista — que,
+chamado no mesmo script que invoca a suíte, casa com o próprio `argv` do script
+e reporta uma sobreposição que não existe. O truque do colchete protege o
+`pgrep` de casar consigo, não de casar com o script que o carrega: **rode-o em
+chamada separada**.
+
+O que salvou nos dois casos não foi a regra, foi a disciplina de reconferir antes
+de formar hipótese: investigar o código a partir de um vermelho falso custa horas,
+e rodar o teste sozinho custa segundos. **Reconferir é mais barato que raciocinar
+— faça primeiro.**
+
+**E a terceira parte, que inverte o instinto.** Os dois efeitos acima acontecem na
+mesma rodada e em direções opostas: margem apertada produz **vermelho** falso,
+ausência temporal produz **verde** falso. O vermelho puxa toda a atenção — a
+investigação vai para ele, que é o falso, e os verdes falsos ficam protegidos pelo
+barulho, sem ninguém olhar.
+
+Logo: **uma rodada com vermelho não explicado é o pior momento para confiar nos
+verdes dela, não o melhor.** O vermelho não é o único problema da rodada; é o
+único visível.
+
+Reconferir só o teste vermelho responde *"ele é real?"*. Não responde *"a rodada é
+confiável?"*. São perguntas diferentes. Procedimento: vermelho não explicado →
+repetir a **suíte inteira** com a pista limpa antes de acreditar em qualquer
+resultado dela, verde incluído.
+
+Instância desta fase, e ela é do próprio autor deste documento: `aviso-liveness.spec.js:84`
+foi o vermelho isolado que disparou a correção acima — e, ao ser reaberto por
+causa disso, revelou que estava **sem âncora**: afirmava `.aviso` com
+`toHaveCount(0)` sem antes exigir que o card existisse, então passava tanto com o
+aviso corretamente ausente quanto com a tela inteira não pintada. Era, ao mesmo
+tempo, o teste de margem mais apertada do arquivo e um verde falso do padrão 2. Os
+dois defeitos no mesmo teste, e foi o vermelho — o sintoma errado — que levou até
+o certo.

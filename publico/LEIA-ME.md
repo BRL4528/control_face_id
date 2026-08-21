@@ -19,19 +19,36 @@ shell do app do operador no celular dele.
 A garantia aqui é **ausência do arquivo**, não acerto de configuração: uma regra
 de rota protege só enquanto ninguém erra a regra.
 
-## Hostname: ainda não definido
+## Dois hostnames, e eles NÃO são o mesmo
 
-O hostname vive em **um único lugar**, com nome de placeholder proposital:
+São duas origens distintas — é o ponto inteiro desta pasta. Confundi-los ao
+substituir o texto desfaz o isolamento sem quebrar nada visivelmente, que é o
+pior jeito de errar.
 
-```
-ORIGEM-PUBLICA-A-DEFINIR
-```
+| Placeholder | O que é | Estado |
+|---|---|---|
+| `ORIGEM-PUBLICA-A-DEFINIR` | A origem **desta** pasta: onde o colaborador abre o link e cadastra o rosto. Projeto da Vercel com Root Directory `publico`. | a definir |
+| `HOSTNAME-DO-APP` | A origem do **app do operador**, que já existe: onde o gestor bate ponto e o RH administra. Outro projeto da Vercel. | a confirmar com o cliente |
 
-Ele **ainda não está em nenhum arquivo de código**, porque quem monta o link é a
-tela do RH (`js/`, do Full-Stack) e essa parte ainda não existe. Quando existir,
-a chave é `origemCadastroPublico` em `js/config.js` — que é o arquivo de
-configuração de runtime, editável no servidor sem republicar. Uma string, um
-lugar.
+Nunca aponte o subdomínio novo para o projeto do app, e nunca adicione o hostname
+do app ao projeto desta pasta. Se os dois nomes servirem o mesmo projeto, volta a
+ser uma origem só — e o `IndexedDB` volta a ser compartilhado, que é exatamente o
+que a origem separada existe para impedir.
+
+### Onde o hostname NÃO vai
+
+Nenhum dos dois está escrito em arquivo de código, e o da origem pública **não
+deve** entrar em nenhum.
+
+Quem monta o link do convite é o **servidor**: a resposta de
+`POST /efrat/rh/face/convite` já devolve a `url` pronta (contrato § 4.5). Se o
+cliente também montasse a URL a partir de uma configuração local, passariam a
+existir duas fontes para a mesma coisa, e elas divergiriam **em silêncio** no dia
+em que o hostname mudasse — porque as duas continuariam "funcionando". A URL vem
+do servidor, ponto. É também uma linha menos de configuração para errar.
+
+Se em algum momento a página precisar saber a própria origem, ela lê de
+`location`, não de configuração.
 
 Nada nesta pasta precisa saber o próprio hostname: a CSP é toda `'self'`.
 

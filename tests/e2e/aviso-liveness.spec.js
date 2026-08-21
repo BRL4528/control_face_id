@@ -91,5 +91,12 @@ test('cadastro pela câmera do RH não avisa — o RH estava vendo a pessoa', as
 
   await entrarNoRh(page);
 
+  // ANCORA, e ela faltava: `toHaveCount(0)` sobre `.aviso` e afirmacao de
+  // AUSENCIA, e ausencia dentro de um card que nao renderizou tambem da zero.
+  // Sem esta linha o teste passava tanto quando o aviso estava corretamente
+  // ausente quanto quando a tela inteira nao tinha pintado — e era justamente
+  // este o teste que prova que a camera do RH ficou sem aviso.
+  await expect(card(page, 't-camera'), 'o card tem de existir, senão o zero abaixo não prova nada')
+    .toHaveCount(1);
   await expect(card(page, 't-camera').locator('.aviso')).toHaveCount(0);
 });

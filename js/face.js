@@ -1,6 +1,7 @@
 // Motor de reconhecimento. Isola tudo que depende do face-api e da câmera,
 // para que a orquestração da tela não precise saber nada disso.
-import { euclidiana } from './regras.js';
+import { euclidiana, yaw } from './regras.js';
+import { calcularModeloId } from './modelo.js';
 
 const cfg = () => window.EFRAT_CFG;
 
@@ -43,13 +44,6 @@ function metricas(canvas, box) {
   return { sharp: ls2 / n - media * media, bright: soma / (NORM * NORM) };
 }
 
-function yaw(landmarks) {
-  const p = landmarks.positions;
-  const le = p[36], re = p[45], nariz = p[30];
-  const meio = (le.x + re.x) / 2;
-  const vao = Math.abs(re.x - le.x) || 1;
-  return (nariz.x - meio) / vao;
-}
 
 export const DICA_ADORNO = 'Nenhum rosto — tire óculos escuros, máscara ou touca';
 
@@ -99,9 +93,13 @@ export const Face = {
   _seguidos: 0,
   latencia: 0,
   modo: 'full',
+  modeloId: null,
 
   async carregar(base) {
-    if (fingido()) { this.pronto = true; this.backend = 'fake'; return; }
+    // Fingido não busca peso nenhum — nada pra hashear, e hashear de verdade
+    // aqui só custaria 7MB por teste sem testar nada real (docs/fase3-contrato.md
+    // §4.7: modelo_id no navegador, não em build).
+    if (fingido()) { this.pronto = true; this.backend = 'fake'; this.modeloId = 'fingido'; return; }
     const t0 = performance.now();
     try { await faceapi.tf.setBackend('webgl'); await faceapi.tf.ready(); }
     catch (e) { await faceapi.tf.setBackend('cpu'); await faceapi.tf.ready(); }
@@ -112,6 +110,11 @@ export const Face = {
     this.pronto = true;
     this.backend = faceapi.tf.getBackend();
     this.msCarga = Math.round(performance.now() - t0);
+    // Uma vez por carga de página, não por cadastro (§4.7): computado agora,
+    // logo após o motor carregar, para bater no mesmo cache que ele populou.
+    // null se algum dos 7 arquivos falhar — quem cadastra decide o que fazer
+    // com a ausência, esta função nunca fabrica id parcial.
+    this.modeloId = await calcularModeloId(raiz);
   },
 
   _opts(tam) {
@@ -243,12 +246,101 @@ export const Face = {
     this._rastro = { box: null, perdas: 0 };
   },
 
+  /**
+   * `f.descritor`, quando presente, vence o cálculo por semente — hook só
+   * para teste controlar a distância exata entre capturas (ex.: simular 3
+   * poses coerentes de cadastro, que a semente por pessoa não consegue: o
+   * mesmo `pessoa` sempre dá distância 0 entre capturas, e pessoas diferentes
+   * dão ~4 — nem "mesmo arquivo" nem "pose diferente" de verdade, os dois
+   * extremos que a regra de coerência do T-8ADD9C tem que distinguir do meio).
+   * Sem `f.descritor`, comportamento idêntico ao de sempre — nenhum teste
+   * existente é afetado.
+   */
   _capturaFingida() {
     const f = fingido();
-    const base = new Array(128).fill(0);
-    const semente = String(f.pessoa || 'x');
-    for (let i = 0; i < 128; i++) base[i] = ((semente.charCodeAt(i % semente.length) * (i + 7)) % 100) / 100;
+    let base = f.descritor;
+    if (!base) {
+      base = new Array(128).fill(0);
+      const semente = String(f.pessoa || 'x');
+      for (let i = 0; i < 128; i++) base[i] = ((semente.charCodeAt(i % semente.length) * (i + 7)) % 100) / 100;
+    }
     return { descritor: base, thumb: 'data:image/jpeg;base64,TEST', qualidade: { ok: true, sharp: 300, bright: 120 } };
+  },
+
+  /**
+   * Upload de 3 fotos (T-D30529): a foto já existe, não tem retry de câmera —
+   * uma tentativa, motivo específico na recusa (texto aprovado com o
+   * Designer, aplicado por quem chama esta função, não aqui).
+   *
+   * `detectAllFaces`, não `detectSingleFace`: precisa DISTINGUIR zero rostos
+   * de mais de um, porque o texto de recusa é diferente pros dois casos.
+   *
+   * HEIC é recusado antes de tentar decodificar — `createImageBitmap` falha
+   * pra HEIC do mesmo jeito que falha pra arquivo corrompido, e são erros
+   * que pedem ações diferentes da pessoa.
+   */
+  async capturarDeArquivo(file) {
+    const nome = String((file && file.name) || '').toLowerCase();
+    if (/\.(heic|heif)$/.test(nome)) return { ok: false, motivo: 'formato_heic' };
+    if (fingido()) return this._capturaFingidaDeArquivo(file, nome);
+
+    let bitmap;
+    try { bitmap = await createImageBitmap(file); }
+    catch (e) { return { ok: false, motivo: 'formato' }; }
+
+    // Reduz a maior aresta pra 1280px antes da inferência (docs/fase3-contrato.md
+    // §4.3, caminho 3): foto de 12MP não deixa o descritor melhor e trava a
+    // máquina do RH.
+    const escala = Math.min(1, 1280 / Math.max(bitmap.width, bitmap.height));
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(bitmap.width * escala);
+    cv.height = Math.round(bitmap.height * escala);
+    cv.getContext('2d').drawImage(bitmap, 0, 0, cv.width, cv.height);
+    if (bitmap.close) bitmap.close();
+
+    let dets;
+    try {
+      dets = await faceapi.detectAllFaces(cv, this._opts(cfg().inputSize))
+        .withFaceLandmarks().withFaceDescriptor();
+    } catch (e) { return { ok: false, motivo: 'tecnico' }; }
+
+    if (!dets || dets.length === 0) return { ok: false, motivo: 'sem_rosto' };
+    if (dets.length > 1) return { ok: false, motivo: 'multiplos_rostos' };
+
+    const det = dets[0];
+    const q = avaliar(det, cv, det.detection.box);
+    if (!q.ok) return { ok: false, motivo: 'qualidade', qualidade: q };
+    return {
+      ok: true, descritor: Array.from(det.descriptor),
+      thumb: miniatura(cv, det.detection.box, 128), qualidade: q
+    };
+  },
+
+  /**
+   * Convenção de nome pro modo fingido, pra e2e simular os erros do upload
+   * sem foto de verdade: `sem-rosto*`, `dois-rostos*`, `qualidade-ruim*`
+   * disparam a recusa correspondente; qualquer outro nome vira o "pessoa"
+   * que gera o descritor (mesma técnica de `_capturaFingida`).
+   *
+   * `f.descritoresPorArquivo[file.name]`, quando presente, vence — mesmo
+   * motivo do `f.descritor` de `_capturaFingida`: simular 3 fotos coerentes
+   * (ou incoerentes de propósito) exige controlar a distância exata, e nome
+   * de arquivo vira semente da mesma forma bimodal (idêntico ou ~4, nunca o
+   * meio).
+   */
+  _capturaFingidaDeArquivo(file, nomeMinusculo) {
+    if (nomeMinusculo.includes('sem-rosto')) return { ok: false, motivo: 'sem_rosto' };
+    if (nomeMinusculo.includes('dois-rostos')) return { ok: false, motivo: 'multiplos_rostos' };
+    if (nomeMinusculo.includes('qualidade-ruim')) return { ok: false, motivo: 'qualidade' };
+    const f = fingido();
+    const mapa = f && f.descritoresPorArquivo;
+    if (mapa && mapa[file.name]) {
+      return { ok: true, descritor: mapa[file.name], thumb: 'data:image/jpeg;base64,TEST', qualidade: { ok: true, sharp: 300, bright: 120 } };
+    }
+    const pessoa = nomeMinusculo.replace(/\.[a-z0-9]+$/, '') || 'x';
+    const base = new Array(128).fill(0);
+    for (let i = 0; i < 128; i++) base[i] = ((pessoa.charCodeAt(i % pessoa.length) * (i + 7)) % 100) / 100;
+    return { ok: true, descritor: base, thumb: 'data:image/jpeg;base64,TEST', qualidade: { ok: true, sharp: 300, bright: 120 } };
   },
 
   /** Usa o último quadro aprovado se for recente; tenta algumas vezes antes de desistir. */
@@ -279,6 +371,43 @@ export const Face = {
       await new Promise(r => setTimeout(r, 250));
     }
     return null;
+  },
+
+  /**
+   * Uma captura manual de vídeo com resultado tipado (T-D30529: página
+   * pública, "tirar uma foto de cada vez"). Diferente de `capturar()`:
+   * usa `detectAllFaces` pra DISTINGUIR zero rostos de mais de um — a página
+   * pública precisa dos dois textos, "não encontrei" e "mais de uma pessoa",
+   * que `capturar()` (single-face) não separa.
+   */
+  async capturarUnico(video, tentativas) {
+    if (fingido()) {
+      const nome = String(fingido().pessoa || '');
+      if (nome === 'sem-rosto') return { ok: false, motivo: 'sem_rosto' };
+      if (nome === 'dois-rostos') return { ok: false, motivo: 'multiplos_rostos' };
+      if (nome === 'qualidade-ruim') return { ok: false, motivo: 'qualidade', qualidade: { ok: false, msg: 'ruim' } };
+      return Object.assign({ ok: true }, this._capturaFingida());
+    }
+    const max = tentativas || 3;
+    for (let i = 0; i < max; i++) {
+      const usarBom = this._bom.canvas && (performance.now() - this._bom.em) < 1200;
+      const cv = usarBom ? this._bom.canvas : this._capturarQuadro(video);
+      let dets;
+      try {
+        dets = await faceapi.detectAllFaces(cv, this._opts(cfg().inputSize)).withFaceLandmarks().withFaceDescriptor();
+      } catch (e) { dets = null; }
+      if (dets && dets.length > 1) return { ok: false, motivo: 'multiplos_rostos' };
+      if (dets && dets.length === 1) {
+        const det = dets[0];
+        const q = avaliar(det, cv, det.detection.box);
+        if (q.ok) return { ok: true, descritor: Array.from(det.descriptor), thumb: miniatura(cv, det.detection.box, 128), qualidade: q };
+        if (i === max - 1) return { ok: false, motivo: 'qualidade', qualidade: q };
+      } else if (i === max - 1) {
+        return { ok: false, motivo: 'sem_rosto' };
+      }
+      await new Promise(r => setTimeout(r, 250));
+    }
+    return { ok: false, motivo: 'sem_rosto' };
   },
 
   distancia: euclidiana

@@ -389,3 +389,19 @@ export function pendenciasPorMotivo(marcacoes, recadastros, pessoas) {
     { chave: 'recadastro', rotulo: 'Recadastro', total: c.recadastro }
   ].sort((a, b) => b.total - a.total);
 }
+
+/**
+ * Yaw (giro horizontal da cabeça) a partir de três landmarks do rosto — só
+ * `.x`, de propósito (T-5EC67B): pitch (queixo para baixo/cima) é rotação em
+ * torno do eixo HORIZONTAL, então mexe em `.y`/`.z`, nunca em `.x`. Esta
+ * função é matematicamente cega a pitch — não é limiar frouxo, é ausência de
+ * métrica. Função pura (sem DOM) de propósito, para o QA poder afirmar isso
+ * em unitário determinístico sem navegador.
+ */
+export function yaw(landmarks) {
+  const p = landmarks.positions;
+  const le = p[36], re = p[45], nariz = p[30];
+  const meio = (le.x + re.x) / 2;
+  const vao = Math.abs(re.x - le.x) || 1;
+  return (nariz.x - meio) / vao;
+}
