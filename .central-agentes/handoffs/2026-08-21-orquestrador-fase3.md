@@ -272,3 +272,34 @@ Auditei este checkpoint e achei duas afirmações minhas que ficaram falsas:
 aberta com membros, remover e adicionar de dentro · ficha do colaborador em edição com
 telefone e o diálogo de telefone duplicado (que avisa, na hora da autorização, que a
 pessoa não poderá receber o link de cadastro de face).
+
+## Fecho: a §1 ficou completa, não "completa com ressalva"
+
+`integra/v3-r3` em d821ff3: **97 unitários · 139 e2e (zero armados) · 16 guardas** —
+zero falhas nas três coberturas. Nenhum `test.fixme` sobrou.
+
+A fatia de segurança do aparelho fechou inteira. Aprovar deixou de dar acesso a todas as
+equipes. E a última lacuna declarada, o **rastro auditável**: toda tentativa vira
+registro (quem, quando, qual aparelho, resultado) **independente de ter batido no
+limite** — registrar só o bloqueio mostraria a enxurrada e esconderia a tentativa
+paciente. O código tentado nunca é guardado.
+
+**Erro meu:** escalei um defeito ao cliente antes de ter o alcance. Disse que a câmera do
+PC provavelmente estava quebrada; o defeito estava na página do link, nunca integrada.
+Quatro leituras independentes confirmaram os dois caminhos intactos — a câmera porque o
+vídeo é **irmão** e não filho do container reescrito, o upload porque usa delegação no
+container pai, imune por construção. Fiz as perguntas certas e falei antes das respostas.
+
+**Lacuna de coordenação:** a regra de pista filtrava por Playwright e não via o navegador
+visível. Ampliada para qualquer consumo de navegador ou CPU pesada, com o recurso
+nomeado na procedência.
+
+**Limite de verificação visual do upload:** o navegador da Central não tem comando de
+upload de arquivo, e clicar num slot abre o diálogo nativo do sistema, que travaria a
+sessão. Então "as três em sequência", "retry de uma posição" e "recusa por falta de
+rosto" estão provados **funcionalmente e não vistos por olho humano**. O estado
+vazio-vs-falhou está provado em dois níveis: classe pelo teste, aparência pelo CSS
+(`css/tema.css:174-176` — tracejado vs sólido, que sobrevive a daltonismo).
+
+**Aberto:** link do celular (defeito em investigação) · métrica de pose · as quatro
+decisões do cliente.
