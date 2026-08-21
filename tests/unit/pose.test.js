@@ -10,6 +10,28 @@
 // NASCE VERMELHO enquanto `yaw` não estiver em regras.js. O vermelho é o
 // pedido, não um defeito do motor.
 
+// O QUE ESTES TESTES NÃO COBREM, declarado porque teste que não pega uma classe
+// tem de dizer que não pega — senão a próxima pessoa confia nele para isso.
+//
+// Eles NÃO detectam viés antropométrico na fórmula de pose. Medido: duas
+// anatomias plausíveis, ambas perfeitamente de frente (pitch verdadeiro zero),
+// dão leituras diferentes por fator ~2 tanto na forma absoluta
+// ((nariz−olhos)/(RAZÃO·vão)) quanto na razão auto-normalizada
+// ((nariz−olhos)/(queixo−nariz)). Nenhuma das duas tem zero natural: elas
+// cancelam ESCALA (tamanho do rosto, distância da câmera) e não cancelam FORMA.
+//
+// A monotonicidade sobrevive a um deslocamento constante, e o teste de limiar só
+// prova que o gate lê a config — então os dois ficariam VERDES com qualquer das
+// duas fórmulas enviesadas. Pegar isso exigiria descritores de rostos com
+// proporções diferentes, que o projeto não tem.
+//
+// Consequência de desenho (T-5EC67B): pitch ABSOLUTO em 2D não é mensurável sem
+// assumir anatomia, e assumir anatomia no GATE é pior que no matcher — o matcher
+// errado manda para revisão humana, o gate errado nem tenta. Diferença entre duas
+// fotos da MESMA pessoa cancela o deslocamento exatamente (medido: zero exato nas
+// duas anatomias), então consistência de pose entre as 3 fotos é respondível sem
+// constante. Ver docs/validacao-biometrica.md:101 para o risco demográfico.
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -33,9 +55,10 @@ const regras = await import('../../js/regras.js');
 /** Rosto de frente: olho esquerdo, olho direito, ponta do nariz. */
 function base() {
   const p = [];
-  p[36] = { x: 100, y: 150, z: 0 };
-  p[45] = { x: 200, y: 150, z: 0 };
-  p[30] = { x: 150, y: 190, z: 20 };
+  p[36] = { x: 100, y: 150, z: 0 };   // canto externo do olho direito
+  p[45] = { x: 200, y: 150, z: 0 };   // canto externo do olho esquerdo
+  p[30] = { x: 150, y: 190, z: 20 };  // ponta do nariz — protrui
+  p[8]  = { x: 150, y: 255, z: 5 };   // queixo (contorno da mandíbula) — protrui menos
   return { positions: p };
 }
 
@@ -43,7 +66,7 @@ function base() {
 function queixoBaixo(graus) {
   const p = base().positions, r = graus * Math.PI / 180;
   const c = Math.cos(r), s = Math.sin(r), o = [];
-  for (const i of [36, 45, 30]) {
+  for (const i of [36, 45, 30, 8]) {
     o[i] = { x: p[i].x, y: p[i].y * c - p[i].z * s, z: p[i].y * s + p[i].z * c };
   }
   return { positions: o };
@@ -53,7 +76,7 @@ function queixoBaixo(graus) {
 function cabecaVirada(graus) {
   const p = base().positions, r = graus * Math.PI / 180;
   const c = Math.cos(r), s = Math.sin(r), cx = 150, o = [];
-  for (const i of [36, 45, 30]) {
+  for (const i of [36, 45, 30, 8]) {
     o[i] = { x: cx + (p[i].x - cx) * c + p[i].z * s, y: p[i].y, z: -(p[i].x - cx) * s + p[i].z * c };
   }
   return { positions: o };
