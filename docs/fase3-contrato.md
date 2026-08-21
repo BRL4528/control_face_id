@@ -49,6 +49,26 @@ nenhuma peça deste contrato pode violar:
 
 ---
 
+## Princípio que apareceu quatro vezes nesta fase
+
+**Antes de confiar num sinal, perguntar de onde vem o dado que o alimenta — e se ele
+pode ser constante.**
+
+Nomeado porque a fase inteira o reencontrou em lugares sem relação nenhuma entre si:
+
+| Onde | O sinal | Como ele mentiria |
+|---|---|---|
+| §4.7 | `modelo_id` | manifesto gerado da árvore do repositório declara id certo sobre bytes errados: nunca marca divergência e passa a atestar sanidade |
+| §4.2 | `coerencia_no_limite` | corte mal escolhido acende em todo cadastro e treina o RH a ignorar, erodindo a conferência humana que compensa a falta de liveness |
+| §1.2 | `pedidos_da_mesma_rede_1h` | proxy que não repassa o IP real torna o `ip_hash` constante: "mesma rede" para o mundo inteiro, aceso sempre |
+| T-E3DBD4 | o `#porta` que nascia visível | tela que aparece por padrão não é evidência de estado nenhum |
+
+Detector que mente é pior que detector ausente, porque desliga a suspeita de quem
+olharia. Todo campo deste contrato que existe para alguém *notar algo* carrega, junto,
+a resposta a "o que faria isto virar constante?".
+
+---
+
 ## 0. Convenções
 
 Herdadas do ADR v3 sem alteração: base `/webhook`; JSON UTF-8; datas ISO 8601
@@ -179,9 +199,29 @@ Decisões dentro dessa resposta:
   **O campo fica no dado e no log; na tela aparece uma frase, não o número.** Eu havia
   posto o contador direto na tela, e é jargão por número: um RH leigo não liga "mesma
   rede" a "possível ataque" e não sabe o que fazer com `12`. A tela mostra, **só quando
-  é anômalo**, o texto fechado com o Designer: **"Vários aparelhos pediram liberação
-  pela mesma internet na última hora — se você só está esperando um, recuse os
-  outros."** Uma frase só, com a ação embutida.
+  é anômalo**, uma frase com a ação embutida.
+
+  **Duas versões, com gatilho — porque "mesma rede" depende de o n8n ver o IP do
+  cliente.** Se o proxy na frente do n8n não repassar o IP real (`X-Forwarded-For` ou
+  equivalente), o `ip_hash` passa a ser o mesmo para todo mundo — o do proxy — e o
+  contador conta o mundo inteiro como "a mesma rede": acende **sempre**, e a frase fica
+  tecnicamente verdadeira e informativamente vazia. É o mesmo modo de falha do
+  manifesto sobre a árvore do repositório (§4.7): detector que lê uma constante é
+  detector que mente.
+
+  | Se o IP real… | Campo | Frase na tela |
+  |---|---|---|
+  | **chega** ao n8n | `pedidos_da_mesma_rede_1h` | "Vários aparelhos pediram liberação **pela mesma internet** na última hora — se você só está esperando um, recuse os outros." |
+  | **não chega** | `pedidos_pendentes_1h` | "Vários aparelhos pediram liberação na última hora — se você só está esperando um, recuse os outros." |
+
+  `Por quê a segunda versão preserva o invariante:` o que sai é a palavra "mesma rede",
+  não o sinal. O Cenário 1 é **flood** — muitos pedidos plausíveis ao mesmo tempo — e
+  isso o servidor observa com certeza, com proxy ou sem: quantos pendentes existem
+  agora e quantos apareceram na última hora. A segunda frase é verdadeira
+  independentemente de topologia, continua dizendo a ação, e **não acende sempre**,
+  porque a condição passa a ser volume real em vez de um hash constante. Tirar o sinal
+  inteiro jogaria fora o invariante junto com a métrica — e o invariante nunca dependeu
+  de IP.
   `Por quê o número não sai do dado:` observabilidade. No dia em que alguém investigar
   um flood de verdade, "vários" não serve para nada. Frase para decidir, número para
   investigar.
@@ -1276,6 +1316,18 @@ erro de aplicação faria o cliente tratá-la como regra de negócio.
 
 `LIMITE_CONVITE` sai do catálogo da rota: a rota não limita abertura.
 
+**Alternativa condicionada, pré-aprovada — se não houver proxy capaz de limitar.** A
+guarda de volume acima pressupõe infraestrutura na frente do n8n. Gatilho explícito:
+*se a resposta do cliente for que não existe proxy, ou que o proxy não faz rate
+limit*, a guarda de volume passa para a rota, chaveada no **`pessoa_id` do convite** —
+nunca em IP — com limiar generoso.
+`Por quê `pessoa_id` e não IP:` é a chave que não sofre NAT de operadora, então uma
+turma no mesmo canteiro não se tranca mutuamente; e mantém a propriedade que motivou
+as chaves distintas, porque cada `429` continua tendo causa única e legível (aquela
+pessoa, aquele convite). Está escrito aqui, e não guardado para quando a resposta
+chegar, porque **alternativa que existe só na cabeça de alguém é alternativa que se
+perde.**
+
 **Uso único com Data Table, honestamente.** O consumo é um compare-and-set
 `aberto → consumido` que, sem índice único nem transação, é leitura-e-escrita e
 pode correr. Mitigações: `Idempotency-Key` obrigatório no envio e dano limitado
@@ -1764,6 +1816,7 @@ como está (§2.4).
 |---|---|---|
 | `CODIGO_COM_LETRA_INVALIDA` | 422 | rh/aparelho/aprovar |
 | `CODIGO_NAO_ENCONTRADO` | 404 | rh/aparelho/aprovar |
+| `CODIGO_EXPIRADO` | 404 | rh/aparelho/aprovar |
 | `CODIGO_AMBIGUO` | 409 | rh/aparelho/aprovar |
 | `ESCOPO_VAZIO` | 422 | aprovar, escopo |
 | `EQUIPE_INVALIDA` | 422 | aprovar, escopo |
