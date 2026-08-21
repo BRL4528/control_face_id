@@ -349,13 +349,32 @@ logado (o ADR já exige; o teste precisa cravar).
 **Teste:** para N pendentes, nenhuma função de `dispositivo_id`/`apelido`/`ua` reproduz o
 código; os códigos são distintos e vêm de CSPRNG.
 
-**Invariante 2.1e.** Tentativa de aprovação com código errado é limitada por sessão de RH e
-por janela, e o contador de tentativas é visível na linha do pendente. São ~30 bits
-(`31^6`), o que é bastante contra adivinhação cega — mas o alvo real é o RH que erra a
-digitação três vezes e o atacante que testa códigos enquanto um pendente legítimo está na
-fila.
-**Teste:** N erros na janela bloqueiam novas tentativas com `429`; a contagem aparece na
-lista de pendentes.
+**Invariante 2.1e.** Tentativa de aprovação com código errado é limitada **por usuário de
+RH** e por janela, com `429` + `Retry-After`, e **a contagem acontece depois da
+autenticação**. São ~30 bits (`31^6`), o que é bastante contra adivinhação cega — mas o
+alvo real é o RH que erra a digitação três vezes e o atacante que testa códigos enquanto
+um pendente legítimo está na fila.
+**Teste:** N erros na janela bloqueiam com `429` + `Retry-After`, e dentro da janela nem o
+código **certo** passa (sem isso, "bloqueou" pode ser só uma mensagem diferente); e 12
+tentativas com credencial errada dão `401`, nunca `429`, sem consumir cota.
+
+*Por que a ordenação virou parte da invariante:* se a contagem vier antes da checagem de
+usuário/chave, quem souber apenas o **nome** do usuário de RH derruba a aprovação de
+aparelhos pela janela inteira sem ter credencial nenhuma — a defesa vira negação de
+serviço contra o próprio RH.
+
+*Corrigido depois da implementação (T-C20AD3), e o furo era meu:* a versão anterior exigia
+que "o contador de tentativas seja visível na linha do pendente". Isso não sobreviveu ao
+desenho, e o `508cd44fd2` mostrou por quê — um código errado com frequência não resolve
+para aparelho nenhum, então não existe linha em que incrementar; o contador certo é por
+usuário de RH. Pior: o teste que eu escrevera para essa parte era **vacuoso**, procurava a
+palavra `tentativas` no payload do RH, e esse campo já existe na linha do aparelho por
+outro motivo (rotação de pedido, contrato §1.2) — passaria sempre. **Lacuna aberta,
+registrada como lacuna e não como asserção fingida:** hoje uma sequência de tentativas
+erradas não deixa rastro auditável em lugar nenhum. O lugar natural, se for fechar, é uma
+linha de auditoria no formato de `efrat_auditoria_identificacao` (ADR: dispositivo,
+instante, resultado) — mas isso é decisão de contrato, e inventar campo para satisfazer um
+teste seria deixar o teste dirigir o desenho.
 
 **Invariante 2.1f.** O pendente expira sozinho. Um pedido de aprovação que ninguém atendeu
 não pode ficar aprovável por tempo indeterminado — é o que transforma um tablet perdido em
