@@ -794,3 +794,109 @@ dentro da decisão que já foi tomada, e é honesto sobre o que garante.
 - **O limiar 0,45 não foi calibrado com a população da Efrat** — as invariantes de §4 são
   corretas para o limiar configurado, seja ele qual for, e é por isso que 4.2c exige fonte
   única.
+
+---
+
+## Apêndice · Três padrões de teste que esta fase produziu
+
+Não são teoria: cada um saiu de um defeito real desta rodada, e os três são a
+mesma família — **verde que não prova o que o nome do teste promete**. Ficam aqui
+porque as invariantes acima só valem se os testes que as sustentam não mentirem.
+
+### 1. Guarda que documenta um defeito declara a própria obsolescência
+
+Um teste escrito para travar um comportamento **errado** (para que ninguém dependa
+dele sem saber) vira mentira no dia em que o comportamento é consertado. A
+mensagem de falha dele é o lugar certo para dizer isso — ela é lida exatamente por
+quem estiver olhando quando acontecer.
+
+Instância: a guarda 2.1g afirmava que `#btnPonto` vinha habilitado embaixo da tela
+escondida, com a mensagem *"se isto virar false, btnPonto passou a discriminar e
+este guarda pode ser revisto"*. `index.html` passou a nascer `disabled`, a guarda
+ficou vermelha, e a mensagem disse o que fazer: inverter a afirmação para
+`toBeDisabled()` e travar a correção. Sem essa frase, o vermelho pareceria
+regressão e alguém "consertaria" o produto de volta.
+
+**Regra:** todo teste cuja asserção descreve um defeito aceito carrega, na
+mensagem, a instrução para o dia em que o defeito morrer.
+
+### 2. Não inferir de ausência
+
+Afirmar que algo **não** aconteceu só vale se algo positivo provar que o caminho
+rodou. Sem essa âncora, o verde não distingue *"foi impedido"* de *"ninguém correu
+ainda"* — e sob CPU disputada a segunda hipótese fica mais provável, então o teste
+fica mais verde justamente quando a máquina está pior.
+
+O discriminador não é a forma da asserção, é se a coisa afirmada ausente **era
+possível naquele instante**:
+
+- `expect(locator).toHaveClass(/hide/)` re-tenta até o timeout: afirma "continuou
+  escondido o tempo todo". Sólida.
+- `expect(valorJs).toBeFalsy()` / `toBe(0)` fotografa um instante. Frágil **se** o
+  tempo tornar possível o que ela nega.
+- Uma ausência garantida por contrato (a operação é proibida) é permanente:
+  esperar mais não a torna presente. Sólida.
+
+Instâncias desta fase, todas do mesmo formato: o teste de offline verde porque a
+checagem de dispositivo travava contra produção; `toBeEnabled()` que não olha
+visibilidade; o critério 5b, cuja tela já estava visível antes do passo; e o
+`chamadas.carga === 0` lido como fotografia. Consertos: âncora positiva antes da
+negativa — a mensagem que só o ramo de falha escreve, ou o contador do caminho que
+tinha de ter rodado.
+
+### 3. Contraprova antes da negação
+
+Um teste que só nega **passa contra uma rota que não existe** — `404` não ativa
+nada. Verde por ausência de implementação mente pior que vermelho, porque não pede
+atenção de ninguém.
+
+Instância: os testes armados de 2.1 provam primeiro o caminho feliz (com o código
+certo, ativa) e só então negam. Foi essa ordem que pegou um erro meu no mesmo dia —
+uma substituição de constante falhou calada e os testes apontavam para a rota
+antiga; sem a contraprova eles teriam ficado verdes contra o `404`.
+
+**Corolário para ler resultado sob concorrência** — corrigido depois de dois
+contra-exemplos medidos no mesmo dia, e a versão anterior deste parágrafo estava
+errada:
+
+- Verde geral sob concorrência é **mais forte**, não mais fraco: contenção não
+  produz verde falso — exceto nas asserções de ausência temporal do padrão 2, que
+  ficam *mais* verdes quando a máquina está pior.
+- Vermelho **espalhado** pede repetir com a pista limpa.
+- Vermelho **isolado** é **suspeito, não confiável** — reconfira sozinho antes de
+  acreditar. A versão anterior dizia o contrário ("contenção não é seletiva, logo
+  um vermelho isolado é real"). O raciocínio tem um furo: a contenção é uniforme,
+  mas a **margem não é**. Ela quebra primeiro o teste que está mais perto do
+  próprio limite de tempo, e só ele — o que é indistinguível de seletividade.
+  Medidos no mesmo dia: `aviso-liveness.spec.js:84`, vermelho entre 105 verdes e
+  3/3 verde isolado em 4,0s; e `aparelhos.spec.js:102`, vermelho na suíte e verde
+  sozinho em 15,7s.
+
+O que salvou nos dois casos não foi a regra, foi a disciplina de reconferir antes
+de formar hipótese: investigar o código a partir de um vermelho falso custa horas,
+e rodar o teste sozinho custa segundos. **Reconferir é mais barato que raciocinar
+— faça primeiro.**
+
+**E a terceira parte, que inverte o instinto.** Os dois efeitos acima acontecem na
+mesma rodada e em direções opostas: margem apertada produz **vermelho** falso,
+ausência temporal produz **verde** falso. O vermelho puxa toda a atenção — a
+investigação vai para ele, que é o falso, e os verdes falsos ficam protegidos pelo
+barulho, sem ninguém olhar.
+
+Logo: **uma rodada com vermelho não explicado é o pior momento para confiar nos
+verdes dela, não o melhor.** O vermelho não é o único problema da rodada; é o
+único visível.
+
+Reconferir só o teste vermelho responde *"ele é real?"*. Não responde *"a rodada é
+confiável?"*. São perguntas diferentes. Procedimento: vermelho não explicado →
+repetir a **suíte inteira** com a pista limpa antes de acreditar em qualquer
+resultado dela, verde incluído.
+
+Instância desta fase, e ela é do próprio autor deste documento: `aviso-liveness.spec.js:84`
+foi o vermelho isolado que disparou a correção acima — e, ao ser reaberto por
+causa disso, revelou que estava **sem âncora**: afirmava `.aviso` com
+`toHaveCount(0)` sem antes exigir que o card existisse, então passava tanto com o
+aviso corretamente ausente quanto com a tela inteira não pintada. Era, ao mesmo
+tempo, o teste de margem mais apertada do arquivo e um verde falso do padrão 2. Os
+dois defeitos no mesmo teste, e foi o vermelho — o sintoma errado — que levou até
+o certo.

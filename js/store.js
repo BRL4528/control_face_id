@@ -1,14 +1,20 @@
 // Armazenamento local. Tudo que o app precisa para operar um turno inteiro
 // sem internet vive aqui.
 //
-// Quatro coleções:
-//   cfg      sessão, carga da unidade, deriva de relógio
-//   fila     marcações ainda não confirmadas pelo servidor  (o dado crítico)
-//   enviadas marcações já confirmadas, para deduzir entrada/saída do dia
-//   eventos  diário de bordo, para diagnóstico em campo
+// Cinco coleções:
+//   cfg       sessão, carga da unidade, deriva de relógio
+//   fila      marcações ainda não confirmadas pelo servidor  (o dado crítico)
+//   enviadas  marcações que o servidor confirmou ter — aceita, duplicada OU
+//             retida (§1.6/§3.3 do contrato): "confirmada" não é sinônimo de
+//             "conta como ponto", é sinônimo de "não precisa mais ser reenviada"
+//   recusadas marcações que o servidor recusou de vez (rejeitado) — nunca
+//             reenviadas, nunca apagadas sozinhas, visíveis pro operador.
+//             Existe porque hoje um item rejeitado ficava preso na fila pra
+//             sempre, retentando em silêncio: ver docs/fase3-contrato.md §1.6.
+//   eventos   diário de bordo, para diagnóstico em campo
 export const Store = (() => {
   const NOME = 'efrat-ponto';
-  const VERSAO = 1;
+  const VERSAO = 2;
   let db = null;
 
   function abrir() {
@@ -24,6 +30,9 @@ export const Store = (() => {
         if (!d.objectStoreNames.contains('enviadas')) {
           const s = d.createObjectStore('enviadas', { keyPath: 'id_cliente' });
           s.createIndex('por_dia', 'marcado_dia');
+        }
+        if (!d.objectStoreNames.contains('recusadas')) {
+          d.createObjectStore('recusadas', { keyPath: 'id_cliente' });
         }
         if (!d.objectStoreNames.contains('eventos')) {
           d.createObjectStore('eventos', { keyPath: 'seq', autoIncrement: true });
@@ -62,23 +71,15 @@ export const Store = (() => {
     fila: () => tx('fila', 'readonly', s => s.getAll()),
     tirarDaFila: id => tx('fila', 'readwrite', s => s.delete(id)),
 
-    async marcarErro(id, erro) {
-      const d = await abrir();
-      return new Promise((res, rej) => {
-        const t = d.transaction('fila', 'readwrite');
-        const st = t.objectStore('fila');
-        const g = st.get(id);
-        g.onsuccess = () => {
-          const item = g.result;
-          if (item) { item._erro = erro; item._tentativas = (item._tentativas || 0) + 1; st.put(item); }
-        };
-        t.oncomplete = () => res();
-        t.onerror = () => rej(t.error);
-      });
-    },
-
     confirmar: m => tx('enviadas', 'readwrite', s => s.put(m)),
     enviadas: () => tx('enviadas', 'readonly', s => s.getAll()),
+
+    // T-D00CE0 (§1.6): rejeitado nunca mais reenviado nem apagado sozinho —
+    // fica aqui, visível, até alguém olhar. Sem `marcarErro`/`_erroPermanente`
+    // de antes: aquilo deixava o item preso na `fila`, retentando em
+    // silêncio pra sempre, que era exatamente o bug que este contrato fecha.
+    recusar: m => tx('recusadas', 'readwrite', s => s.put(m)),
+    recusadas: () => tx('recusadas', 'readonly', s => s.getAll()),
 
     async doDia(dia) {
       const todas = await Promise.all([this.fila(), this.enviadas()]);
@@ -95,8 +96,8 @@ export const Store = (() => {
     async limparTudo() {
       const d = await abrir();
       return new Promise((res, rej) => {
-        const t = d.transaction(['cfg', 'fila', 'enviadas', 'eventos'], 'readwrite');
-        ['cfg', 'fila', 'enviadas', 'eventos'].forEach(n => t.objectStore(n).clear());
+        const t = d.transaction(['cfg', 'fila', 'enviadas', 'recusadas', 'eventos'], 'readwrite');
+        ['cfg', 'fila', 'enviadas', 'recusadas', 'eventos'].forEach(n => t.objectStore(n).clear());
         t.oncomplete = () => res();
         t.onerror = () => rej(t.error);
       });

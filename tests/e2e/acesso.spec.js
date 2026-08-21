@@ -38,6 +38,10 @@ async function aprovar(page) {
     d.estado = 'ativo'; d.equipes_ids = ['eq-1', 'eq-2']; d.configuracao_versao = 1;
   }
   await page.evaluate(() => window.__EFRAT.verificarDispositivo());
+  // #porta e o sinal que discrimina: fica escondido enquanto o aparelho
+  // esta pendente. btnPonto habilitado, sozinho, ja e verdadeiro antes de
+  // aprovar (toBeEnabled ignora visibilidade) e por isso nao prova nada.
+  await expect(page.locator('#porta')).toBeVisible({ timeout: 20000 });
   await expect(page.locator('#btnPonto')).toBeEnabled({ timeout: 20000 });
 }
 
@@ -102,9 +106,13 @@ test('critério 5a — aparelho que nunca completou cadastro (sem rede desde o b
   });
   await page.goto(ctx.url + '/index.html');
   await page.waitForFunction(() => window.__EFRAT && window.__EFRAT.Face.pronto, null, { timeout: 20000 });
-  await page.waitForTimeout(2000);
-  await expect(page.locator('#porta')).toHaveClass(/hide/);
+  // Espera a CONDIÇÃO POSITIVA em vez de um sleep fixo: `#aguardando` nasce
+  // com `hide` (index.html:51), então ele só perde a classe se o app tiver
+  // rodado e decidido mostrar a tela de espera. É esse passo que ancora as
+  // duas afirmações negativas seguintes — sem ele, "porta escondida" e "sem
+  // info" seriam verdade também num app que simplesmente não rodou.
   await expect(page.locator('#aguardando')).not.toHaveClass(/hide/);
+  await expect(page.locator('#porta')).toHaveClass(/hide/);
   const dispositivo = await page.evaluate(() => window.__EFRAT.S.dispositivo);
   expect(dispositivo && dispositivo.info).toBeFalsy();
 });
@@ -120,7 +128,16 @@ test('critério 5b — aparelho cadastrado mas NUNCA aprovado (ficou pendente) n
 
   await page.evaluate(() => { window.EFRAT_CFG.apiBase = 'http://127.0.0.1:1/webhook'; });
   await page.evaluate(() => window.__EFRAT.verificarDispositivo());
-  await page.waitForTimeout(500);
+
+  // ANCORA POSITIVA, e aqui ela é obrigatória: diferente do 5a, `#aguardando`
+  // JÁ estava visível antes deste passo (afirmado acima). Então "continua
+  // visível" não distingue "o fail-closed rodou e recusou" de "o fetch morto
+  // ainda não retornou e nada rodou" — e sob CPU disputada a segunda hipótese
+  // fica MAIS provável, que é o jeito de uma afirmação negativa depois de
+  // sleep fixo ficar verde por motivo errado. A mensagem é a prova de
+  // execução: só o ramo de falha de rede a escreve (js/app.js:190).
+  await expect(page.locator('#aguardandoTexto'))
+    .toHaveText('Sem conexão para confirmar a liberação deste aparelho.');
 
   await expect(page.locator('#porta')).toHaveClass(/hide/);
   await expect(page.locator('#aguardando')).not.toHaveClass(/hide/);
@@ -162,7 +179,14 @@ test('T-E3DBD4 — RH alcançável com aparelho pendente, sem liberar carga nem 
   await page.click('#btnEntrarRh');
   await expect(page.locator('#rh')).not.toHaveClass(/hide/, { timeout: 15000 });
 
-  // durante todo o fluxo, carga da unidade e botão de ponto continuam presos
+  // ANCORA POSITIVA antes das negativas. `chamadas.carga` é contador lido num
+  // instante: `toBe(0)` não re-tenta e é verdade também num app que ainda não
+  // rodou nada. Afirmar primeiro que o caminho do aparelho REALMENTE rodou
+  // (o estado foi consultado) transforma o verde de "ninguém correu ainda" em
+  // "correu, decidiu pendente, e mesmo assim não baixou carga".
+  await expect
+    .poll(() => ctx.estado.chamadas.estado, { timeout: 15000 })
+    .toBeGreaterThan(0);
   expect(ctx.estado.chamadas.carga).toBe(0);
   await expect(page.locator('#porta')).toHaveClass(/hide/);
 
@@ -170,5 +194,9 @@ test('T-E3DBD4 — RH alcançável com aparelho pendente, sem liberar carga nem 
   await page.click('#btnSairRh');
   await expect(page.locator('#aguardando')).not.toHaveClass(/hide/, { timeout: 8000 });
   await expect(page.locator('#porta')).toHaveClass(/hide/);
+  // Este sítio JÁ está ancorado, e por isso não ganha poll nenhum: durante o
+  // painel do RH `#aguardando` estava com `hide` (mostrar() esconde os
+  // outros), então ele voltar a aparecer é transição POSITIVA — prova que o
+  // logout rodou e re-renderizou. A negativa abaixo pendura nela.
   expect(ctx.estado.chamadas.carga).toBe(0);
 });
