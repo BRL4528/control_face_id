@@ -37,6 +37,24 @@ nenhuma peça deste contrato pode violar:
 
 1. **Nada de segredo no bundle.** Todo arquivo servido é público. `js/config.js`
    é configuração de runtime, não cofre.
+   **E a dependência de ordem em `js/config.js:15` é inerente ao desenho, não defeito a
+   corrigir** — registro pedido pelo DevOps (T-F1E72A) para ninguém "consertar" aquele
+   arquivo achando que fecha um buraco. Por desenho o app precisa de duas coisas ao mesmo
+   tempo: um default de produção escrito no arquivo, e um jeito de o ambiente de teste
+   sobrepor esse default. **Toda** forma de conseguir isso é ordem-dependente —
+   `Object.assign` com os defaults no primeiro argumento, spread, ou uma variável separada
+   que o config prefere. Trocar dependência de **ordem** por dependência de **convenção**
+   não compra robustez e custa complexidade num arquivo cuja virtude é ser simples o
+   bastante para o cliente ler e editar no servidor.
+   O que protege é a guarda de CI, e ela protege porque verifica o **resultado**: busca o
+   `config.js` servido, executa num contexto real e lê o `window.EFRAT_CFG.apiBase`
+   resolvido — nunca analisa o texto, nunca afirma que `Object.assign` existe. Consequência:
+   qualquer refatoração que preserve o comportamento passa, e qualquer uma que o quebre
+   falha, **inclusive as que ninguém previu**.
+   **Medido, não deduzido** (DevOps): trocando o `Object.assign` por objeto literal — a
+   limpeza que um revisor aprovaria sem pensar — a guarda foi de `exit 0` para `exit 1`
+   nomeando `n8n.samasc.com.br`. Antes: "npm run serve → 127.0.0.1:37475 (local)". Depois:
+   "o servidor de teste entrega o app apontando para n8n.samasc.com.br".
 2. **Nenhum passo de build.** Página nova é arquivo `.html` novo + módulo ES novo.
    Sem bundler, sem transpilação, sem `process.env`.
 3. **A página pública de face vive em origem própria.** Subdomínio, não caminho.
@@ -67,56 +85,99 @@ Detector que mente é pior que detector ausente, porque desliga a suspeita de qu
 olharia. **E medição que ninguém usa é pior que não medir, porque vira falso conforto** —
 formulação do Biometria, e é o mesmo padrão um passo adiante: `efrat_template.coerencia`
 acumulando sem ninguém olhar (dívida 9) não é neutro, é um "nós medimos isso" que ninguém
-pode sacar. A família toda é uma só: coisa que parece evidência e não é. Todo campo deste contrato que existe para alguém *notar algo* carrega, junto,
-a resposta a "o que faria isto virar constante?".
+pode sacar. A família toda é uma só: coisa que parece evidência e não é.
 
-## Convenção de nomes: a força de uma afirmação vai no nome dela
+### O princípio irmão: não inferir de ausência
 
-Varredura de nomes pedida pelo Orquestrador, irmã da tabela de procedência de §4.2 — lá o
-risco era número construído lido como medido; aqui é **afirmação fraca lida como forte**.
+Nomeado pelo Orquestrador depois de aparecer **sete vezes em um dia**, em lugares sem
+relação entre si. É distinto do anterior: lá o sinal existe e mente; aqui **não há sinal, e
+a falta é lida como afirmação**.
 
-O achado não foi o que eu previ. Eu esperava encontrar nomes ambíguos (`verificado`,
-`confirmado`); o documento **não tem** esses campos. O que ele tem é uma convenção que eu
-mesmo criei e apliquei **pela metade**: `apelido_declarado`, `geo_declarada` e
-`origem_observada` carregam a força no nome, e campos da mesma natureza não carregam.
-Convenção aplicada pela metade é pior que convenção ausente, porque a presença do sufixo
-em alguns campos faz a ausência nos outros parecer significado.
-
-| Sufixo | Força | O que é |
+| Onde | A ausência | Foi lida como |
 |---|---|---|
-| `_declarado` | **nenhuma** | o cliente afirmou, ninguém checou |
-| `_observado` | fato do servidor | o servidor viu acontecer |
-| `_calculado` | aritmética sobre entrada não verificada | o servidor computou; os insumos vieram do cliente |
-| `_provado` | posse verificada | confere contra hash/credencial |
-| `_autorizado_por`, `_decidido_por` | responsabilidade humana | alguém assumiu; nenhuma checagem técnica |
+| `offline.spec` | teste que não progrediu por travamento | verde |
+| `toBeEnabled` | asserção que não olha visibilidade | botão utilizável |
+| §4.7, mecanismo antigo | manifesto de build, escrito antes de o dado existir | descrição dos bytes servidos |
+| §4.3 e §7 item 14 | campo que não foi gravado, logo nada a remover | teste de remoção passando |
+| `acesso.spec.js:105,123` | `waitForTimeout` fixo, e o caminho não teve tempo de rodar | fail-closed comprovado |
+| protocolo de pista | resultado não anunciado | suíte verde |
+| protocolo de pista | anúncio de fim que nunca chega (rodada morreu) | pista ocupada para sempre |
+| quadro de tarefas | cartão não movido durante o merge | estado real do cartão |
+| quadro de tarefas | rótulo `PRONTO` cujo significado ninguém conferiu (é *ready*, não *done*) | entrega concluída |
 
-**Onde o sufixo é obrigatório:** quando o mesmo campo poderia plausivelmente ser de outra
-força. `pedidos_da_mesma_rede_1h` não precisa — contagem só pode ser observada. `modelo_id`
-**precisa**, porque poderia ser verificado e não é. Essa é a regra que impede a convenção de
-inflar todo nome do sistema.
+### O terceiro irmão: guarda que confere o mecanismo, não o resultado
 
-Os dois casos que a varredura encontrou:
+Nomeado pelo Orquestrador sobre a guarda do `serve`, e é distinto dos dois anteriores: não é
+sinal que mente nem ausência lida como afirmação — é **verificação apontada para a
+implementação em vez do efeito**. Guarda de propriedade sobrevive a refatoração; guarda de
+implementação vira mentira na primeira limpeza, e pior: continua verde enquanto mente.
 
-- **`modelo_id` é declarado pelo cliente** (§4.7) e não diz isso no nome, enquanto
-  `apelido_declarado`, que é da mesma natureza, diz. Nome honesto:
-  **`modelo_id_declarado`**. Feio e honesto vale mais que elegante e ambíguo.
-- **A "conferência" do RH na fila de recadastro** (`53136b3`) é um clique de humano, e a
-  palavra sugere verificação. Na prosa e na tela: **declaração de que conferiu**, não
-  conferência. O que o sistema sabe é que alguém marcou uma caixa; o que aconteceu antes de
-  marcar, ele não sabe.
+| Guarda | Conferia o mecanismo | Passou a conferir o resultado |
+|---|---|---|
+| `apiBase` do `serve` | presença da linha injetada / domínio no texto | `window.EFRAT_CFG.apiBase` resolvido, após executar o arquivo servido |
+| `modelo_id` (§4.7) | existência de um `manifesto.json` de build | digest dos 7 arquivos **servidos**, comparado entre as duas origens |
+| decimal fora da tela (§7 item 14) | ausência do campo no registro | ausência do campo **no payload**, com o registro semeado |
 
-E por que isso não é preciosismo: a compensação que este contrato oferece pela **ausência de
-liveness** nos caminhos `link` e `rh_upload` é exatamente a conferência humana (§4.3). Se
-"conferência" e "verificado" forem lidos com a mesma confiança, perde-se a distinção que
-sustenta essa compensação — e ela é a única que sustenta dois dos três caminhos de cadastro.
+Os três foram consertados no mesmo dia, e nos três o defeito era o mesmo: a asserção olhava
+para como a coisa é feita, e o que importa é o que sai. **Quarto caso, encontrado pelo DevOps
+ao auditar as 15 guardas dele procurando a *forma* e não o erro** — e era o pior, porque
+estava na fronteira da origem pública: a guarda "o service worker do operador não alcança a
+página pública" lia o **texto** do handler e comparava posições. Medido: trocar
+`if (url.pathname === FORA_DO_APP || …) return;` por
+`if (false && (url.pathname === FORA_DO_APP || …)) return;` mantinha a guarda **verde** —
+referência intacta, desvio morto. A proteção que impede o colaborador de receber o shell do
+app do operador sem rede podia estar desligada com o CI todo verde. Corrigida em `a94f22a`:
+passa a **executar** o handler com `self`/`caches`/`location`/`fetch` dublados e observar se
+`respondWith` foi chamado; seis sabotagens, todas vermelhas.
 
-**Quando aplicar, e é a parte que importa mais que a proposta.** `modelo_id` está sendo
-implementado agora (T-8ADD9C). Renomear campo em voo custa mais do que compra, e um contrato
-que muda nome de campo no meio da implementação vira o defeito que ele estava tentando
-evitar. Recomendação: o sufixo vale **para nome que ainda não está em código**; para
-`modelo_id`, a força fica registrada na descrição do campo e a renomeação espera uma passada
-única e coordenada, **depois** de os três caminhos de cadastro estarem entregues. O cliente
-está esperando funcionalidade, não vocabulário.
+**E guarda de resultado exige CONTRAPROVA, ou passa por vacuidade** — regra do DevOps, e é a
+metade que faltava no parágrafo acima. Afirmar só o que a coisa **não** faz deixa passar o
+caso em que ela não faz nada: um `sw.js` com o handler de `fetch` inteiro removido satisfaz
+"não assume os caminhos públicos". Foi preciso afirmar, no mesmo teste, que ele **ainda
+assume** `/index.html` e os modelos. As duas metades juntas — o que não faz e o que continua
+fazendo — ou virar mecanismo em resultado só troca um falso verde por outro.
+É o mesmo formato do critério 14 desta rodada, onde a ausência do decimal no payload só
+significa algo com o registro **semeado**: a semente é a contraprova. Generalizando: **toda
+asserção de ausência precisa de uma asserção de presença ao lado, no mesmo teste** — senão a
+ausência pode vir de o mecanismo não ter rodado.
+
+**E a contraprova não é algo de que se lembra: é algo que a sabotagem cobra.** O DevOps achou
+a regra porque estava consertando a guarda e o conserto tentou passar por vacuidade nas mãos
+dele — escreveu "não assume os caminhos públicos", rodou a sabotagem de remover o handler
+inteiro, e a guarda passou. Sem sabotar cada guarda antes de confiar nela, a versão "de
+resultado" sai com o mesmo defeito da versão "de mecanismo" **e a mensagem de commit diz que
+está consertado**. Requisito prático, então: quem escrever guarda de resultado sabota
+explicitamente o caso *"o mecanismo não rodou"* — e é essa sabotagem, não a boa intenção, que
+produz a contraprova.
+
+**Teste operacional para classificar uma guarda em trinta segundos**, também do DevOps:
+*se alguém refatorasse isto corretamente, a minha assertiva continuaria passando?* Se uma
+mudança que **preserva** comportamento pode deixá-la vermelha, ela olha para implementação; e
+vale o inverso, uma mudança que **quebra** comportamento pode passar. Não exige reconhecer o
+caso, o que é o que o torna aplicável em série.
+
+**E "mecanismo" é relativo à propriedade.** Quando a propriedade **é** textual — por exemplo
+o mesmo prefixo de caminho aparecendo nos três arquivos que precisam concordar — conferir
+texto *é* conferir resultado, e a guarda está correta. Duas das quinze do DevOps seguem sendo
+proxy, declaradas como proxy: essa, e a do HTML inicial, cuja versão de resultado exigiria
+navegador no CI para uma propriedade que o atributo representa fielmente. **Proxy declarado
+como proxy é aceitável; proxy passando por resultado não é** — e a diferença entre os dois é
+só alguém ter escrito qual dos dois é.
+
+Os últimos quatro casos não são do produto — dois são do nosso canal e dois do nosso
+instrumento de acompanhamento — e é por isso que o princípio ficou visível: o mesmo defeito aparece igual quando o "sistema" é a equipe. E os dois casos do quadro merecem nota, porque a forma deles é diferente: ali a ausência não
+era de dado, era de **atualização** — e um quadro não atualizado não fica calado, ele
+**continua afirmando o estado anterior em nome de quem devia tê-lo movido**. Somado a um
+rótulo cujo significado ninguém conferiu (`PRONTO` é *ready*, não *done*), produziu uma
+conferência de boa-fé que devolveu garantia falsa. Rótulo não é evidência, do mesmo modo que
+antiguidade de número não é (§4.2) — e conferir o quadro sem conferir o vocabulário do quadro
+é conferir mecanismo, não resultado.
+
+**Regra prática:**
+todo campo, teste ou protocolo deste contrato que trate falta de dado como resultado tem de
+dizer explicitamente qual dos dois lados a falta significa — e, quando não puder dizer,
+perguntar em vez de assumir. É o que §1.8 já faz com o aparelho offline (falha fechado, e
+diz que falha fechado), e o que os dois specs acima **não** fazem.
 
 ---
 

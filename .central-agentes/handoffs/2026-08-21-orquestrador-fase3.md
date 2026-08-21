@@ -149,3 +149,39 @@ boot + guarda "nenhuma seção nasce visível".
 
 **Bloqueios com o cliente:** a string do hostname de produção, e qual proxy está na
 frente do n8n (a resposta "nenhum" muda a recomendação de rate limit).
+
+## Atualização 4 · fecho do dia (medido, não reportado)
+
+`integra/v3-r3` em 6151115: **93 unitários + 95 e2e passando, 5 armados, zero falhas**,
+medido no meu worktree com Playwright instalado — parei de somar relato de terceiro.
+
+**Concluído** (10): liberação de aparelho por código digitado · coerência calculada no
+servidor com recusa em 0,45 · equipes com membros, telefone obrigatório e edição ·
+aviso de liveness também no upload · decimais fora da tela · contrato (1893+ linhas) ·
+threat model · CSP/cache/guardas de CI · guarda do `apiBase` efetivo · prova de posse
+religada.
+
+**Em construção:** cadastro de face (câmera do PC pronta no ramo do Biometria, upload
+em obra, link por último de propósito) · marcação de aparelho revogado.
+
+**Aberto com o cliente:** hostname de produção da origem pública · quatro fotos com e
+sem capacete (2 poses cada) para testar a hipótese da sombra da aba · sim/não à Parte 1
+(rotas do convite pela Vercel — recomendada: grátis, reversível, devolve a camada de
+volume para fora da aplicação).
+
+## O princípio que o dia produziu
+
+**Não inferir de ausência.** Nove instâncias em um dia, em cinco camadas:
+`offline.spec.js` verde porque a chamada à produção travava · `toBeEnabled()` que não
+olha visibilidade (26+7 asserções, incluindo um teste que não conseguia falhar) ·
+manifesto de modelo gerado antes do dado existir · meu "se eu não disser nada, está
+verde" · fim de rodada que nunca chega travando a pista · guarda do `sw.js` tratando
+base ausente como satisfeita · dois hostnames onde ausência de sintoma seria lida como
+isolamento em pé · teste que passaria por vacuidade sem campo gravado · três asserções
+de ausência temporal nos invariantes de acesso. Está no README, antes da seção das
+guardas. Regra prática: todo campo, teste ou protocolo que trate falta de dado como
+resultado tem de **dizer** qual dos dois lados a falta significa.
+
+E o meu: o quadro derivou porque eu integrava sem mover cartão, e derivou para o lado
+otimista — a conferência do Arquiteto produziu garantia falsa. `[PRONTO]` nesse CLI é
+*ready*, não *terminado*.
