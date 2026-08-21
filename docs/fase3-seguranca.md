@@ -767,6 +767,52 @@ na captura por câmera.
 **Invariante 5.1c.** O aviso é conteúdo da página, não `title`/`tooltip`/`aria-label`.
 **Teste:** o texto é encontrado no conteúdo visível da tela.
 
+### 5.1d · O gate de pose não gateia pose — medido, T-5EC67B
+
+Registrado aqui porque a qualidade do enrollment é o que sustenta as três origens
+de cadastro, e `validacao-biometrica.md` trata captura ruim como o defeito que
+contamina toda verificação futura. Não é achado de UI: é o gate que decide se uma
+captura vira template.
+
+O gate de pose inteiro é uma linha (`js/face.js:47-53`):
+
+```
+yaw = (nariz.x − meio_dos_olhos.x) / vão_horizontal_dos_olhos
+```
+
+**Só coordenadas X.** Queixo baixo é rotação em torno do eixo horizontal — move Y e
+Z, não move X. Medido, replicando a fórmula com rotação rígida:
+
+| Queixo baixo | `yaw()` | Passa? |
+|---|---|---|
+| 0° · 10° · 20° · 30° · 40° | `0.0000` em todos | sim, em todos |
+
+Zero exato em qualquer ângulo. **Não existe métrica de pitch** — 40° de queixo baixo
+são indistinguíveis de rosto perfeitamente de frente. O nome do cartão pressupõe um
+gate permissivo demais; a realidade é ausência de gate.
+
+E o gate que existe é mais frouxo do que parece:
+
+| Cabeça virada | `yaw()` | Contra `maxYaw: 0.30` |
+|---|---|---|
+| 45° | `0.2000` | passa, com dois terços do orçamento |
+| 55° | `0.2856` | passa |
+| 60° | `0.3464` | só aqui reprova |
+
+**Confiança dos dois achados é diferente, e isso importa.** A invariância sob pitch é
+**algébrica** — a fórmula não lê Y — então é certa e independente de modelo. Os
+ângulos de yaw são **indicativos**: dependem da profundidade de nariz assumida
+(`z = 20` para 100 px entre olhos), e mudam com a geometria do rosto. O que não muda
+é a ordem de grandeza: `0,30` é muito, não pouco.
+
+**Por que não há teste ainda:** `yaw()` e `avaliar()` são privadas em `js/face.js`, e
+o caminho de rosto fingido do próprio arquivo (`js/face.js:156`) devolve `yaw: 0.05`
+fixo — nunca executa a fórmula real. Sem exportar a função de pose não existe costura
+por onde afirmar nada. Pedido de uma linha registrado com o Biometria; com ela o
+unitário é determinístico e sai no mesmo dia. **Não forcei um teste no lugar:** um
+teste que não exercita a fórmula daria a impressão de que o gate de pose está
+coberto, que é pior que a lacuna declarada.
+
 ### 5.2 O que **não** propor
 
 - Não propor detecção de "foto de foto" no cliente (moiré, reflexo, textura). É PAD caseiro,
