@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { avaliarLoteFace } from '../../js/coerencia.js';
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -48,6 +49,10 @@ export function semearPendencia(estado, pendencia) {
 }
 
 export function criarServidor(opts = {}) {
+  // Fonte única do limiar de aceite (docs/fase3-seguranca.md § 4.2c) — o mesmo
+  // valor que js/config.js define como cfg.limiarAceite. Configurável só para
+  // os testes provarem que mudar a config muda o veredito, sem duplicar 0,45.
+  const limiarAceiteCadastro = opts.limiarAceite != null ? opts.limiarAceite : 0.45;
   const estado = {
     token: opts.token || 'TOKEN-TESTE',
     marcacoes: new Map(),      // id_cliente -> marcação
@@ -541,20 +546,51 @@ export function criarServidor(opts = {}) {
       if (url.pathname === '/webhook/efrat/cadastro') {
         estado.chamadas.cadastro++;
         const origem = body.origem === 'gestor' ? 'gestor' : 'rh';
-        if (!Array.isArray(body.vetores) || !body.vetores.length) {
-          return responder(422, { ok: false, erro: 'vetores vazios' });
+        // Coerência calculada aqui, a partir dos vetores recebidos — nunca a
+        // partir do campo `coerencia` que o corpo da requisição manda (T-8ADD9C:
+        // js/fila.js mandava um `0` fixo; um número que o cliente informa sobre
+        // si mesmo é um número que o cliente escolhe). Mesma função pura para
+        // qualquer caminho de cadastro (js/coerencia.js).
+        const avaliacao = avaliarLoteFace(body.vetores, limiarAceiteCadastro);
+        if (!avaliacao.ok) {
+          return responder(422, {
+            ok: false,
+            erro: {
+              codigo: avaliacao.codigo, mensagem: avaliacao.mensagem,
+              maior_distancia: avaliacao.maiorDistancia
+            }
+          });
         }
-        const id = 'p-' + (body.matricula || Math.random().toString(36).slice(2));
-        if (origem === 'rh' && !pessoas.some(p => p.pessoa_id === id)) {
+        const id = body.pessoa_id || 'p-' + (body.matricula || Math.random().toString(36).slice(2));
+        const existente = pessoas.find(p => p.pessoa_id === id);
+        const versaoNova = existente ? (existente.versao || 1) + 1 : 1;
+        const criadoEm = new Date().toISOString();
+        // Procedência do template (docs/fase3-seguranca.md § 5.1a): origem,
+        // coerência calculada e instante já dá para gravar agora. Autor (qual
+        // pessoa do RH) depende de identidade do RH chegar nesta rota — hoje só
+        // chega dispositivo_id (o aparelho, não quem está logado); registrado
+        // como limite do contrato atual, para o T-65D806 fechar.
+        if (origem === 'rh' && !existente) {
           pessoas.push({
             pessoa_id: id, nome: body.nome, matricula: body.matricula,
-            equipe_id: body.equipe_id, papel: 'colaborador', versao: 1,
-            vetores: body.vetores, miniatura: body.miniatura || ''
+            equipe_id: body.equipe_id, papel: 'colaborador', versao: versaoNova,
+            vetores: body.vetores, miniatura: body.miniatura || '',
+            origem, coerencia: avaliacao.maiorDistancia, criado_em: criadoEm
+          });
+        } else if (origem !== 'rh') {
+          // Caminho pendente (gestor hoje; upload/link entram aqui quando
+          // existirem — T-D30529): não sobrescreve template vigente (§ 1.3a),
+          // vai para a fila humana do RH com a coerência já calculada, senão
+          // js/rh.js:358 mostra "—" para sempre (achado do Orquestrador).
+          estado.recadastros.push({
+            template_id: 't-' + id, pessoa_id: id, versao: versaoNova,
+            coerencia: avaliacao.maiorDistancia, miniatura: body.miniatura || '',
+            vetores: body.vetores, origem, criado_em: criadoEm
           });
         }
         return responder(200, {
-          ok: true, pessoa_id: id, template_id: 't-' + id, versao: 1,
-          status: origem === 'rh' ? 'ativo' : 'pendente'
+          ok: true, pessoa_id: id, template_id: 't-' + id, versao: versaoNova,
+          status: origem === 'rh' ? 'ativo' : 'pendente', coerencia: avaliacao.maiorDistancia
         });
       }
       return responder(404, { ok: false, erro: 'rota desconhecida' });
