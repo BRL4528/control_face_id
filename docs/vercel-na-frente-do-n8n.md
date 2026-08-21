@@ -18,6 +18,32 @@ consultada em 21/08/2026, não de memória.
 
 ---
 
+## Por que a Parte 1 é mais do que proteção
+
+Síntese do Orquestrador, e ela reordena o resto deste documento.
+
+O desenho original tinha **duas camadas com chaves diferentes**: regra de produto
+na rota, chaveada no convite; e guarda de volume **fora** da aplicação, chaveada em
+endereço. Quando o cliente confirmou que não há proxy, a guarda de volume foi
+empurrada para dentro da rota — segunda escolha, e o teto passou a compartilhar
+destino com aquilo que protege.
+
+A Parte 1 põe a Vercel na frente exatamente das duas rotas anônimas. Ou seja: **a
+Vercel passa a ser o proxy que não existia, de graça, só nas rotas que esta fase
+acrescenta.** A camada de volume volta para fora da aplicação, que é onde ela
+sempre devia estar. A Parte 1 não é uma proteção nova — é a arquitetura projetada
+antes de sabermos da topologia.
+
+### O que a Parte 1 NÃO toca (para ninguém se assustar)
+
+- **`pedidos_da_mesma_rede_1h` continua válido.** O `ip_hash` que ele conta é
+  gravado no **registro de aparelho**, e é exibido por `/efrat/rh/aparelhos` —
+  ambas rotas do app do operador e do RH, que na Parte 1 continuam falando direto
+  com o n8n. O endereço real continua chegando ali. Só a Parte 2 quebraria isso.
+- **O risco do `sw.js` é exclusivo da Parte 2.** A origem pública **não tem
+  service worker, por desenho** (e há guarda de CI para isso). A Parte 1 não
+  encosta no handler de fetch.
+
 ## Parte 1 — Só as rotas do convite (n8n continua público)
 
 **Mecanismo:** duas regras de `rewrites` em `publico/vercel.json` com destino em
@@ -78,12 +104,19 @@ Duas consequências que andam juntas:
 > invocação, Active CPU e transferência por chamada, para *todo* o tráfego do
 > produto, inclusive marcação de ponto.
 
-### A armadilha de latência, confirmada na documentação
+### A armadilha de latência — é da Parte 2, não da Parte 1
 
-`regions` **tem `iad1` (Washington) como padrão**. O n8n está no Brasil. Sem fixar
-região, cada chamada atravessaria para os Estados Unidos e voltaria. Correção:
-`"regions": ["gru1"]` (São Paulo). Barato de fazer, fácil de esquecer, e o sintoma
-seria "o ponto ficou lento" sem causa aparente.
+`regions` tem **`iad1` (Washington) como padrão**, e o n8n está no Brasil. Sem
+fixar região, cada chamada atravessaria para os Estados Unidos e voltaria.
+Correção: `"regions": ["gru1"]` (São Paulo).
+
+**Mas isso vale para Function, não para `rewrite`.** Medido na sonda: o
+`x-vercel-id` da requisição proxiada veio `gru1::…`, ou seja o `rewrite` resolveu
+na borda mais próxima de quem chamou e saiu do Brasil. Então a Parte 1, feita com
+`rewrites`, **não tem essa armadilha** — ela aparece no instante em que o caminho
+passa a ser uma Function, que é o cenário da Parte 2.
+
+Fácil de esquecer, e o sintoma seria "o ponto ficou lento" sem causa aparente.
 
 ### O que quebra no app do operador — e o risco sério está no `sw.js`
 
@@ -105,9 +138,17 @@ Hoje o app fala direto com o n8n (`apiBase` em `js/config.js`). Com o n8n fechad
    o app diria "registrado" para algo que o servidor nunca recebeu. É a pior
    classe de defeito que este produto pode ter, e não faria barulho.
 
-   O teste unitário que existe hoje (`o service worker não intercepta chamadas de
-   outra origem`) **deixa de ser suficiente** nesse mundo: ele afirma justamente a
-   propriedade que a mudança remove.
+   **E o pior está uma camada acima disto.** O teste unitário que existe hoje —
+   `o service worker não intercepta chamadas de outra origem` — **deixa de ser
+   suficiente nesse mundo, e continua verde**. Ele afirma exatamente a propriedade
+   que a mudança remove: "não intercepta outra origem" é verdadeiro e irrelevante
+   quando a API passa a ser da mesma origem. Um revisor veria o teste passando e
+   concluiria que a API está protegida do cache. **Não estaria.**
+
+   É o mesmo padrão que esta fase passou a semana caçando — teste verde que não
+   mede o que promete — só que projetado no futuro, num mundo que ainda não
+   existe. Se a Parte 2 for aprovada algum dia, reescrever essa guarda é
+   pré-requisito, não detalhe de implementação.
 
 ### Incremental?
 
@@ -126,30 +167,59 @@ o n8n recusa tudo.
 
 ---
 
-## Verificar ANTES de decidir: o endereço de origem
+## O endereço de origem: MEDIDO, não suposto
 
-Vale para a Parte 1 e para a Parte 2, e é o item que mais pode mudar a decisão.
+Subi uma sonda descartável na Vercel com um `rewrite` externo, medi o que o
+upstream recebe, e apaguei o projeto. O que chega de fato:
 
-Com a Vercel no meio, **o n8n passa a ver o endereço dela**, não o do colaborador
-— a menos que o endereço real venha repassado em cabeçalho (`X-Forwarded-For`) e o
-n8n esteja configurado para lê-lo e confiar nele.
+```
+forwarded:               for=45.174.156.40;host=...;proto=https
+x-vercel-forwarded-for:  45.174.156.40
+x-vercel-proxied-for:    45.174.156.40
+x-forwarded-for:         AUSENTE
+x-vercel-id:             gru1::...
+x-vercel-proxy-signature: Bearer <assinatura>
+```
 
-Duas coisas que a equipe acabou de decidir dependem disso:
+(`45.174.156.40` era o endereço público real de quem chamou, confirmado antes.)
 
-- o **limite de volume por IP dentro da rota** (o limite generoso, que substituiu
-  o limite apertado por IP justamente por causa de NAT de operadora);
-- o aviso de **`pedidos_da_mesma_rede_1h`** na tela do RH.
+**O endereço real do colaborador CHEGA.** Isso desmente a suposição de que o n8n
+veria só o endereço da Vercel — mas com duas ressalvas que decidem o desenho:
 
-Se o endereço real não chegar, os dois passam a ver **um endereço só, para todo
-mundo**. O limite por IP vira um limite global compartilhado por todos os
-colaboradores, e o aviso de "muitos pedidos da mesma rede" acende sempre. É
-**exatamente o mesmo modo de falha** que fez a equipe rejeitar chavear por IP em
-população com NAT de operadora — o caminho barato o reintroduz por outra porta.
+**1. Não chega em `X-Forwarded-For`.** Chega no `Forwarded` padrão (RFC 7239) e em
+cabeçalhos próprios da Vercel. A maioria dos servidores e bibliotecas — n8n
+incluso, quando se liga "trust proxy" — lê `X-Forwarded-For`. Então **por padrão
+o n8n não vai enxergar o endereço real**, e vai atribuir tudo a um só. Funciona,
+mas só com configuração deliberada para ler `Forwarded` ou
+`X-Vercel-Forwarded-For`.
 
-Não afirmo que quebra nem que funciona: não encontrei documentação que fechasse a
-questão para `rewrite` externo. Um `curl` pelo caminho novo, olhando o que o n8n
-registra como origem, resolve em minutos. **Essa verificação vem antes da decisão,
-não depois dela.**
+**2. E ler esse cabeçalho é confiar em quem manda.** Na Parte 1 o n8n **continua
+público**. Qualquer pessoa pode chamar o n8n direto, por fora da Vercel, e mandar
+o `Forwarded` que quiser. Um limite chaveado nesse valor é **contornável em uma
+linha de `curl`** — a menos que o n8n também verifique que a requisição veio da
+Vercel.
+
+### Conclusão para o limite por IP dentro da rota
+
+**Ele tem de sair**, e a conclusão sobrevive à medição — mas pelo motivo certo:
+não porque o endereço real não chegue (ele chega), e sim porque **na Parte 1 esse
+valor é forjável**, já que o n8n segue alcançável por fora. Um limite que o
+atacante escolhe a chave é pior que não ter limite, porque parece proteção.
+
+Fica: o limite por convite na rota (não depende de endereço nenhum), mais o que a
+Vercel oferece de graça na frente.
+
+### Um achado que muda a Parte 2
+
+A Vercel **assina** a requisição proxiada: `x-vercel-proxy-signature` e
+`x-vercel-proxy-signature-ts`. Se o n8n puder verificar essa assinatura, ele
+distingue "veio pela Vercel" de "veio direto" **sem segredo compartilhado e sem
+Static IPs** — o que atacaria o custo de US$ 200/mês da Parte 2 pela raiz, e
+também tornaria o limite por IP confiável de novo.
+
+Registrado como **pista, não conclusão**: não confirmei como se verifica essa
+assinatura nem se o esquema é documentado e estável. É a segunda pergunta para a
+Vercel, junto com a dos Static IPs.
 
 ## Um meio-caminho mais barato, para comparação
 
