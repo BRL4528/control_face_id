@@ -147,7 +147,7 @@ Autenticação de RH (`usuario` + `chave`). Corpo: `{ usuario, chave }`.
     {
       "dispositivo_id": "uuid-v4",
       "apelido": "Tablet obra norte",
-      "local": { "local_id": "loc-01", "nome": "Obra Norte" },
+      "unidade": "Obra Norte",
       "equipes_ids": ["eq-01"],
       "configuracao_versao": 7,
       "ultimo_uso_em": "2026-08-21T10:58:00Z",
@@ -181,8 +181,8 @@ Decisões dentro dessa resposta:
 - **`encerrados` cobre 30 dias.** Recusa e revogação precisam ser auditáveis por
   um período curto; não é histórico eterno.
 - Rota **separada** de `/efrat/rh/dados`, que ganha apenas o contador
-  `aparelhos_pendentes` (para o badge da aba) e `locais[]` (para o seletor de
-  aprovação).
+  `aparelhos_pendentes`, para o badge da aba. As equipes que o seletor de aprovação
+  precisa já vêm em `equipes`, com a `unidade` de cada uma.
   `Por quê:` a aba de aparelhos muda enquanto o RH olha e precisa de refresh
   próprio; recarregar o painel inteiro (marcações do período, pessoas, equipes)
   a cada 15 s por causa de uma lista de 3 linhas é desperdício.
@@ -191,7 +191,7 @@ Decisões dentro dessa resposta:
 
 ```json
 { "usuario": "rh", "chave": "…", "idempotency_key": "uuid-v4",
-  "codigo": "ABC-123", "local_id": "loc-01", "equipes_ids": ["eq-01", "eq-02"] }
+  "codigo": "ABC-123", "equipes_ids": ["eq-01", "eq-02"] }
 ```
 
 Normalização do código: caixa alta, tudo fora do alfabeto descartado — `abc-123`,
@@ -213,8 +213,8 @@ Validações, todas `422` salvo indicado:
 | código não resolve nenhuma linha pendente, ou resolve linha expirada, recusada ou já ativa | `404 CODIGO_NAO_ENCONTRADO` — **uma mensagem só** para os quatro casos |
 | mais de uma linha pendente com o mesmo código (bug de colisão) | `409 CODIGO_AMBIGUO`, não escolhe nenhuma |
 | `equipes_ids` vazio | `ESCOPO_VAZIO` |
-| alguma equipe inexistente, inativa, ou de outro `local_id` | `EQUIPE_FORA_DO_LOCAL`, com `campo: "equipes_ids"` |
-| `local_id` inexistente ou inativo | `LOCAL_INVALIDO` |
+| alguma equipe inexistente ou inativa | `EQUIPE_INVALIDA`, com `campo: "equipes_ids"` |
+| equipes de **unidades diferentes** no mesmo aparelho | `EQUIPES_DE_UNIDADES_DIFERENTES`, com `campo: "equipes_ids"` |
 | mais de 10 códigos errados do mesmo usuário de RH em 5 min | `429 LIMITE_APROVACAO` + `Retry-After` |
 
 `Por quê a mensagem única no 404:` distinguir "existe mas expirou" de "não
@@ -222,15 +222,24 @@ existe" transforma o campo de aprovação em oráculo de códigos válidos. E o
 limite de tentativas erradas existe porque, sem ele, 29,7 bits atrás de um
 formulário logado é força bruta viável contra um lote de pendentes.
 
-Efeito da aprovação, atômico: `estado` → `ativo`, grava `local_id`,
-`equipes_ids`, `aprovado_por`, `aprovado_em`, `configuracao_versao` = 1, apaga
+**A unidade não vem no corpo: é derivada das equipes escolhidas.** As equipes
+selecionadas têm de compartilhar a mesma `unidade` (comparada normalizada, §2.3), e
+essa unidade é o rótulo que o aparelho vai exibir. Um campo a menos na requisição e
+**um passo a menos na tela**: o RH escolhe quem bate ponto ali, e o lugar sai disso.
+
+`Por quê a checagem existe:` é o que impede um tablet de sair aprovado com equipes de
+três canteiros diferentes — a limitação de raio de exposição do Cenário 3 de
+`ameacas-v3.md`, que é a razão de o escopo ser por equipe e não por unidade inteira.
+
+Efeito da aprovação, atômico: `estado` → `ativo`, grava `equipes_ids`, a `unidade`
+derivada, `aprovado_por`, `aprovado_em`, `configuracao_versao` = 1, apaga
 `codigo_curto` e `codigo_expira_em`.
 
 Resposta `200`:
 
 ```json
 { "ok": true, "dispositivo_id": "uuid-v4", "apelido": "Tablet obra norte",
-  "local": { "local_id": "loc-01", "nome": "Obra Norte" },
+  "unidade": "Obra Norte",
   "equipes_ids": ["eq-01","eq-02"], "request_id": "…" }
 ```
 
@@ -390,11 +399,12 @@ mesa para conferência, com a hora da batida e a hora em que chegou."
 
 ```json
 { "usuario": "rh", "chave": "…", "idempotency_key": "uuid-v4",
-  "dispositivo_id": "uuid-v4", "local_id": "loc-01", "equipes_ids": ["eq-01"] }
+  "dispositivo_id": "uuid-v4", "equipes_ids": ["eq-01"] }
 ```
 
-Mesmas validações de `aprovar` (`ESCOPO_VAZIO`, `EQUIPE_FORA_DO_LOCAL`,
-`LOCAL_INVALIDO`). Incrementa `configuracao_versao`.
+Mesmas validações de `aprovar` (`ESCOPO_VAZIO`, `EQUIPE_INVALIDA`,
+`EQUIPES_DE_UNIDADES_DIFERENTES`), e a `unidade` continua derivada das equipes.
+Incrementa `configuracao_versao`.
 
 `Por quê existe:` sem ela, corrigir o escopo de um aparelho já aprovado exige
 revogar e recadastrar — o que só é possível com acesso físico ao aparelho para
@@ -417,7 +427,7 @@ Ativo:
 { "ok": true, "estado": "ativo",
   "dispositivo": {
     "dispositivo_id": "uuid-v4", "apelido": "Tablet obra norte",
-    "local": { "local_id": "loc-01", "nome": "Obra Norte" },
+    "unidade": "Obra Norte",
     "equipes_ids": ["eq-01","eq-02"], "configuracao_versao": 7
   },
   "request_id": "…" }
@@ -425,7 +435,8 @@ Ativo:
 
 - `codigo_expira_em` permite a tela dizer quanto tempo o código ainda vale, em
   vez de exibir um número que pode ter morrido.
-- `dispositivo.local` é a volta do laço de §1.1.
+- `dispositivo.unidade` é a volta do laço de §1.1 — texto, não referência, e o
+  aparelho só o exibe.
 - **Nada mais entra aqui.** Em particular: nada de `motivo` de recusa, nada de
   nome de quem aprovou, nada de contagem de pendentes. É a única rota que um
   aparelho não aprovado consegue chamar; cada campo novo é superfície.
@@ -526,9 +537,17 @@ de equipe. Troca de equipe não é correção de ponto.
 ```
 
 - Sem `equipe_id` → cria. Com `equipe_id` → atualiza.
-- `local_id` substitui `unidade` como fonte da verdade (ADR § Persistência e
-  locais). `unidade` continua **aceito e gravado** durante a migração, e é
-  ignorado quando `local_id` vem.
+- **`unidade` continua sendo o texto que já é hoje.** Sem entidade nova, sem
+  `local_id`, sem tela de locais. Decisão tomada com o Orquestrador depois de o
+  Full-Stack perguntar de onde nascia esse conceito — o raciocínio inteiro está em
+  §2.4, e ele diverge de propósito de `adr-acesso-v3.md` § Persistência e locais.
+- `unidade` é **normalizada na escrita**: `trim`, espaços internos colapsados. A
+  comparação é sem diferenciar caixa nem acento, então `Unidade A`, `unidade a` e
+  `Unidade  A` são a mesma unidade. Grava-se a grafia da primeira vez que apareceu.
+- Na tela, `unidade` é **escolha entre os valores existentes** mais "nova unidade",
+  nunca um campo de texto solto. É o que transforma texto livre em vocabulário
+  controlado sem criar entidade — e é o que faz a normalização acima quase nunca
+  precisar entrar em ação.
 - `nome` obrigatório, 2–60 caracteres, único entre equipes ativas
   (`409 EQUIPE_DUPLICADA`).
 
@@ -551,6 +570,66 @@ devolve `equipes` e `pessoas` inteiras, e a lista de membros é
 `Por quê:` é a mesma decisão de arquitetura de `js/regras.js` — o servidor
 entrega fato, o cliente calcula recorte, e o cálculo fica coberto por teste de
 unidade em Node. Rota de membros seria um segundo caminho para a mesma verdade.
+
+### 2.4 Por que `unidade` fica texto, e não vira entidade
+
+O Full-Stack parou antes de começar T-8188C6 para perguntar de onde nascia o conceito
+de "locais", que aparecia em duas pontas deste contrato. Fez certo, e a pergunta achou
+um problema meu: **ninguém pediu essa entidade.** O cliente pediu equipes e
+colaboradores; `unidade` já existe hoje como texto (`js/rh.js` lista `e.unidade`, e o
+formulário traz "Unidade Piloto" como padrão). Trocá-la por uma entidade com id
+próprio daria a um RH leigo **três conceitos onde havia dois**, e acrescentaria um
+passo ("em que local?") em duas telas.
+
+**Decisão: texto, sem entidade.** E a pergunta que decidiu foi: *o escopo do aparelho
+fica frouxo sem ela?* Não fica. Três razões, na ordem em que importam.
+
+**1. A unidade nunca governou nada.** O que determina a carga é `equipes_ids`, e só:
+o servidor monta a galeria a partir dele (`/efrat/carga`, ADR § *o servidor obtém
+`equipes_ids` exclusivamente do cadastro ativo*). O `local_id` que eu havia posto em
+§1.3 não era fronteira de acesso — era rótulo e agrupador. Fronteira de acesso
+continua sendo a lista de equipes, com ou sem entidade.
+
+**2. A checagem de coerência funciona em texto.** O que ela precisa afirmar é "estas
+equipes são do mesmo lugar", e isso se compara igual em texto normalizado. O que
+tornava texto frágil — `Unidade A` virando duas unidades por causa de caixa ou espaço
+— morre com duas medidas de §2.3: normalizar na escrita e **oferecer os valores
+existentes na tela em vez de campo solto**. Texto livre com seletor é vocabulário
+controlado sem tabela nova. E, de quebra, a unidade passou a ser **derivada** das
+equipes na aprovação (§1.3), então a tela de liberação perdeu um passo em vez de
+ganhar.
+
+**3. O único poder exclusivo da entidade é um poder que não queremos.** A entidade
+permitiria o aparelho seguir o *lugar* em vez da lista: equipe nova naquele canteiro
+entraria no escopo do tablet sozinha. Isso é precisamente o que `ameacas-v3.md` R1 e
+Cenário 3 existem para impedir — significaria que **criar uma equipe concede,
+silenciosamente, acesso à biometria de gente nova a um aparelho já aprovado**, sem
+nenhuma decisão do RH. O argumento mais forte a favor da entidade é, olhado de perto,
+o argumento mais forte contra ela.
+
+Sobre o geofence: `lat`, `lng` e `raio_m` **já vivem em `efrat_equipe`** hoje. Tirá-los
+de lá para uma tabela de locais é desduplicação de banco — exatamente normalização
+entrando numa tela de usuário leigo.
+
+O que cada lado custa, sem maquiagem:
+
+| | Custo real |
+|---|---|
+| **Texto (escolhido)** | endereço e geofence repetidos por equipe; renomear um canteiro é editar N equipes em vez de uma linha. Com 2 equipes hoje, é barato; com 40, não seria |
+| **Entidade** | um terceiro conceito para o RH, um passo a mais em duas telas, uma migração das equipes existentes, e a tentação permanente de "o aparelho segue o local" |
+
+**Isto diverge de propósito de `adr-acesso-v3.md` § Persistência e locais**, que cria
+`efrat_local` e a chama de fonte única dos locais. Não estou apagando aquela decisão:
+ela pesou modelagem de dados e não pesou o custo de tela, e o brief desta fase é
+explicitamente "a aplicação o mais simples possível, para gente leiga". Fica
+registrado que o ADR aponta para o outro lado e que a divergência é consciente.
+
+**Quando isso vira entidade.** Quando renomear um canteiro passar a significar editar
+muitas equipes, ou quando o geofence por local realmente importar. A migração fica
+mecânica **porque normalizamos agora**: texto normalizado e escolhido em seletor
+converte para referência com um `INSERT DISTINCT` e um `UPDATE`, sem faxina de dados.
+Normalizar hoje é o que mantém a porta aberta barata — e é a diferença entre adiar e
+abandonar.
 
 ---
 
@@ -951,8 +1030,21 @@ tela já lê `t.origem`, que é o campo que §5 acrescenta ao template.
 `recadastros`, decidida em `/efrat/rh/decidir` com `tipo: "template"`), onde o RH
 vê a miniatura nova ao lado da atual antes de virar referência. Semântica idêntica
 à de `origem: "gestor"` que `api-piloto.md` já descreve. A fila passa a mostrar
-`origem`, quem cadastrou e a `coerencia` **calculada pelo servidor**, porque "veio
-de link" e "veio da minha câmera" pedem desconfianças diferentes de quem decide.
+`origem` e quem cadastrou, porque "veio de link" e "veio da minha câmera" pedem
+desconfianças diferentes de quem decide.
+
+**E o número de coerência sai da tela do RH.** Hoje `js/rh.js:358` imprime
+"coerência 0.113" no card. O número continua gravado, entra em relatório e serve para
+recalibração — só não aparece mais para o RH.
+`Por quê:` é a única coisa neste contrato que o RH vê e sobre a qual não pode fazer
+nada. Todo lote com coerência acima de `0,45` é recusado na captura e **nunca chega à
+fila**; então, no único lugar em que o número aparece, ele varia dentro de uma faixa
+em que a resposta é sempre a mesma. Número que não muda decisão é decoração — e
+decoração numérica com nome técnico é o que faz um usuário leigo concluir que não
+entende o sistema.
+Se o sinal for útil na borda de cima da faixa aceita, ele volta como **frase**, nunca
+como decimal: "as três fotos ficaram pouco parecidas entre si". Frase o RH usa — olha
+as fotos com mais atenção antes de aprovar. `0.42` não diz nada a ninguém.
 
 Honestidade sobre `rh_upload`: quem aprova o pendente é a mesma pessoa que subiu o
 arquivo, então ali o controle é **procedimental** (força a comparação lado a lado),
@@ -1430,6 +1522,23 @@ porque é o que responde à pergunta que interessa: dois deploys com bytes idên
 **têm** de dar o mesmo id, e um deploy com peso velho **tem** de dar id diferente
 sem depender de alguém lembrar de incrementar um número.
 
+**O manifesto é calculado sobre os bytes EFETIVAMENTE PUBLICADOS naquela origem,
+nunca sobre a árvore de origem.** É o que impede o detector de cegar.
+
+`Por quê, e é o modo de falha mais perigoso desta seção:` se o manifesto for gerado
+a partir do repositório enquanto os pesos vêm de camada de cache, de build anterior
+ou de cópia que não rodou, ele declara o **id certo sobre bytes errados**. Nesse
+arranjo o `modelo_id` **concorda** com a referência, nenhuma divergência é marcada, e
+o detector fica cego exatamente no único modo de falha que ele existe para pegar. É
+pior do que não ter detector, porque passa a **atestar sanidade**: o painel diria
+"tudo conforme" enquanto os templates saem incompatíveis. Detector que mente desliga
+a suspeita de quem olharia.
+
+Logo: o passo que gera o manifesto lê os arquivos **como eles saem servidos** —
+depois da cópia, no artefato publicado — e o critério de aceite tem de **provar**
+isso, baixando os pesos da origem pública e recalculando o hash contra o manifesto
+dela (§7, item 16-B). Roda sem DNS, no segundo listener que §4.6 já desenhou.
+
 **A armadilha, e é a mesma de §4.2.** O cliente lê o manifesto e manda `modelo_id`
 no corpo — ou seja, **é o cliente declarando algo sobre si mesmo**, exatamente o
 padrão que este contrato acabou de remover da coerência. Aceito aqui, e a diferença
@@ -1500,7 +1609,8 @@ de o cliente ser atualizado.
 
 ## 5. Modelo de dados — colunas e tabelas novas
 
-`efrat_dispositivo` (+): `pendente_id`, `codigo_expira_em`, `ip_hash`,
+`efrat_dispositivo` (+): `unidade` (texto derivado das equipes na aprovação,
+§1.3), `pendente_id`, `codigo_expira_em`, `ip_hash`,
 `ultimo_uso_em`, `recusado_por`, `recusado_em`, `revogado_por`, `revogado_em`,
 `motivo_decisao`.
 
@@ -1511,7 +1621,8 @@ de o cliente ser atualizado.
 derivado na leitura (§3.1), para que o estado se cure sozinho quando o número
 deixa de ser compartilhado.
 
-`efrat_equipe` (+): `local_id` (já previsto no ADR), `ativo`.
+`efrat_equipe` (+): `ativo`. **`local_id` não entra** (§2.4); `unidade` segue como
+texto normalizado.
 
 `efrat_marcacao` (+): `recebido_em`, `aparelho_estado_no_envio`,
 `aparelho_revogado_em`, `motivo_codigo`. Nenhuma coluna existente é reescrita —
@@ -1529,8 +1640,6 @@ segue sendo contador de template por pessoa.
 (booleano — qual modelo o caminho de reconhecimento usa). Alimentada pelo
 `models/manifesto.json` de cada deploy (§4.7).
 
-`efrat_local`: como o ADR define, sem alteração.
-
 `efrat_face_convite` (nova): `convite_id`, `pessoa_id`, `token_hash`, `estado`
 (`emitido` | `aberto` | `consumido` | `expirado` | `revogado` | `substituido` |
 `bloqueado`), `canal`, `criado_por`, `criado_em`, `expira_em`, `aberto_em`,
@@ -1545,7 +1654,8 @@ apagado sozinho.
 
 **Nenhuma coluna existente muda de tipo ou de significado.** Toda adição tem
 default vazio, então nada exige migração de dados — o backfill de `telefone`
-acontece por edição (§3.1) e o de `local_id` por edição de equipe (§2.3).
+acontece por edição (§3.1). E não há migração de `unidade` para entidade: ela fica
+como está (§2.4).
 
 ---
 
@@ -1557,8 +1667,8 @@ acontece por edição (§3.1) e o de `local_id` por edição de equipe (§2.3).
 | `CODIGO_NAO_ENCONTRADO` | 404 | rh/aparelho/aprovar |
 | `CODIGO_AMBIGUO` | 409 | rh/aparelho/aprovar |
 | `ESCOPO_VAZIO` | 422 | aprovar, escopo |
-| `EQUIPE_FORA_DO_LOCAL` | 422 | aprovar, escopo |
-| `LOCAL_INVALIDO` | 422 | aprovar, escopo |
+| `EQUIPE_INVALIDA` | 422 | aprovar, escopo |
+| `EQUIPES_DE_UNIDADES_DIFERENTES` | 422 | aprovar, escopo |
 | `LIMITE_APROVACAO` | 429 | rh/aparelho/aprovar |
 | `APARELHO_JA_ATIVO` | 409 | rh/aparelho/recusar |
 | `DISPOSITIVO_RECUSADO` | 409 | dispositivo/registrar |
@@ -1634,6 +1744,12 @@ Contrato (servidor falso + workflows):
 7. `ultimo_uso_em` **não** muda por consulta de `estado`; muda por `carga` e por
    `marcacoes`.
 8. Inativar equipe com membro ativo → `422` com `membros_ativos` correto.
+8-A. **`unidade` é texto normalizado, e não existe entidade de local** (§2.4):
+    `Unidade A`, `unidade a` e `Unidade  A` resolvem para a mesma unidade; aprovar
+    aparelho com equipes de unidades diferentes → `422
+    EQUIPES_DE_UNIDADES_DIFERENTES`; a `unidade` gravada no aparelho e devolvida em
+    `/dispositivo/estado` é **derivada** das equipes, não enviada pelo cliente. E
+    nenhuma requisição deste contrato aceita `local_id`.
 9. Telefone: fixo, 10 dígitos e DDD com zero recusados com o código próprio de
    cada um; `(67) 99876-5432` e `+55 67 99876-5432` gravam o mesmo E.164.
 9-A. **Telefone compartilhado, o ciclo inteiro:** duplicado sem autorização →
@@ -1697,6 +1813,13 @@ Contrato (servidor falso + workflows):
       campos separados para ninguém colapsar um no outro;
     - dois deploys com os mesmos bytes de `models/` produzem o **mesmo**
       `modelo_id`; um deploy com um `.bin` trocado produz outro.
+16-B. **O manifesto descreve o que está publicado, e o teste prova isso.** Baixa os
+    três `.bin` **da origem pública** (segundo listener, §4.6), recalcula o `sha256`
+    de cada um e compara com o `models/manifesto.json` **daquela origem**; qualquer
+    divergência reprova. O caso que o teste tem de pegar é o pior: manifesto novo
+    servido junto de peso velho — id certo sobre bytes errados, que não marca
+    divergência nenhuma e faz o detector atestar sanidade em vez de detectar (§4.7).
+    Teste que só confira "existe manifesto" não serve.
 17. **Template de link é `pendente` mesmo sem template anterior.** Pessoa sem
     biometria nenhuma + envio por link → `template_estado: "pendente"`, e
     `tem_biometria` da pessoa continua falso até a decisão do RH.
@@ -1757,6 +1880,18 @@ Critérios de UI que são contrato, não estética:
 33. A pendência de marcação retida mostra hora da batida **e** hora do
     recebimento, agrupada por aparelho, com contagem.
 34. A página de face, na tela final, não tem link nem botão para o app.
+35. **Guarda de vocabulário — nenhum jargão nosso na tela.** Os termos internos
+    deste contrato não aparecem em texto visível ao usuário: `retido`, `escopo`,
+    `coerência`, `modelo`, `modelo divergente`, `template`, `descritor`,
+    `pendente_id`, `dispositivo_id`, `configuracao_versao`, `versao_cadastro`,
+    `idempotência`, `E.164`, `derivado`. Guarda estática sobre os literais de texto
+    de `js/rh.js`, `js/fila.js`, `js/app.js` e da página pública.
+    `Por quê é critério e não recomendação:` complexidade de **invariante** não pode
+    virar complexidade de **tela**. O usuário é leigo, numa empresa de engenharia, e
+    o cliente pediu explicitamente a aplicação mais simples possível. Cada invariante
+    deste documento nasceu de defeito real; nenhum deles autoriza ensinar o
+    vocabulário do defeito a quem só quer registrar ponto. Exceção única e
+    consciente: o código curto do aparelho, que é dado que o RH digita.
 
 ---
 
@@ -1825,7 +1960,12 @@ Critérios de UI que são contrato, não estética:
    menor e honesto: o `modelo_id` é **declarado pelo cliente**, então é procedência
    e não prova. Fecha junto com a inferência no servidor (dívida 1), que é o mesmo
    ponto onde o vetor deixa de ser palavra do cliente.
-8. **A exceção de telefone compartilhado é decisão humana sem verificação.** O RH
+8. **`unidade` como texto, e não entidade** (§2.4). Endereço e geofence repetidos
+   por equipe, e renomear um canteiro é editar N equipes. Escolhido de propósito
+   contra `adr-acesso-v3.md` § Persistência e locais, pelo custo de tela num usuário
+   leigo. Vira `efrat_local` quando N crescer ou quando o geofence por local importar;
+   a normalização de §2.3 é o que mantém essa migração mecânica.
+9. **A exceção de telefone compartilhado é decisão humana sem verificação.** O RH
    autoriza, fica registrado quem autorizou, e ninguém confere se o
    compartilhamento é real. É o desenho certo (recusar sem saída produz número
    falso, §3.1), e é dívida: a única defesa é a autorização estar registrada e
