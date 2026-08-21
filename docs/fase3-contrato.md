@@ -1491,6 +1491,35 @@ nome, e o que ela consegue produzir é um template que **sempre** nasce `pendent
   e mantém o token em variável local em memória. Nunca em `localStorage`,
   `sessionStorage`, IndexedDB, cookie, ou atributo do DOM.
 
+**Não há etapa de confirmação por dígitos do telefone, e isso não é esquecimento.**
+`docs/fase3-seguranca.md` §1.2b propõe que, antes de a câmera abrir, a pessoa digite os
+**quatro últimos dígitos do telefone cadastrado**, com o token queimando na terceira
+tentativa errada. O Designer chegou a escrever o texto. **Não entrou**, e a razão é um furo
+no controle, não simplificação:
+
+> §1.2b defende "quem recebe o link por engano". Mas o dígito conferido é o do telefone
+> **cadastrado** — e se o RH errou de número ao cadastrar, o link chega a `X` e o número
+> guardado **é** `X`. O estranho em `X` sabe os quatro últimos dígitos do próprio celular e
+> passa. O controle falha exatamente no cenário que ele existe para cobrir.
+
+O que ele defende de fato é o link **repassado** a terceiro que não conhece o número — e
+contra isso é frágil, porque quem repassa dita os quatro dígitos junto. Em troca, cobra um
+passo de um usuário leigo com o rosto já na frente da câmera, e o "queima na terceira" entra
+em conflito direto com a regra ratificada de §4.4 (recusa não consome; quem tem sinal ruim
+não pode ficar sem caminho).
+
+**A variante que funcionaria, se algum dia se quiser a etapa:** um código de 4 dígitos
+**gerado na emissão e entregue fora de banda** — o RH fala ao telefone ou pessoalmente, e a
+página pede aquele código. Contra entrega errada isso funciona (o estranho no número errado
+nunca ouviu o código), e o custo é o mesmo. Fica registrado como alternativa **não adotada**,
+para decisão de produto: acrescenta um passo, e o caminho do link já espera o hostname, então
+há folga para decidir sem bloquear ninguém.
+
+**O que sustenta o caminho do link sem a etapa** é o que §4.3 já define: template de `link`
+nasce **sempre pendente**, inclusive no primeiro cadastro, e um humano compara antes de
+valer. É compensação procedimental e está registrada como tal na dívida 1 — não é equivalente
+a um segundo fator, e o contrato não finge que seja.
+
 **Como a página pública autentica sem credencial de aparelho.** O token é a
 credencial, e vale em **duas rotas e mais nenhuma**, como
 `Authorization: Bearer <token>`. Não é credencial de aparelho (não abre `carga`,
