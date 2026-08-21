@@ -855,7 +855,48 @@ certo, ativa) e só então negam. Foi essa ordem que pegou um erro meu no mesmo 
 uma substituição de constante falhou calada e os testes apontavam para a rota
 antiga; sem a contraprova eles teriam ficado verdes contra o `404`.
 
-**Corolário para ler resultado sob concorrência:** contenção de CPU degrada a
-rodada inteira, não escolhe um teste. Verde geral sob concorrência é mais forte,
-não mais fraco; um vermelho **isolado** entre verdes também é confiável. O que
-exige repetir com a pista limpa é vermelho **espalhado**.
+**Corolário para ler resultado sob concorrência** — corrigido depois de dois
+contra-exemplos medidos no mesmo dia, e a versão anterior deste parágrafo estava
+errada:
+
+- Verde geral sob concorrência é **mais forte**, não mais fraco: contenção não
+  produz verde falso — exceto nas asserções de ausência temporal do padrão 2, que
+  ficam *mais* verdes quando a máquina está pior.
+- Vermelho **espalhado** pede repetir com a pista limpa.
+- Vermelho **isolado** é **suspeito, não confiável** — reconfira sozinho antes de
+  acreditar. A versão anterior dizia o contrário ("contenção não é seletiva, logo
+  um vermelho isolado é real"). O raciocínio tem um furo: a contenção é uniforme,
+  mas a **margem não é**. Ela quebra primeiro o teste que está mais perto do
+  próprio limite de tempo, e só ele — o que é indistinguível de seletividade.
+  Medidos no mesmo dia: `aviso-liveness.spec.js:84`, vermelho entre 105 verdes e
+  3/3 verde isolado em 4,0s; e `aparelhos.spec.js:102`, vermelho na suíte e verde
+  sozinho em 15,7s.
+
+O que salvou nos dois casos não foi a regra, foi a disciplina de reconferir antes
+de formar hipótese: investigar o código a partir de um vermelho falso custa horas,
+e rodar o teste sozinho custa segundos. **Reconferir é mais barato que raciocinar
+— faça primeiro.**
+
+**E a terceira parte, que inverte o instinto.** Os dois efeitos acima acontecem na
+mesma rodada e em direções opostas: margem apertada produz **vermelho** falso,
+ausência temporal produz **verde** falso. O vermelho puxa toda a atenção — a
+investigação vai para ele, que é o falso, e os verdes falsos ficam protegidos pelo
+barulho, sem ninguém olhar.
+
+Logo: **uma rodada com vermelho não explicado é o pior momento para confiar nos
+verdes dela, não o melhor.** O vermelho não é o único problema da rodada; é o
+único visível.
+
+Reconferir só o teste vermelho responde *"ele é real?"*. Não responde *"a rodada é
+confiável?"*. São perguntas diferentes. Procedimento: vermelho não explicado →
+repetir a **suíte inteira** com a pista limpa antes de acreditar em qualquer
+resultado dela, verde incluído.
+
+Instância desta fase, e ela é do próprio autor deste documento: `aviso-liveness.spec.js:84`
+foi o vermelho isolado que disparou a correção acima — e, ao ser reaberto por
+causa disso, revelou que estava **sem âncora**: afirmava `.aviso` com
+`toHaveCount(0)` sem antes exigir que o card existisse, então passava tanto com o
+aviso corretamente ausente quanto com a tela inteira não pintada. Era, ao mesmo
+tempo, o teste de margem mais apertada do arquivo e um verde falso do padrão 2. Os
+dois defeitos no mesmo teste, e foi o vermelho — o sintoma errado — que levou até
+o certo.
