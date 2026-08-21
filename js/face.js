@@ -1,6 +1,6 @@
 // Motor de reconhecimento. Isola tudo que depende do face-api e da câmera,
 // para que a orquestração da tela não precise saber nada disso.
-import { euclidiana } from './regras.js';
+import { euclidiana, yaw } from './regras.js';
 import { calcularModeloId } from './modelo.js';
 
 const cfg = () => window.EFRAT_CFG;
@@ -44,13 +44,6 @@ function metricas(canvas, box) {
   return { sharp: ls2 / n - media * media, bright: soma / (NORM * NORM) };
 }
 
-function yaw(landmarks) {
-  const p = landmarks.positions;
-  const le = p[36], re = p[45], nariz = p[30];
-  const meio = (le.x + re.x) / 2;
-  const vao = Math.abs(re.x - le.x) || 1;
-  return (nariz.x - meio) / vao;
-}
 
 export const DICA_ADORNO = 'Nenhum rosto — tire óculos escuros, máscara ou touca';
 
@@ -378,6 +371,43 @@ export const Face = {
       await new Promise(r => setTimeout(r, 250));
     }
     return null;
+  },
+
+  /**
+   * Uma captura manual de vídeo com resultado tipado (T-D30529: página
+   * pública, "tirar uma foto de cada vez"). Diferente de `capturar()`:
+   * usa `detectAllFaces` pra DISTINGUIR zero rostos de mais de um — a página
+   * pública precisa dos dois textos, "não encontrei" e "mais de uma pessoa",
+   * que `capturar()` (single-face) não separa.
+   */
+  async capturarUnico(video, tentativas) {
+    if (fingido()) {
+      const nome = String(fingido().pessoa || '');
+      if (nome === 'sem-rosto') return { ok: false, motivo: 'sem_rosto' };
+      if (nome === 'dois-rostos') return { ok: false, motivo: 'multiplos_rostos' };
+      if (nome === 'qualidade-ruim') return { ok: false, motivo: 'qualidade', qualidade: { ok: false, msg: 'ruim' } };
+      return Object.assign({ ok: true }, this._capturaFingida());
+    }
+    const max = tentativas || 3;
+    for (let i = 0; i < max; i++) {
+      const usarBom = this._bom.canvas && (performance.now() - this._bom.em) < 1200;
+      const cv = usarBom ? this._bom.canvas : this._capturarQuadro(video);
+      let dets;
+      try {
+        dets = await faceapi.detectAllFaces(cv, this._opts(cfg().inputSize)).withFaceLandmarks().withFaceDescriptor();
+      } catch (e) { dets = null; }
+      if (dets && dets.length > 1) return { ok: false, motivo: 'multiplos_rostos' };
+      if (dets && dets.length === 1) {
+        const det = dets[0];
+        const q = avaliar(det, cv, det.detection.box);
+        if (q.ok) return { ok: true, descritor: Array.from(det.descriptor), thumb: miniatura(cv, det.detection.box, 128), qualidade: q };
+        if (i === max - 1) return { ok: false, motivo: 'qualidade', qualidade: q };
+      } else if (i === max - 1) {
+        return { ok: false, motivo: 'sem_rosto' };
+      }
+      await new Promise(r => setTimeout(r, 250));
+    }
+    return { ok: false, motivo: 'sem_rosto' };
   },
 
   distancia: euclidiana
