@@ -549,6 +549,15 @@ export function criarServidor(opts = {}) {
         if (requisicao.caminho === '/efrat/dispositivo/registrar') estado.chamadas.registrar++;
         try {
           const resposta = await despachar(nucleo, roteador, requisicao);
+          // chamadas.rh: no bloco antigo so incrementava DEPOIS do gate
+          // usuario+chave passar (rh/sal nunca contava, nunca passava pelo
+          // gate). Aqui o equivalente e so contar quando a autenticacao nao
+          // rejeitou -- senao um 401 de credencial errada conta como chamada
+          // de RH, que o contador antigo nunca fez.
+          if (resposta.status !== 401
+              && ['/efrat/rh/aparelho/aprovar', '/efrat/rh/aparelhos', '/efrat/rh/face/cadastrar'].includes(requisicao.caminho)) {
+            estado.chamadas.rh = (estado.chamadas.rh || 0) + 1;
+          }
           return responder(resposta.status, resposta.corpo, resposta.cabecalhos);
         } finally {
           if (requisicao.caminho === '/efrat/marcacoes') estado.lotesSimultaneos--;

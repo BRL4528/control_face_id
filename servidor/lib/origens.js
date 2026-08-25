@@ -32,7 +32,12 @@ export function cabecalhosCors(origem) {
     ...base,
     'Access-Control-Allow-Origin': origem,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    // Os TRES que o contrato usa. Faltando Authorization e Idempotency-Key, o
+    // preflight barra toda chamada autenticada cross-origin — e esta API e
+    // cross-origin por desenho, entao seria toda chamada real. A lista espelha
+    // CABECALHOS_ACEITOS de nucleo/http.js; se divergirem, a de la manda nas
+    // rotas do contrato e esta so vale para /api/saude.
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, Idempotency-Key',
     'Access-Control-Max-Age': '600'
   };
 }

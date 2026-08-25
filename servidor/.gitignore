@@ -14,3 +14,4 @@ skills-lock.json
 # copia de build do nucleo (fonte de verdade e ../nucleo)
 nucleo
 public
+js
