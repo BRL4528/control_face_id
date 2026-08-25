@@ -74,6 +74,14 @@ curl -s https://control-face-id-api.vercel.app/api/saude
 
 ### 2. Publicar o app do operador em produção — SEM ISSO NÃO HÁ TESTE
 
+> **A ORDEM AQUI NÃO É PREFERÊNCIA, É DEPENDÊNCIA.** O app agora aponta para a
+> origem própria da API (`js/config.js`), não mais para o n8n. Se você publicar
+> o app **antes** do passo 1, ele vai falar com uma API que ainda não tem rota
+> nenhuma — e o sintoma no aparelho é "não consegui conectar", que não aponta
+> para a causa.
+>
+> Só publique o app depois de o passo 1 responder `"rotas":8`.
+
 ```bash
 vercel link --yes --project control-face-id --scope brl4528s-projects
 vercel deploy --prod --yes
