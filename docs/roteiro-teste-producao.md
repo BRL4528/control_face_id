@@ -194,3 +194,33 @@ só se as 3 fotos não baterem entre si.
 | Rosto não reconhecido na câmera | A pessoa já tem cadastro aprovado pelo RH? Ver seção "primeiro cadastro" acima |
 | Ponto aceito mas foi para conferência | Normal para ponto do próprio gestor ou reconhecimento incerto — não é falha |
 | "Ver minha equipe" não aparece pro gestor | Sem internet no momento da marcação dele |
+
+<!--
+NOTA INTERNA — não é para o cliente, não apagar antes de revisar.
+
+Gatilho de revisão desta nota (Orquestrador, 2026-08-25): quando o
+Full-Stack (615dfda777) entregar as rotas da API própria substituindo o
+n8n/v2, os pontos abaixo têm texto de tela que hoje vem do backend v2/n8n e
+pode mudar de wording ou de condição de disparo. Marcado agora para não
+precisar reler o documento inteiro depois — conferir cada um contra os
+erros reais da API nova antes de atualizar a linha do build no topo.
+
+- Passo 1, mensagens "Este aparelho não foi liberado..." e "...acesso
+  revogado...": vêm de `info.estado` (`/efrat/dispositivo/estado`). A API
+  nova pode devolver estados/textos diferentes.
+- Passo 2, "Código inválido": é fallback do app (`r.erro || 'Código
+  inválido'`) — se a API nova preencher `r.erro` com outra coisa, o texto
+  real na tela muda.
+- Passo 2, "Aparelho liberado" / fluxo de 2 telas (código → escolher
+  equipes): a mecânica é do app (`js/rh.js`), deve sobreviver à troca de
+  backend, mas os erros de digitação/repetição podem vir com mensagens
+  novas da API.
+- "Duas coisas que provavelmente vão estranhar" § 1 (cadastro por link
+  pendente): depende do contrato de `/efrat/rh/dados` (campo
+  `recadastros`) continuar igual na API nova — mecanismo já fechado em
+  contrato (FASE 3), risco baixo, mas conferir mesmo assim.
+- Passo 3, "Rosto não reconhecido": condição de disparo depende de
+  `/efrat/identificar` responder dentro do tempo esperado — API nova pode
+  mudar latência/timeout e mudar com que frequência esse caso aparece.
+-->
+
