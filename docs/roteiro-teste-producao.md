@@ -123,12 +123,16 @@ na captura, o rosto já vale a partir daqui, pronto para o Passo 4.
 - Aparecer "Qualidade insuficiente: [algum motivo]" → a foto ficou escura,
   desfocada ou de lado demais. Tente de novo com mais luz e a pessoa olhando
   para a câmera.
-- Ao tocar em "Salvar biometria" aparecer alguma mensagem de erro (mesmo que
-  o texto pareça técnico) → normalmente quer dizer que as 3 fotos ficaram
-  parecidas demais entre si (a pessoa não mexeu a cabeça) ou diferentes
-  demais (ângulos muito distintos, ou alguma foto de outra pessoa por
-  engano). Refaça as 3 capturas variando um pouco a posição da cabeça entre
-  elas, sem exagerar.
+- Aparecer "As 3 fotos não deram certo — pareceram de pessoas diferentes.
+  Tire as 3 de novo com calma; se continuar assim, avise o RH." → alguma
+  captura pode ter pego outra pessoa passando atrás, ou a pessoa se mexeu
+  demais entre uma foto e outra. Repita as 3 com calma.
+- Aparecer "As 3 fotos ficaram iguais demais. Mova um pouco a cabeça entre
+  as capturas e tente de novo." → a pessoa ficou parada igual nas 3. Peça
+  para virar levemente a cabeça entre uma captura e outra.
+- Aparecer "As fotos não ficaram boas pra usar. Tire as 3 de novo, com boa
+  luz e o rosto bem visível." → problema técnico na foto em si (luz, foco).
+  Refaça com mais luz.
 
 ## Passo 4 — Colaborador marca o próprio ponto
 
@@ -262,15 +266,19 @@ pontos abaixo contra os erros reais que a API devolve.
 - Passo 2, "Código inválido": é fallback do app (`r.erro || 'Código
   inválido'`) — se a API preencher `r.erro` com outra coisa, o texto real
   na tela muda.
-- Passo 3 (NOVO), erro ao "Salvar biometria": `salvarBiometria()` em
-  `js/rh.js` só faz `toast(bio.erro || 'Falha ao gravar biometria')` — ao
-  contrário do caminho de upload, NÃO decodifica os códigos
-  `COERENCIA_INSUFICIENTE`/`FOTOS_IGUAIS` em texto amigável. Descrevi o
-  passo genericamente ("mensagem de erro, mesmo que pareça técnico") de
-  propósito, porque não sei qual texto cru a API vai devolver aí. Vale
-  cobrar do Full-Stack/Biometria decodificar isso antes de amanhã — texto
-  técnico cru pro RH no meio do teste é exatamente o tipo de coisa que
-  vira "não funcionou" sem saber em que passo.
+- Passo 3, erro ao "Salvar biometria": RESOLVIDO em 2026-08-25 — Biometria
+  (bdf5f40f33) vai implementar reuso do texto já aprovado de `js/fila.js`
+  (COERENCIA_INSUFICIENTE/FOTOS_IGUAIS/VETORES_INVALIDOS, mesma família de
+  captura ao vivo) em `salvarBiometria()` de `js/rh.js`, em vez do texto de
+  "escolha de arquivo" do upload. Aval dado, texto do roteiro já atualizado
+  para as 3 frases reais. **Confirmar antes do teste que o commit realmente
+  saiu** — se não sair a tempo, o texto real ainda será o cru (`bio.erro` ou
+  "Falha ao gravar biometria"), e a coluna "se vier diferente" do Passo 3
+  precisa voltar pra genérica.
+- `VETORES_INVALIDOS` no upload (js/rh.js) segue sem decodificar — combinado
+  que fica pra depois por ser caminho quase inalcançável (client já bloqueia
+  os 3 slots antes do botão habilitar). Não afeta o roteiro de amanhã
+  (upload nem está no escopo garantido).
 - Passo 3, "Biometria salva" e a ausência de fila de aprovação: confirmado
   no código (`servidor-falso.js`, origem `rh_camera` grava `estadoTemplate
   = 'ativo'` direto) — não é suposição, é como o contrato já fecha isso.
