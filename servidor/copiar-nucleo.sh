@@ -79,8 +79,14 @@ if [ -d ../nucleo ]; then
   if command -v git >/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
     sha=$(git rev-parse HEAD)
     suja=$([ -n "$(git status --porcelain)" ] && echo true || echo false)
-    printf '{"commit":"%s","arvore_suja":%s}\n' "$sha" "$suja" > versao.json
-    echo "versao carimbada: ${sha} (arvore suja: ${suja})"
+    # A REF responde a pergunta que o sha NAO responde (achado do QA): sha diz
+    # "qual codigo", ref diz "DE ONDE VEIO". A duvida real de ontem nao era o
+    # codigo -- era se producao estava com o build de preview. VERCEL_GIT_COMMIT_REF
+    # sairia de graca num projeto ligado ao git, mas em deploy por CLI ela nao
+    # existe (mesma razao do sha), entao sai do git aqui.
+    ref=$(git rev-parse --abbrev-ref HEAD)
+    printf '{"commit":"%s","ref":"%s","arvore_suja":%s}\n' "$sha" "$ref" "$suja" > versao.json
+    echo "versao carimbada: ${sha} (${ref}, arvore suja: ${suja})"
   else
     echo "ERRO: sem git aqui, nao da para carimbar a versao."
     echo "  Publique da arvore do repo, com \`npm --prefix servidor run publicar\`."

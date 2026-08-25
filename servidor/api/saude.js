@@ -89,7 +89,7 @@ export default async function handler(req, res) {
   // `arvore_suja` vale tanto quanto o sha. Deploy feito com mudanca nao
   // commitada tem um sha que MENTE sobre o que esta no ar, e sha que mente e
   // pior que sha ausente: ausencia nao atesta nada, atestado falso atesta.
-  let versao = { commit: null, arvore_suja: null };
+  let versao = { commit: null, ref: null, arvore_suja: null };
   try {
     const aqui = path.dirname(fileURLToPath(import.meta.url));
     versao = JSON.parse(fs.readFileSync(path.join(aqui, '..', 'versao.json'), 'utf8'));
@@ -98,7 +98,7 @@ export default async function handler(req, res) {
   const saudavel = banco === 'ok' && nucleo === 'ok' && rotas > 0;
   res.statusCode = saudavel ? 200 : 503;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  const corpo = { ok: saudavel, commit: versao.commit, arvore_suja: versao.arvore_suja, banco, nucleo, rotas, causa_rotas: rotas ? undefined : erroRotas, servidor_hora: new Date().toISOString() };
+  const corpo = { ok: saudavel, commit: versao.commit, ref: versao.ref, arvore_suja: versao.arvore_suja, banco, nucleo, rotas, causa_rotas: rotas ? undefined : erroRotas, servidor_hora: new Date().toISOString() };
   if (nome) { corpo.banco_nome = nome; corpo.ambiente = process.env.VERCEL_ENV || 'desconhecido'; }
   res.end(JSON.stringify(corpo));
 }
