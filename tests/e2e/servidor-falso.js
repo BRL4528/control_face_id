@@ -15,13 +15,9 @@ import { normalizarTelefone, telefonesCompartilhados, normalizarUnidade } from '
 // simulada e o `estado` que os e2e leem. A regra mora no nucleo, e a prova de
 // que a extracao nao mudou nada e que os 174 e2e nao mudaram uma assercao.
 import { criarRepositorioMemoria } from '../../nucleo/memoria.js';
-import { criarRoteador, despachar, AUTH, CORS } from '../../nucleo/http.js';
+import { criarRoteador, despachar } from '../../nucleo/http.js';
 import { lerRequisicao } from '../../nucleo/http-node.js';
-import { enviarLote } from '../../nucleo/casos/marcacao.js';
-import { obterSal } from '../../nucleo/casos/rh.js';
-import { obterCarga } from '../../nucleo/casos/dispositivo.js';
-import { registrar, consultarEstado, aprovar, listar } from '../../nucleo/casos/aparelho.js';
-import { cadastrar as cadastrarFace } from '../../nucleo/casos/face.js';
+import { ROTAS } from '../../nucleo/rotas.js';
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -259,24 +255,10 @@ export function criarServidor(opts = {}) {
   const repositorio = criarRepositorioMemoria({ estado, pessoas, rhUsuario });
   const nucleo = { repo: repositorio, cripto, cfg };
 
-  const roteador = criarRoteador([
-    { caminho: '/efrat/marcacoes', metodos: ['POST'], auth: AUTH.TOKEN_OU_APARELHO,
-      cors: CORS.ABERTO, manipulador: enviarLote },
-    { caminho: '/efrat/rh/sal', metodos: ['POST'], auth: AUTH.ABERTA,
-      cors: CORS.ABERTO, manipulador: obterSal },
-    { caminho: '/efrat/carga', metodos: ['POST'], auth: AUTH.APARELHO,
-      cors: CORS.ABERTO, manipulador: obterCarga },
-    { caminho: '/efrat/dispositivo/registrar', metodos: ['POST'], auth: AUTH.ABERTA,
-      cors: CORS.ABERTO, manipulador: registrar },
-    { caminho: '/efrat/dispositivo/estado', metodos: ['POST'], auth: AUTH.APARELHO,
-      cors: CORS.ABERTO, manipulador: consultarEstado },
-    { caminho: '/efrat/rh/aparelho/aprovar', metodos: ['POST'], auth: AUTH.RH,
-      cors: CORS.ABERTO, manipulador: aprovar },
-    { caminho: '/efrat/rh/aparelhos', metodos: ['POST'], auth: AUTH.RH,
-      cors: CORS.ABERTO, manipulador: listar },
-    { caminho: '/efrat/rh/face/cadastrar', metodos: ['POST'], auth: AUTH.RH,
-      cors: CORS.ABERTO, manipulador: cadastrarFace }
-  ]);
+  // A tabela vem de nucleo/rotas.js -- fonte unica com a ponte da Vercel
+  // (servidor/api/roteador.js), pra teste e producao nunca divergirem sobre
+  // quais das 25 rotas ja migraram.
+  const roteador = criarRoteador(ROTAS);
 
   const requestId = () => crypto.randomUUID();
   const erro = (codigo, mensagem, campo) => ({
