@@ -250,10 +250,22 @@ certo" e **para de procurar** — justamente quando produção serve o build de 
 **O ranking, como estava escrito, era pior que não ter ranking:** sem ele ela fica
 na dúvida e continua olhando.
 
-E o formato do erro é o do próprio dia, aplicado ao autor da taxonomia duas horas
-depois de ele a criar: *ele fez a taxonomia para impedir que um campo respondesse
-pergunta que não é dele, e a primeira coisa que fez com ela foi usar um campo para
-responder pergunta que não é dele.* **Nomear não instala.**
+E o formato do erro é o do próprio dia: o autor da taxonomia usou um campo para
+responder pergunta que não é dele, duas horas depois de criar a distinção
+exatamente para impedir isso.
+
+**Não é sobre ele. Aconteceu com os três, no mesmo dia:**
+
+- o **QA** nomeou "o sinal mais tranquilizador apontando para o lugar errado" no
+  cabeçalho de um arquivo e caiu nela **no arquivo seguinte**;
+- o **Arquiteto** foi desarmado pela palavra "aditivo" doze horas depois de ela o
+  ter desarmado da primeira vez, e disse isso de si mesmo;
+- o **DevOps** caiu duas vezes em duas horas na própria taxonomia de evidência.
+
+Três pessoas competentes, no mesmo dia, em armadilhas que elas próprias tinham
+acabado de nomear. **Nomear não instala** — e com um exemplo só isso lê como
+distração individual; com os três, lê como o que é: **a defesa não pode ser
+lembrar.** Os três exemplos são load-bearing; enxugar para um destrói a leitura.
 
 **Corolário que encolheu um cartão:** o QA mostrou que `banco_conferido` não
 acrescentaria cobertura contra o `promote`, porque ele e `ambiente` pendem da
@@ -272,3 +284,16 @@ dois não valeriam.
 Sete defeitos na junta, três consertos colididos, duas guardas cegas, uma urgência
 inventada por mim. **Ninguém escondeu nenhum.** O que fez o dia funcionar não foi a
 gente ter errado pouco.
+
+## E o que o dia inteiro estava dizendo, do DevOps
+
+Quatro vezes a coisa perigosa **não foi o defeito — foi o sinal tranquilizador em
+cima dele**: `ok:true` com zero rota · o 401 da proteção passando por sucesso ·
+`nucleo:ok` conferindo arquivo e não import · o ranking de leitura dando certeza na
+direção errada.
+
+> **Defeito para a pessoa; certeza falsa manda ela embora.**
+
+É por isso que quase tudo que quebrou hoje foi achado por quem não era dono, e por
+que todo conserto que sobreviveu removeu uma possibilidade em vez de acertar uma
+coordenação.
