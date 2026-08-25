@@ -89,7 +89,7 @@ export const METODOS = {
   auditoria: ['registrarAuditoriaIdentificacao', 'registrarAuditoriaAprovacao', 'registrarDecisaoRh'],
   modelo: ['lerReferenciaModeloApp', 'definirReferenciaModeloApp', 'registrarModeloObservado', 'modeloJaObservado'],
   limite: ['contarNaJanela', 'registrarTentativaErrada', 'tentativasNaJanela'],
-  rh: ['lerUsuarioRh']
+  rh: ['lerUsuarioRh', 'inserirUsuarioRh']
 };
 
 export const TODOS_OS_METODOS = Object.values(METODOS).flat();
@@ -534,4 +534,24 @@ export class Repositorio {
    * chave. A rota /rh/sal expoe SOMENTE sal e iteracoes.
    */
   async lerUsuarioRh(usuario) { this.#naoImplementado('lerUsuarioRh'); }
+
+  /**
+   * ADICAO de 2026-08-25, a pedido de DevOps + Persistencia: a semente do
+   * ambiente de teste precisa criar o usuario de RH sem a semente falar SQL
+   * direto. Semente que fala SQL e um segundo lugar onde o esquema esta
+   * escrito -- e o lugar que ninguem atualiza quando o esquema muda.
+   *
+   * `usuario` e chave: `inserido:false` devolve o registro existente, para a
+   * semente poder rodar duas vezes sem quebrar (semente que so funciona em
+   * banco virgem nao serve pra ambiente de teste, que e reaproveitado).
+   *
+   * NUNCA recebe senha em claro: o que entra e `{usuario, nome, sal,
+   * iteracoes, chave}`, onde `chave` e o material ja derivado -- a mesma
+   * forma que /efrat/rh/sal expoe (sal + iteracoes) e que lerUsuarioRh
+   * devolve. Derivar aqui dentro poria KDF no repositorio, que e
+   * armazenamento, nao criptografia.
+   *
+   * @returns {Promise<{inserido: boolean, usuario: object}>}
+   */
+  async inserirUsuarioRh(usuario) { this.#naoImplementado('inserirUsuarioRh'); }
 }
