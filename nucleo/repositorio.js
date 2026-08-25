@@ -65,7 +65,8 @@ export class RepositorioIncompleto extends Error {
  */
 export const METODOS = {
   dispositivo: [
-    'lerDispositivo', 'lerDispositivoPorPendenteId', 'listarDispositivos',
+    'lerDispositivo', 'lerDispositivoPorPendenteId', 'lerDispositivoPorCodigoPendente',
+    'listarDispositivos',
     'inserirDispositivoSeAusente', 'atualizarDispositivo', 'renovarCodigoCurto',
     'aprovarDispositivoPorCodigo', 'trocarEstadoDispositivo',
     'incrementarRetidasPosRevogacao', 'marcarUsoDispositivo',
@@ -124,6 +125,32 @@ export class Repositorio {
    */
   async lerDispositivoPorPendenteId(pendenteId) { this.#naoImplementado('lerDispositivoPorPendenteId'); }
 
+  /**
+   * ADICAO de 2026-08-25 (nao altera assinatura nenhuma).
+   *
+   * Le a linha PENDENTE que este codigo curto resolve, ja respeitando a
+   * expiracao da prova de posse. Serve so para VALIDAR o escopo antes de
+   * aprovar (equipes existem? mesma unidade?) e para montar a auditoria.
+   *
+   * Quem ATIVA continua sendo `aprovarDispositivoPorCodigo`, que refaz as
+   * mesmas condicoes dentro do UPDATE. Sim, e conferir duas vezes -- e de
+   * proposito: esta leitura pode ficar obsoleta entre a validacao e a
+   * escrita, e a escrita e que decide. Usar SO esta leitura e depois um
+   * update incondicional e o check-then-act que a interface existe para
+   * tirar do caminho.
+   *
+   * @param {string} codigo ja normalizado (caixa alta, sem formatacao)
+   * @param {number} agoraMs
+   * @param {number} expiraEmMs janela de validade da prova de posse
+   * @returns {Promise<object|null>} null tambem quando existe mas expirou ou
+   *   nao esta mais pendente -- quem chama nao distingue, e nao deve: §1.3
+   *   colapsa "nao existe", "expirou", "recusado" e "ja ativo" numa resposta
+   *   so, para a rota nao virar oraculo de codigo valido.
+   */
+  async lerDispositivoPorCodigoPendente(codigo, agoraMs, expiraEmMs) {
+    this.#naoImplementado('lerDispositivoPorCodigoPendente');
+  }
+
   /** @returns {Promise<object[]>} todas as linhas, copiadas. */
   async listarDispositivos() { this.#naoImplementado('listarDispositivos'); }
 
@@ -137,7 +164,12 @@ export class Repositorio {
    * linha existente para quem chama decidir entre 202 (mesmo aparelho
    * insistindo) e 409 DISPOSITIVO_CONFLITO (credencial diferente).
    *
-   * @returns {Promise<{inserido: boolean, dispositivo: object}>}
+   * `colisaoCodigo:true` = o dispositivo_id estava livre mas o codigo curto
+   * sorteado ja e de outra linha pendente. Quem chama sorteia outro; depois de
+   * 3 colisoes responde 503 CODIGO_INDISPONIVEL. E o indice unico decidindo,
+   * nao um SELECT antes do INSERT.
+   *
+   * @returns {Promise<{inserido: boolean, dispositivo: object|null, colisaoCodigo?: boolean}>}
    */
   async inserirDispositivoSeAusente(dispositivo) { this.#naoImplementado('inserirDispositivoSeAusente'); }
 
