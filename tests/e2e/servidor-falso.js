@@ -18,6 +18,8 @@ import { criarRepositorioMemoria } from '../../nucleo/memoria.js';
 import { criarRoteador, despachar, AUTH, CORS } from '../../nucleo/http.js';
 import { lerRequisicao } from '../../nucleo/http-node.js';
 import { enviarLote } from '../../nucleo/casos/marcacao.js';
+import { obterSal } from '../../nucleo/casos/rh.js';
+import { obterCarga } from '../../nucleo/casos/dispositivo.js';
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -257,7 +259,11 @@ export function criarServidor(opts = {}) {
 
   const roteador = criarRoteador([
     { caminho: '/efrat/marcacoes', metodos: ['POST'], auth: AUTH.TOKEN_OU_APARELHO,
-      cors: CORS.ABERTO, manipulador: enviarLote }
+      cors: CORS.ABERTO, manipulador: enviarLote },
+    { caminho: '/efrat/rh/sal', metodos: ['POST'], auth: AUTH.ABERTA,
+      cors: CORS.ABERTO, manipulador: obterSal },
+    { caminho: '/efrat/carga', metodos: ['POST'], auth: AUTH.APARELHO,
+      cors: CORS.ABERTO, manipulador: obterCarga }
   ]);
 
   const alfabetoCodigo = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -415,16 +421,9 @@ export function criarServidor(opts = {}) {
     }
   };
 
-  // A REFERÊNCIA só muda por /efrat/carga — é o motor de reconhecimento de
-  // verdade reportando a si mesmo a cada sincronismo, não o painel do RH
-  // submetendo um cadastro (docs/fase3-contrato.md §4.7: "para isso o app
-  // reporta seu modelo_id em /efrat/carga"). Se as rotas de cadastro também
-  // movessem a referência, elas nunca poderiam divergir dela — a checagem
-  // inteira viraria sempre-verdade.
-  const definirReferenciaModeloApp = modeloId => {
-    registrarModeloObservado(modeloId, 'app');
-    estado.referenciaModeloApp = modeloId;
-  };
+  // A funcao que definia a REFERENCIA saiu daqui: /efrat/carga (o unico
+  // caminho que a move) agora mora em nucleo/casos/dispositivo.js e chama
+  // ctx.repo.definirReferenciaModeloApp diretamente.
 
   /**
    * Classifica um modelo_id contra a referência ANTES de registrar esta
@@ -543,22 +542,6 @@ export function criarServidor(opts = {}) {
     return sessao;
   };
 
-  function carga() {
-    const fim = new Date(); fim.setHours(23, 59, 59, 0);
-    return {
-      ok: true,
-      gestor: { id: 'p-gestor', nome: 'Gestor Piloto' },
-      equipes: [
-        { equipe_id: 'eq-1', nome: 'Equipe Um', unidade: 'Unidade A', lat: 0, lng: 0, raio_m: 500, minha: true },
-        { equipe_id: 'eq-2', nome: 'Equipe Dois', unidade: 'Unidade A', lat: 0, lng: 0, raio_m: 500, minha: false }
-      ],
-      pessoas: pessoas.filter(p => !estado.inativos.has(p.pessoa_id)),
-      sem_cadastro: [{ pessoa_id: 'p-novo', nome: 'Novato Sem Face', matricula: '009', equipe_id: 'eq-1' }],
-      servidor_hora: new Date().toISOString(),
-      expira_em: fim.toISOString()
-    };
-  }
-
   const servidor = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const responder = (cod, obj, extras) => {
@@ -638,6 +621,7 @@ export function criarServidor(opts = {}) {
           estado.maxLotesSimultaneos = Math.max(estado.maxLotesSimultaneos, estado.lotesSimultaneos);
           await new Promise(r => setTimeout(r, opts.latenciaMs || 60));
         }
+        if (requisicao.caminho === '/efrat/carga') estado.chamadas.carga++;
         try {
           const resposta = await despachar(nucleo, roteador, requisicao);
           return responder(resposta.status, resposta.corpo, resposta.cabecalhos);
@@ -784,40 +768,9 @@ export function criarServidor(opts = {}) {
         });
       }
 
-      if (url.pathname === '/webhook/efrat/carga') {
-        estado.chamadas.carga++;
-        if (body.dispositivo_id) {
-          const dispositivo = dispositivoAutenticado(req, body.dispositivo_id);
-          if (!dispositivo) return responder(401, erro('CREDENCIAL_INVALIDA', 'credencial invalida'));
-          if (dispositivo.estado === 'pendente') {
-            return responder(403, erro('DISPOSITIVO_PENDENTE', 'dispositivo aguarda aprovacao'));
-          }
-          if (dispositivo.estado !== 'ativo') {
-            return responder(403, erro('DISPOSITIVO_INATIVO', 'dispositivo inativo'));
-          }
-          if (!dispositivo.equipes_ids.length) {
-            return responder(403, erro('DISPOSITIVO_SEM_ESCOPO', 'dispositivo sem equipes'));
-          }
-          // T-8ADD9C/§4.7: o app reporta o próprio modelo_id uma vez por
-          // sincronismo — é o dado mais barato da seção, e é ele que forma a
-          // REFERÊNCIA (o modelo_id mais recente visto no caminho do app).
-          // Tolerado ausente: cliente antigo não quebra o sincronismo por isso.
-          if (body.modelo_id) definirReferenciaModeloApp(body.modelo_id);
-          return responder(200, {
-            ok: true, versao: dispositivo.configuracao_versao,
-            gerado_em: new Date().toISOString(),
-            escopo: { equipes_ids: [...dispositivo.equipes_ids] },
-            pessoas: pessoas
-              .filter(p => !estado.inativos.has(p.pessoa_id) && dispositivo.equipes_ids.includes(p.equipe_id))
-              .map(p => ({
-                pessoa_id: p.pessoa_id, nome: p.nome, equipe_id: p.equipe_id, papel: p.papel,
-                template: { versao: p.versao, vetores: p.vetores }, miniatura: p.miniatura
-              })),
-            removidos_ids: [], request_id: requestId()
-          });
-        }
-        return responder(200, carga());
-      }
+      // /efrat/carga saiu daqui: mora em nucleo/casos/dispositivo.js, servida
+      // pela tabela de rotas la em cima. O ramo anonimo (sem dispositivo_id)
+      // nao migrou -- ver a nota na propria rota nova sobre a ambiguidade 2.
 
       if (url.pathname === '/webhook/efrat/identificar') {
         estado.chamadas.identificar++;
@@ -961,9 +914,8 @@ export function criarServidor(opts = {}) {
       // indice unico (repositorio.inserirMarcacaoSeAusente) -- que num Map da
       // no mesmo e num banco e a diferenca entre ter e nao ter ponto duplicado.
 
-      if (url.pathname === '/webhook/efrat/rh/sal') {
-        return responder(200, { ok: true, sal: rhUsuario.sal, iteracoes: rhUsuario.iteracoes });
-      }
+      // /efrat/rh/sal saiu daqui: mora em nucleo/casos/rh.js, servida pela
+      // tabela de rotas la em cima.
 
       if (url.pathname.startsWith('/webhook/efrat/rh/')) {
         if (body.usuario !== rhUsuario.usuario || body.chave !== rhUsuario.chave) {
@@ -1703,7 +1655,7 @@ export function criarServidor(opts = {}) {
     fs.createReadStream(arq).pipe(res);
   });
 
-  return { servidor, estado, pessoas, carga };
+  return { servidor, estado, pessoas };
 }
 
 export function subir(opts = {}) {
