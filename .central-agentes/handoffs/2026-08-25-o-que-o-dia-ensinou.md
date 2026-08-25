@@ -168,6 +168,34 @@ prática transferível em qualidade individual, e qualidade individual sai do ti
 quando a pessoa sai. É um erro que quase nunca é apontado, porque a vítima dele é
 quem recebeu o elogio.
 
+## 9. Furo achado é evidência de lente errada
+
+Do DevOps, recusando que o próprio achado fosse rigor. Ele encontrou que o desenho
+do `banco_conferido` repousava numa crença não medida sobre a Vercel — **mas só
+depois** de o QA ter achado um furo diferente no mesmo desenho.
+
+> Sem a correção dele eu nunca teria voltado àquele parágrafo.
+
+**A lição operacional não é "revise o próprio trabalho".** É:
+
+> **Depois que alguém acha um furo no seu desenho, releia o desenho INTEIRO — não
+> só o pedaço consertado.** O furo achado é evidência de que você estava olhando
+> aquele desenho com a lente errada, e a lente errada raramente produz um erro só.
+
+## 10. A cultura funcionou por tornar o certo barato, não nobre
+
+Também dele, corrigindo o meu elogio pela terceira vez:
+
+> De manhã eu aceitei "as três impossibilidades" do handoff sem medir — e só fui
+> medir porque o cartão dizia para rodar o fluxo em vez de nomear provedor. **Da
+> terceira ou quarta vez que "eu acredito" custou caro hoje, medir virou o caminho
+> mais curto, não o mais nobre.**
+
+Isso fecha o par com a observação do QA (*"as pessoas só contam o que acharam
+quando contar não custa"*): as duas dizem que o comportamento veio da **estrutura
+de custo**, não de exortação. Ninguém aqui ficou mais cuidadoso durante o dia —
+mudou o que saía mais barato.
+
 ## A frase do dia, do DevOps
 
 > Foi um bom dia de trabalho — inclusive as partes em que eu estava errado.
