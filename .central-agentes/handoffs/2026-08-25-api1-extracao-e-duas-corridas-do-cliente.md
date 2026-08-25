@@ -28,7 +28,28 @@ Três medições, em ordem de força:
    antes e depois do envio, pessoa desconhecida, campos ausentes em três
    formas, revogado (retido / teto de 500 / janela de 30 dias), pendente,
    negado, lote misto e lote vazio.
-2. **Linha de base completa: 174/174.**
+2. **Suite completa, três rodadas de cada árvore** — e o resultado é
+   simétrico, que é o ponto:
+
+   | árvore | rodadas |
+   |---|---|
+   | extraída (com o núcleo) | 173 · 173 · **174** |
+   | linha de base (`49d23c1`) | **174** · 173 · **174** |
+
+   As duas produzem os dois resultados. Não há efeito diferencial a explicar.
+   A árvore extraída atinge 174/174; a de linha de base também floca.
+
+   Ressalva que o número exige: **a suíte não está verde, ela é instável.** Uma
+   rodada 174/174 é "a suíte *pode* passar", não "a suíte passa". Dois terços de
+   limpeza por rodada, de cada lado. Quem for ler um 173/174 futuro como
+   regressão precisa deste número, não do melhor deles.
+
+   Lacuna honesta: na rodada em que a linha de base falhou eu usei
+   `--reporter=line`, que não emite o nome do teste — tenho a contagem e **não**
+   o nome. A tentativa de recapturar deu 174/174, então o nome segue perdido.
+   Portanto: *"mesmo conjunto de falhas"* não está provado; *"os 174 verdes"*
+   está.
+
 3. **107 unitários verdes**, incluindo a guarda que grepa o limiar 0,45 dentro
    de `servidor-falso.js` — o limiar não se mudou de lugar.
 
@@ -119,3 +140,25 @@ informação que quem chama **tem** de ler, e no primeiro uso eu joguei fora.
   `tests/e2e/*.js` — `nucleo/` nasce sem checagem. E `.vercelignore` só ignora
   `publico/`, então `nucleo/*.js` seria publicado como estático na origem do
   app. Ambos são do DevOps; nenhum foi tocado.
+
+## Como refazer a linha de base
+
+A árvore de comparação foi criada e removida; recriar é um comando:
+
+```
+git worktree add --detach /caminho/tmp 49d23c1
+ln -s "$PWD/node_modules" /caminho/tmp/node_modules
+cd /caminho/tmp && npx playwright test --reporter=list
+```
+
+`49d23c1` é o commit da interface — `tests/e2e/servidor-falso.js` ainda é o
+pré-extração ali (zero referências a `nucleo/`), então é o controle com **uma**
+variável. Use `--reporter=list`, nunca `line`: `line` não emite o nome do teste
+que falhou, e num diagnóstico de instabilidade o nome é o dado.
+
+## Sugestão para quem for usar a suíte como portão
+
+`playwright.config.js` liga `retries: 1` só sob `CI`; localmente é `0`. Com a
+suíte instável nos dois lados, rodar localmente com `--retries=1` separa os dois
+casos de graça: **falha que passa no retry é instabilidade, falha que repete é
+defeito.** Não alterei o config — é sugestão, não mudança.
