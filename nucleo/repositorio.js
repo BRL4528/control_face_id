@@ -137,7 +137,12 @@ export class Repositorio {
    * linha existente para quem chama decidir entre 202 (mesmo aparelho
    * insistindo) e 409 DISPOSITIVO_CONFLITO (credencial diferente).
    *
-   * @returns {Promise<{inserido: boolean, dispositivo: object}>}
+   * `colisaoCodigo:true` = o dispositivo_id estava livre mas o codigo curto
+   * sorteado ja e de outra linha pendente. Quem chama sorteia outro; depois de
+   * 3 colisoes responde 503 CODIGO_INDISPONIVEL. E o indice unico decidindo,
+   * nao um SELECT antes do INSERT.
+   *
+   * @returns {Promise<{inserido: boolean, dispositivo: object|null, colisaoCodigo?: boolean}>}
    */
   async inserirDispositivoSeAusente(dispositivo) { this.#naoImplementado('inserirDispositivoSeAusente'); }
 
