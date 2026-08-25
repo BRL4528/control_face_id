@@ -534,4 +534,13 @@ export class Repositorio {
    * chave. A rota /rh/sal expoe SOMENTE sal e iteracoes.
    */
   async lerUsuarioRh(usuario) { this.#naoImplementado('lerUsuarioRh'); }
+
+  // NAO existe inserirUsuarioRh, e a ausencia e DECISAO -- registrada aqui pra
+  // nao ser reproposta como necessidade tecnica. Nenhuma das rotas cria usuario
+  // de RH; o metodo seria capacidade privilegiada de escrita que a producao
+  // carrega pra sempre sem nenhum caminho de produto exercitando. Capacidade
+  // que ninguem exercita e capacidade que ninguem defende. A semente do
+  // ambiente de teste semeia por SQL direto (mesmo padrao do arnes do QA). A
+  // versao legitima -- gestao de usuario de RH como produto, com rota, auth e
+  // auditoria -- e o cartao T-641E39.
 }

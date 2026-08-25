@@ -132,7 +132,7 @@ export function criarRepositorioPostgres({ connectionString } = {}) {
     async atualizarDispositivo(dispositivoId, campos) {
       const { clausula, valores } = construirSet(campos, COLUNAS_DISPOSITIVO, COLUNAS_JSONB_DISPOSITIVO, 2);
       if (!clausula) return lerDispositivo(dispositivoId);
-      const linhas = await sql(
+      const linhas = await sql.query(
         `UPDATE efrat_dispositivo SET ${clausula} WHERE dispositivo_id = $1 RETURNING *`,
         [dispositivoId, ...valores]
       );
@@ -162,7 +162,7 @@ export function criarRepositorioPostgres({ connectionString } = {}) {
     async aprovarDispositivoPorCodigo({ codigo, criadoDepoisDe, campos }) {
       const { clausula, valores } = construirSet(campos || {}, COLUNAS_DISPOSITIVO, COLUNAS_JSONB_DISPOSITIVO, 3);
       const extra = clausula ? `, ${clausula}` : '';
-      const [linha] = await sql(
+      const [linha] = await sql.query(
         `UPDATE efrat_dispositivo
             SET estado = 'ativo', codigo_curto = NULL${extra}
           WHERE codigo_curto = $1
@@ -182,7 +182,7 @@ export function criarRepositorioPostgres({ connectionString } = {}) {
     async trocarEstadoDispositivo({ dispositivoId, de, para, campos }) {
       const { clausula, valores } = construirSet(campos || {}, COLUNAS_DISPOSITIVO, COLUNAS_JSONB_DISPOSITIVO, 4);
       const extra = clausula ? `, ${clausula}` : '';
-      const [linha] = await sql(
+      const [linha] = await sql.query(
         `UPDATE efrat_dispositivo
             SET estado = $3${extra}
           WHERE dispositivo_id = $1 AND estado = ANY($2)
@@ -275,7 +275,7 @@ export function criarRepositorioPostgres({ connectionString } = {}) {
     async atualizarPessoaSeVersao(pessoaId, versaoEsperada, campos) {
       const { clausula, valores } = construirSet(campos || {}, COLUNAS_PESSOA, COLUNAS_JSONB_PESSOA, 3);
       const extra = clausula ? `, ${clausula}` : '';
-      const [linha] = await sql(
+      const [linha] = await sql.query(
         `UPDATE efrat_pessoa SET versao_cadastro = versao_cadastro + 1${extra}
           WHERE pessoa_id = $1 AND versao_cadastro = $2
           RETURNING *`,
@@ -291,7 +291,7 @@ export function criarRepositorioPostgres({ connectionString } = {}) {
     async atualizarPessoa(pessoaId, campos) {
       const { clausula, valores } = construirSet(campos, COLUNAS_PESSOA, COLUNAS_JSONB_PESSOA, 2);
       if (!clausula) return repo.lerPessoa(pessoaId);
-      const linhas = await sql(
+      const linhas = await sql.query(
         `UPDATE efrat_pessoa SET ${clausula} WHERE pessoa_id = $1 RETURNING *`,
         [pessoaId, ...valores]
       );
@@ -338,7 +338,7 @@ export function criarRepositorioPostgres({ connectionString } = {}) {
         return { renomeada: !!atual, equipe: atual };
       }
       try {
-        const linhas = await sql(
+        const linhas = await sql.query(
           `UPDATE efrat_equipe SET ${clausula} WHERE equipe_id = $1 RETURNING *`,
           [equipeId, ...valores]
         );
@@ -403,7 +403,7 @@ export function criarRepositorioPostgres({ connectionString } = {}) {
     async atualizarMarcacao(idCliente, campos) {
       const { clausula, valores } = construirSet(campos, COLUNAS_MARCACAO, new Set(), 2);
       if (!clausula) return repo.lerMarcacao(idCliente);
-      const linhas = await sql(
+      const linhas = await sql.query(
         `UPDATE efrat_marcacao SET ${clausula} WHERE id_cliente = $1 RETURNING *`,
         [idCliente, ...valores]
       );
