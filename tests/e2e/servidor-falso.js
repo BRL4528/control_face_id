@@ -563,6 +563,8 @@ export function criarServidor(opts = {}) {
           await new Promise(r => setTimeout(r, opts.latenciaMs || 60));
         }
         if (requisicao.caminho === '/efrat/carga') estado.chamadas.carga++;
+        if (requisicao.caminho === '/efrat/dispositivo/estado') estado.chamadas.estado++;
+        if (requisicao.caminho === '/efrat/dispositivo/registrar') estado.chamadas.registrar++;
         try {
           const resposta = await despachar(nucleo, roteador, requisicao);
           return responder(resposta.status, resposta.corpo, resposta.cabecalhos);
