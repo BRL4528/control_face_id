@@ -3,3 +3,10 @@ node_modules
 .env*.local
 .env
 .env*
+
+# Skills de agente instaladas pelo `vercel integration add neon`. Sao
+# ferramenta de quem edita, nao codigo do produto — e iriam junto no deploy
+# da API.
+.agents
+.claude
+skills-lock.json
