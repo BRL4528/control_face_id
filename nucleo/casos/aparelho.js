@@ -1,39 +1,23 @@
-// =====================================================================
-// RASCUNHO -- NAO TESTADO, NAO LIGADO. Autoria do cartao e do Full-Stack.
-// =====================================================================
+// Rotas de aparelho autenticadas por RH + o par registrar/estado do proprio
+// aparelho. docs/fase3-contrato.md §1.1-§1.6, docs/adr-acesso-v3.md.
 //
-// Escrito por API-1 (Arquiteto) ANTES do corte de prioridade que mandou
-// entregar so uma fatia vertical. Entregue como INSUMO, a pedido do
-// Orquestrador, porque 5 destas 6 rotas estao na coluna do primeiro turno
-// (registrar, estado, rh/aparelhos, rh/aparelho/aprovar -- mais recusar e
-// revogar, que vieram de brinde).
+// Rascunho original de API-1 (Arquiteto), revisado e adotado por API-4
+// (T-D3DC5C) depois de conferencia linha a linha contra o mapa das 25 rotas
+// e contra o servidor falso. Um defeito real corrigido na revisao: o ramo de
+// migracao do token legado em `registrar` nao conferia o resultado do
+// `inserirDispositivoSeAusente` (colisao de dispositivo_id gravaria silencio
+// em cima do token ja consumido -- ver o comentario no proprio ramo).
 //
-// O QUE ELE E:
-//   - a mesma forma da fatia provada (nucleo/casos/marcacao.js): assinatura
-//     `async (ctx, req) => {status, corpo, cabecalhos?}`, zero acesso a
-//     armazenamento fora de ctx.repo, zero Date.now().
-//   - uma leitura ja feita das ~700 linhas correspondentes do servidor falso,
-//     com os comentarios de POR QUE preservados.
+// Decisao registrada sobre a divergencia que o Arquiteto sinalizou: em
+// `consultarEstado`, a renovacao do codigo curto expirado so libera a reserva
+// velha quando a nova entra (mais segura que o original, que liberava antes
+// de sortear -- ramo so alcancavel com 3 colisoes seguidas em 31^6, portanto
+// sem cobertura de teste possivel). Mantida a versao segura.
 //
-// O QUE ELE NAO E:
-//   - NAO passou por teste nenhum. Nem e2e, nem unitario, nem fumaca.
-//   - NAO esta na tabela de rotas de tests/e2e/servidor-falso.js -- o codigo
-//     antigo continua servindo estas 6.
-//   - NAO foi conferido contra o mapa das 25 rotas (2026-08-25-mapa-25-rotas-api.md).
-//
-// Divergencia conhecida que EU introduzi e que voce tem de decidir:
-// na renovacao do codigo curto expirado (consultarEstado), o servidor falso
-// apaga a reserva do codigo velho ANTES de sortear o novo, e se os 3 sorteios
-// colidirem o aparelho fica com um codigo que nao resolve mais em lugar
-// nenhum. Aqui a reserva velha so cai quando a nova entra. E mais seguro, mas
-// E MUDANCA DE COMPORTAMENTO num ramo que exige 3 colisoes seguidas em 31^6 --
-// ou seja, inalcancavel por teste. Sua chamada: manter o meu, ou reproduzir o
-// original para a extracao ficar literal.
-//
-// Adote, reescreva ou apague. Se apagar, apague inteiro -- meio arquivo
-// adotado e pior que nenhum.
-//
-// docs/fase3-contrato.md §1.1-§1.6, docs/adr-acesso-v3.md.
+// `recusar`/`revogar` (abaixo) estao prontas e revisadas mas FORA da tabela
+// de rotas por enquanto -- nao entraram na coluna do primeiro turno de
+// amanha (registrar, estado, rh/sal, rh/aparelhos, rh/aparelho/aprovar,
+// rh/face/cadastrar, carga, marcacoes). Ligar depois do teste.
 
 import * as dominio from '../dominio.js';
 import { erroDe, idempotencia, gravarIdempotencia, respostaDeIdempotencia } from '../contexto.js';
@@ -77,7 +61,13 @@ export async function registrar(ctx, req) {
     if (!await ctx.repo.consumirTokenLegado()) {
       return { status: 409, corpo: erro('TOKEN_LEGADO_CONSUMIDO', 'token legado ja migrado') };
     }
-    await ctx.repo.inserirDispositivoSeAusente({
+    // O token so migra UMA vez no sistema inteiro (consumirTokenLegado ja
+    // garantiu isso acima), entao nao existe CORRIDA entre duas migracoes —
+    // mas dispositivo_id colidir com uma linha de outro fluxo (ex.: o mesmo
+    // id ja tinha virado 'pendente' por um /registrar comum antes deste
+    // legado chegar) ainda e possivel e nao pode virar 200 silencioso: o
+    // token ja foi gasto e a linha gravada nao seria a migrada.
+    const inserido = await ctx.repo.inserirDispositivoSeAusente({
       dispositivo_id: b.dispositivo_id, credencial_hash: b.credencial_publica,
       estado: 'ativo', codigo_curto: null, apelido: b.apelido, ua: b.ua,
       geo: b.geo || null, tentativas: 1, local_id: 'local-piloto',
@@ -85,6 +75,9 @@ export async function registrar(ctx, req) {
       aprovado_por: 'migracao-v3', aprovado_em: req.agoraIso,
       criado_em: req.agoraIso, ultimo_uso: null
     });
+    if (!inserido.inserido) {
+      return { status: 409, corpo: erro('DISPOSITIVO_CONFLITO', 'dispositivo ja cadastrado') };
+    }
     return { status: 200, corpo: {
       ok: true, estado: 'ativo', migrado: true,
       dispositivo_id: b.dispositivo_id, request_id: ctx.cripto.uuid()
@@ -254,6 +247,16 @@ export async function aprovar(ctx, req) {
   // CODIGO_AMBIGUO (409, §1.3) nao tem caminho aqui: o codigo curto e indice
   // unico entre as linhas pendentes, entao duas pendentes com o mesmo codigo
   // sao estruturalmente impossiveis.
+  //
+  // ESSA INVARIANTE NAO E DESTE ARQUIVO -- e do indice unico PARCIAL em
+  // codigo_curto WHERE estado='pendente' que a migration do Persistencia
+  // (API-3) precisa criar. Ate a migration existir e ficar confirmada, este
+  // comentario e uma suposicao, nao um fato: sem o indice, dois pendentes
+  // podem nascer com o mesmo codigo e aprovar() pode ativar o aparelho
+  // ERRADO sem erro nenhum (achado do QA, Revisor QA/Security, 2026-08-25 --
+  // mesma suposicao repetida em tests/e2e/servidor-falso.js no comentario do
+  // CODIGO_AMBIGUO antigo, que ja nomeava "banco real" como a condicao que
+  // quebra ela).
 
   const equipesIds = Array.isArray(b.equipes_ids) ? b.equipes_ids : [];
   if (equipesIds.length === 0) {
