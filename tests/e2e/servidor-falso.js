@@ -9,8 +9,20 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { avaliarLoteFace } from '../../js/coerencia.js';
 import { normalizarTelefone, telefonesCompartilhados, normalizarUnidade } from '../../js/regras.js';
+// API-1 (T-C8316C): o nucleo extraido. A partir daqui este arquivo deixa de
+// ser a implementacao das rotas e passa a ser o que ele sempre deveria ter
+// sido -- um SERVIDOR DE TESTE: estaticos, _headers, semeadura, latencia
+// simulada e o `estado` que os e2e leem. A regra mora no nucleo, e a prova de
+// que a extracao nao mudou nada e que os 174 e2e nao mudaram uma assercao.
+import { criarRepositorioMemoria } from '../../nucleo/memoria.js';
+import { criarRoteador, despachar, AUTH, CORS } from '../../nucleo/http.js';
+import { lerRequisicao } from '../../nucleo/http-node.js';
+import { enviarLote } from '../../nucleo/casos/marcacao.js';
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+
+// Origem da pagina publica de face. Placeholder ate o DevOps fechar o DNS.
+const ORIGEM_PUBLICA_PADRAO = 'https://ORIGEM-PUBLICA-A-DEFINIR';
 
 
 export function extrairCspDeHeaders() {
@@ -19,64 +31,16 @@ export function extrairCspDeHeaders() {
   return match ? match[1].trim() : '';
 }
 
-// T-D00CE0 (docs/fase3-contrato.md §1.6 e §3.3.3): decisão de servidor sobre
-// se uma marcação entra, fica retida ou é rejeitada — pura, sem estado além
-// do que recebe, testável em Node. Mora aqui e não em js/regras.js de
-// propósito: o cliente nunca decide isso, só lê o `status`/`motivo_codigo`
-// que a rota devolve (mesmo raciocínio da coerência — número/decisão sem
-// função no cliente não deve viajar no bundle).
-export const JANELA_DRENAGEM_MS = 30 * 24 * 3600 * 1000;
-export const TETO_RETIDAS_POS_REVOGACAO = 500;
-
-/** null = segue o fluxo normal (aparelho ativo). Senão, {status, motivo_codigo}. */
-export function resultadoPorEstadoAparelho(dispositivo, agoraMs) {
-  if (!dispositivo || dispositivo.estado === 'pendente' || dispositivo.estado === 'negado') {
-    return { status: 'rejeitado', motivo_codigo: 'aparelho_nunca_liberado' };
-  }
-  if (dispositivo.estado === 'ativo') return null;
-  if (dispositivo.estado === 'revogado') {
-    const desde = Date.parse(dispositivo.revogado_em);
-    if (isFinite(desde) && (agoraMs - desde) > JANELA_DRENAGEM_MS) {
-      return { status: 'rejeitado', motivo_codigo: 'janela_de_drenagem_encerrada' };
-    }
-    if ((dispositivo.retidasPosRevogacao || 0) >= TETO_RETIDAS_POS_REVOGACAO) {
-      return { status: 'rejeitado', motivo_codigo: 'limite_pos_revogacao' };
-    }
-    return { status: 'retido', motivo_codigo: 'aparelho_revogado' };
-  }
-  return { status: 'rejeitado', motivo_codigo: 'aparelho_nunca_liberado' };
-}
-
-/**
- * null = segue o fluxo normal (pessoa ativa e conhecida). `pessoa` precisa
- * trazer `.ativo` e `.inativado_em` já resolvidos — a função não sabe de
- * `estado.inativos`, só decide a partir do que recebe.
- */
-export function resultadoPorEstadoPessoa(pessoa, marcadoEmIso) {
-  if (!pessoa) return { status: 'rejeitado', motivo_codigo: 'pessoa_desconhecida' };
-  if (pessoa.ativo === false) {
-    const inativadoEm = Date.parse(pessoa.inativado_em);
-    const marcadoEm = Date.parse(marcadoEmIso);
-    if (isFinite(inativadoEm) && isFinite(marcadoEm) && marcadoEm < inativadoEm) {
-      return { status: 'retido', motivo_codigo: 'pessoa_inativa_no_envio' };
-    }
-    return { status: 'rejeitado', motivo_codigo: 'pessoa_inativa' };
-  }
-  return null;
-}
-
-// Frase de gente pra cada motivo_codigo — o cliente escolhe por código
-// (§1.6), isto aqui é só o texto que a rota falsa devolve pronto, igual o
-// servidor real faria.
-export const FRASES_MOTIVO = {
-  aparelho_revogado: 'Aparelho revogado: o RH vai conferir esta marcação.',
-  janela_de_drenagem_encerrada: 'Aparelho revogado há mais de 30 dias: este ponto não é mais aceito.',
-  limite_pos_revogacao: 'Muitas marcações deste aparelho depois da revogação: este ponto não é mais aceito.',
-  aparelho_nunca_liberado: 'Este aparelho nunca foi liberado pelo RH.',
-  pessoa_inativa_no_envio: 'Colaborador foi inativado depois desta marcação: o RH vai conferir.',
-  pessoa_inativa: 'Colaborador está inativo: este ponto não é aceito.',
-  pessoa_desconhecida: 'Colaborador não encontrado no cadastro.'
-};
+// T-D00CE0 (docs/fase3-contrato.md §1.6 e §3.3.3): a decisao de servidor
+// sobre se uma marcacao entra, fica retida ou e rejeitada mora agora em
+// nucleo/dominio.js -- pura, sem HTTP e sem armazenamento, como sempre foi,
+// so que agora no lugar em que a API tambem a usa. Reexportada daqui porque
+// era daqui que ela saia.
+export {
+  JANELA_DRENAGEM_MS, TETO_RETIDAS_POS_REVOGACAO,
+  resultadoPorEstadoAparelho, resultadoPorEstadoPessoa, FRASES_MOTIVO
+} from '../../nucleo/dominio.js';
+import { JANELA_DRENAGEM_MS } from '../../nucleo/dominio.js';
 
 // _headers e a fonte unica da politica de borda. A CSP ja vinha de la; cache
 // tambem tem de vir, senao o E2E valida um cache que nao existe em producao —
@@ -251,6 +215,50 @@ export function criarServidor(opts = {}) {
     telefone_autorizado_por: null, telefone_autorizado_em: null, telefone_autorizacao_motivo: null,
     inativado_em: null, inativado_por: null, motivo_inativacao: null
   }, p));
+
+  // =========================================================================
+  // O NUCLEO DA API (T-C8316C). O que estiver na tabela de rotas abaixo e
+  // servido POR ELE; o que nao estiver segue no codigo antigo deste arquivo,
+  // intocado, ate API-4 portar. Migracao rota a rota, com os 174 e2e verdes a
+  // cada passo -- e nao um corte grande de uma vez, que so diria "quebrou"
+  // sem dizer onde.
+  // =========================================================================
+  const cripto = {
+    uuid: () => crypto.randomUUID(),
+    tokenAleatorio: n => crypto.randomBytes(n).toString('base64url'),
+    inteiroAleatorio: n => crypto.randomInt(n),
+    // Mesmo hash que `hashCredencial` deste arquivo sempre usou -- e o que
+    // faz `credencial_publica` (gravada no registro) casar com o Bearer.
+    sha256: v => crypto.createHash('sha256').update(String(v)).digest('base64url')
+  };
+
+  const cfg = {
+    // Getter, e nao copia: `estado.token` e escrito pelos specs.
+    get tokenLegado() { return estado.token; },
+    limiarAceite: limiarAceiteCadastro,
+    consultarAposS: padrao => (opts.consultarAposS == null ? padrao : opts.consultarAposS),
+    expiraPendenteMs: opts.expiraPendenteMs || 24 * 60 * 60 * 1000,
+    expiraConviteMs: opts.expiraConviteMs || 60 * 60 * 1000,
+    origemPublica: opts.origemPublica || ORIGEM_PUBLICA_PADRAO,
+    cadastroJanelaMs: opts.cadastroJanelaMs || 60_000,
+    cadastroLimite: opts.cadastroLimite || 10,
+    identificarJanelaMs: opts.identificarJanelaMs || 60_000,
+    identificarLimite: opts.identificarLimite || 20,
+    volumeAnonimoJanelaMs: opts.volumeAnonimoJanelaMs || 60_000,
+    volumeAnonimoLimite: opts.volumeAnonimoLimite || 300,
+    // Sal fixo DE TESTE: so para o hash nao ser o IP cru. NUNCA e sal de
+    // deploy -- este arquivo e servidor de teste e o valor nao pode viajar
+    // para configuracao nenhuma que va ao ar.
+    salIp: 'sal-fake-servidor-de-teste-nao-e-producao'
+  };
+
+  const repositorio = criarRepositorioMemoria({ estado, pessoas, rhUsuario });
+  const nucleo = { repo: repositorio, cripto, cfg };
+
+  const roteador = criarRoteador([
+    { caminho: '/efrat/marcacoes', metodos: ['POST'], auth: AUTH.TOKEN_OU_APARELHO,
+      cors: CORS.ABERTO, manipulador: enviarLote }
+  ]);
 
   const alfabetoCodigo = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   const requestId = () => crypto.randomUUID();
@@ -439,7 +447,7 @@ export function criarServidor(opts = {}) {
   // T-D30529/§4.4: máquina de estados do convite. Token de 256 bits, CSPRNG;
   // só o hash mora no servidor (mesma regra do código curto de aparelho,
   // §1.1) — o valor claro aparece uma única vez, na resposta da emissão.
-  const ORIGEM_PUBLICA = opts.origemPublica || 'https://ORIGEM-PUBLICA-A-DEFINIR';
+  const ORIGEM_PUBLICA = cfg.origemPublica;
   const EXPIRA_CONVITE_MS = opts.expiraConviteMs || 60 * 60 * 1000;
   const LIMITE_ENVIOS_RECUSADOS = 5;
   const gerarTokenConvite = () => crypto.randomBytes(32).toString('base64url');
@@ -553,11 +561,11 @@ export function criarServidor(opts = {}) {
 
   const servidor = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
-    const responder = (cod, obj) => {
-      res.writeHead(cod, {
+    const responder = (cod, obj, extras) => {
+      res.writeHead(cod, Object.assign({
         'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Authorization, Content-Type, Idempotency-Key'
-      });
+      }, extras || {}));
       res.end(JSON.stringify(obj));
     };
 
@@ -608,10 +616,35 @@ export function criarServidor(opts = {}) {
 
     if (url.pathname.startsWith('/webhook/')) {
       if (estado.fora) { res.destroy(); return; }
-      let corpo = '';
-      for await (const c of req) corpo += c;
-      let body = {};
-      try { body = corpo ? JSON.parse(corpo) : {}; } catch (e) { /* body vazio */ }
+
+      // A ponte com node:http mora no nucleo (nucleo/http-node.js) e le o
+      // corpo UMA vez. `body`/`corpo` continuam existindo com o mesmo nome
+      // para o codigo antigo deste arquivo, que ainda serve 24 das 25 rotas.
+      const requisicao = await lerRequisicao(req, {
+        caminho: url.pathname.replace('/webhook', ''),
+        tokenDaQuery: url.searchParams.get('token') || '',
+        ip: ipDaRequisicao(req)
+      });
+      const body = requisicao.corpo;
+      const corpo = requisicao.corpoBruto;
+
+      // Rota servida pelo NUCLEO: o servidor falso so instrumenta (contadores
+      // e latencia simulada, que sao coisa de teste e nao de contrato) e
+      // entrega. Nao ha regra de negocio deste lado.
+      if (roteador.achar(requisicao.caminho)) {
+        if (requisicao.caminho === '/efrat/marcacoes') {
+          estado.chamadas.marcacoes++;
+          estado.lotesSimultaneos++;
+          estado.maxLotesSimultaneos = Math.max(estado.maxLotesSimultaneos, estado.lotesSimultaneos);
+          await new Promise(r => setTimeout(r, opts.latenciaMs || 60));
+        }
+        try {
+          const resposta = await despachar(nucleo, roteador, requisicao);
+          return responder(resposta.status, resposta.corpo, resposta.cabecalhos);
+        } finally {
+          if (requisicao.caminho === '/efrat/marcacoes') estado.lotesSimultaneos--;
+        }
+      }
 
       const rotaRegistrar = url.pathname === '/webhook/efrat/dispositivo/registrar';
       const rotaEstado = url.pathname === '/webhook/efrat/dispositivo/estado';
@@ -922,93 +955,11 @@ export function criarServidor(opts = {}) {
         return responder(202, resposta);
       }
 
-      if (url.pathname === '/webhook/efrat/marcacoes') {
-        estado.chamadas.marcacoes++;
-        estado.lotesSimultaneos++;
-        estado.maxLotesSimultaneos = Math.max(estado.maxLotesSimultaneos, estado.lotesSimultaneos);
-        await new Promise(r => setTimeout(r, opts.latenciaMs || 60));
-
-        // T-D00CE0 (§1.6): /efrat/marcacoes NUNCA responde 403 por estado de
-        // aparelho — sempre 200 item a item, que é o único formato em que o
-        // cliente consegue soltar da fila o que já foi resolvido. O gate
-        // genérico lá em cima (linha ~319) já garantiu que a credencial
-        // resolve para ALGUM aparelho conhecido (ou 401 antes de chegar
-        // aqui); aqui só falta olhar o ESTADO desse aparelho.
-        const dispositivoDoLote = estado.dispositivos.get(body.dispositivo_id);
-        const agoraMs = Date.now();
-        const agoraIso = new Date(agoraMs).toISOString();
-        const resultados = [];
-        for (const m of (body.marcacoes || [])) {
-          if (!m || !m.id_cliente || !m.pessoa_id || !m.marcado_em) {
-            resultados.push({ id_cliente: m && m.id_cliente, status: 'rejeitado', motivo: 'campos obrigatorios ausentes' });
-            continue;
-          }
-          if (estado.marcacoes.has(m.id_cliente)) {
-            resultados.push({ id_cliente: m.id_cliente, status: 'duplicado', motivo: null });
-            continue;
-          }
-
-          const porAparelho = resultadoPorEstadoAparelho(dispositivoDoLote, agoraMs);
-          if (porAparelho) {
-            const item = Object.assign({}, m, {
-              requer_revisao: true,
-              recebido_em: agoraIso,
-              aparelho_estado_no_envio: dispositivoDoLote ? dispositivoDoLote.estado : 'desconhecido',
-              aparelho_revogado_em: dispositivoDoLote ? (dispositivoDoLote.revogado_em || null) : null,
-              aparelho_apelido: dispositivoDoLote ? dispositivoDoLote.apelido : null,
-              aparelho_dispositivo_id: body.dispositivo_id || null,
-              motivo_codigo: porAparelho.motivo_codigo
-            });
-            if (porAparelho.status === 'retido') {
-              estado.marcacoes.set(m.id_cliente, item);
-              if (dispositivoDoLote) {
-                dispositivoDoLote.retidasPosRevogacao = (dispositivoDoLote.retidasPosRevogacao || 0) + 1;
-              }
-            }
-            resultados.push({
-              id_cliente: m.id_cliente, status: porAparelho.status,
-              motivo_codigo: porAparelho.motivo_codigo, motivo: FRASES_MOTIVO[porAparelho.motivo_codigo]
-            });
-            continue;
-          }
-
-          const pessoa = pessoas.find(p => p.pessoa_id === m.pessoa_id);
-          const pessoaComEstado = pessoa ? Object.assign({}, pessoa, { ativo: !estado.inativos.has(pessoa.pessoa_id) }) : null;
-          const porPessoa = resultadoPorEstadoPessoa(pessoaComEstado, m.marcado_em);
-          if (porPessoa) {
-            const item = Object.assign({}, m, {
-              requer_revisao: true, recebido_em: agoraIso, motivo_codigo: porPessoa.motivo_codigo
-            });
-            if (porPessoa.status === 'retido') estado.marcacoes.set(m.id_cliente, item);
-            resultados.push({
-              id_cliente: m.id_cliente, status: porPessoa.status,
-              motivo_codigo: porPessoa.motivo_codigo, motivo: FRASES_MOTIVO[porPessoa.motivo_codigo]
-            });
-            continue;
-          }
-
-          // Mesma regra do workflow real: gestor, manual, veredito diferente
-          // de aceito ou relogio fora de 2 min vao para a mesa do RH.
-          const deriva = m.deriva_relogio_ms == null ? 0 : Number(m.deriva_relogio_ms);
-          const revisar = m.veredito !== 'aceito' || m.origem === 'manual'
-            || (pessoa && pessoa.papel === 'gestor') || Math.abs(deriva) > 120000;
-          estado.marcacoes.set(m.id_cliente, Object.assign({}, m, {
-            requer_revisao: !!revisar,
-            foto_auditoria: revisar ? (m.foto_auditoria || '') : ''
-          }));
-          resultados.push({ id_cliente: m.id_cliente, status: 'aceito', motivo: null });
-        }
-        estado.lotesSimultaneos--;
-        const conta = s => resultados.filter(x => x.status === s).length;
-        return responder(200, {
-          ok: true, servidor_hora: agoraIso,
-          resumo: {
-            aceitas: conta('aceito'), duplicadas: conta('duplicado'),
-            retidas: conta('retido'), rejeitadas: conta('rejeitado')
-          },
-          resultados
-        });
-      }
+      // /efrat/marcacoes saiu daqui: mora em nucleo/casos/marcacao.js, servida
+      // pela tabela de rotas la em cima. A dedup por id_cliente deixou de ser
+      // um `Map.has` seguido de um `Map.set` e passou a ser UMA operacao com
+      // indice unico (repositorio.inserirMarcacaoSeAusente) -- que num Map da
+      // no mesmo e num banco e a diferenca entre ter e nao ter ponto duplicado.
 
       if (url.pathname === '/webhook/efrat/rh/sal') {
         return responder(200, { ok: true, sal: rhUsuario.sal, iteracoes: rhUsuario.iteracoes });
