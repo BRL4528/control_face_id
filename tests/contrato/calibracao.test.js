@@ -24,7 +24,7 @@ import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { abrirAlvo } from './arnes/alvo.js';
 import { subirBanco, motivoIndisponivel, politicaDeAusencia } from './arnes/banco.js';
-import { corridaMarcacao, corridaConvite, relatar } from './arnes/corridas.js';
+import { corridaMarcacao, corridaConvite, corridaAprovacao, relatar } from './arnes/corridas.js';
 
 const impedimento = await motivoIndisponivel();
 const { opcoes: pular, reprovar } = politicaDeAusencia(impedimento);
@@ -42,12 +42,13 @@ before(async () => {
       medido[variante] = {
         procedencia: alvo.procedencia,
         marcacao: await corridaMarcacao(alvo),
-        convite: await corridaConvite(alvo)
+        convite: await corridaConvite(alvo),
+        aprovacao: await corridaAprovacao(alvo)
       };
     } finally {
       await alvo.encerrar();
     }
-    console.log(`\n[calibracao] ${variante}\n  ${relatar(medido[variante].marcacao)}\n  ${relatar(medido[variante].convite)}`);
+    console.log(`\n[calibracao] ${variante}\n  ${relatar(medido[variante].marcacao)}\n  ${relatar(medido[variante].convite)}\n  ${relatar(medido[variante].aprovacao)}`);
   }
 }, { timeout: 300000 });
 
@@ -65,6 +66,11 @@ test('atomica: marcacao duplicada NAO acontece sob concorrencia', pular, () => {
 test('atomica: convite NAO e consumido duas vezes em paralelo', pular, () => {
   if (reprovar) assert.fail(reprovar);
   assert.equal(medido.atomica.convite.quebrou, false, relatar(medido.atomica.convite));
+});
+
+test('atomica: um codigo de aprovacao NAO ativa por duas telas ao mesmo tempo', pular, () => {
+  if (reprovar) assert.fail(reprovar);
+  assert.equal(medido.atomica.aprovacao.quebrou, false, relatar(medido.atomica.aprovacao));
 });
 
 // ---------------------------------------------------------------------------
@@ -109,5 +115,15 @@ test('ingenua-com-indice: indice unico salva o DADO, e o teste ainda reprova pel
   assert.equal(
     linhasSempreUm, true,
     'Esperava dado integro (1 linha) e falha so na resposta; vieram linhas duplicadas: ' + relatar(v)
+  );
+});
+
+test('ingenua: a corrida de aprovacao PEGA o ler-depois-gravar (prova de posse)', pular, () => {
+  if (reprovar) assert.fail(reprovar);
+  const v = medido.ingenua.aprovacao;
+  assert.equal(
+    v.quebrou, true,
+    'A corrida de aprovacao passou contra ler-depois-gravar. Sem ela, duas telas de RH ' +
+    'aprovam o mesmo codigo de uso unico e a prova de posse fisica deixa de provar.'
   );
 });

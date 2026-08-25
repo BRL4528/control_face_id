@@ -37,7 +37,7 @@ const lerCorpo = req => new Promise((resolve, reject) => {
  * @param {object} p.repoConvite   uma das VARIANTES.convite
  * @returns {Promise<{base: string, encerrar: () => Promise<void>}>}
  */
-export async function subirApiReferencia({ pool, repoMarcacao, repoConvite }) {
+export async function subirApiReferencia({ pool, repoMarcacao, repoConvite, repoAprovacao }) {
   const servidor = http.createServer(async (req, res) => {
     let corpo;
     try { corpo = await lerCorpo(req); }
@@ -100,6 +100,34 @@ export async function subirApiReferencia({ pool, repoMarcacao, repoConvite }) {
           return json(res, 409, { ok: false, erro: { codigo: 'CONVITE_CONSUMIDO', mensagem: 'Já recebemos suas fotos. O RH vai conferir.' } });
         }
         return json(res, 200, { ok: true, estado: 'recebido', template_estado: 'pendente' });
+      }
+
+      // ---------------------------------------------------------------- //
+      // §1.3 — aprovar aparelho por codigo. Prova de posse fisica de uso
+      // unico. So o compare-and-set ATIVA um aparelho.
+      //
+      // Fora de escopo aqui, de proposito (quem porta e o API-4): auth de RH,
+      // normalizacao do codigo (caixa alta, alfabeto sem O I L 0 1), o limite
+      // LIMITE_APROVACAO e a auditoria de toda tentativa. Nada disso muda o
+      // que esta corrida mede, e reimplementar criaria segunda fonte da
+      // verdade concorrendo com o servidor falso.
+      // ---------------------------------------------------------------- //
+      if (req.url === '/webhook/efrat/rh/aparelho/aprovar') {
+        const r = await repoAprovacao.aprovarPorCodigo(pool, {
+          codigo: String(corpo.codigo || ''),
+          // Expiracao da prova de posse entra na CLAUSULA, nunca numa leitura
+          // anterior. 24h, como o contrato.
+          criadoDepoisDe: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
+          equipesIds: Array.isArray(corpo.equipes_ids) ? corpo.equipes_ids : [],
+          usuario: String(corpo.usuario || ''),
+          agoraIso: new Date().toISOString()
+        });
+        if (!r.trocado) {
+          // "nao existe", "expirou", "ja recusado" e "ja ativo" colapsam numa
+          // mensagem so (§1.3): distinguir viraria oraculo de codigo valido.
+          return json(res, 404, { ok: false, erro: { codigo: 'CODIGO_NAO_ENCONTRADO' } });
+        }
+        return json(res, 200, { ok: true, usuario: String(corpo.usuario || ''), equipes_ids: corpo.equipes_ids });
       }
 
       return json(res, 404, { ok: false, erro: { codigo: 'ROTA_DESCONHECIDA' } });

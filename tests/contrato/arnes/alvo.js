@@ -65,6 +65,8 @@ async function alvoApiReal() {
 /** A API de aferição: HTTP mínimo + banco real + a variante de repositório pedida. */
 async function alvoReferencia(variante, bancoCompartilhado) {
   const repoMarcacao = VARIANTES.marcacao.find(r => r.nome === variante);
+  const repoAprovacao = VARIANTES.aprovacao.find(r => r.nome === variante)
+    || VARIANTES.aprovacao.find(r => r.nome === 'ingenua');
   const repoConvite = VARIANTES.convite.find(r => r.nome === variante)
     // 'ingenua-com-indice' é uma distinção só de marcação (índice único em
     // id_cliente). No convite a variante ingênua é uma só, e é ela que vale.
@@ -74,21 +76,22 @@ async function alvoReferencia(variante, bancoCompartilhado) {
   // A calibração passa UM banco para as três variantes: subir um container por
   // variante triplicaria o tempo sem mudar nada do que está sendo medido.
   const banco = bancoCompartilhado || await subirBanco();
-  const api = await subirApiReferencia({ pool: banco.pool, repoMarcacao, repoConvite });
+  const api = await subirApiReferencia({ pool: banco.pool, repoMarcacao, repoConvite, repoAprovacao });
 
   // As variantes diferem no ESQUEMA (com e sem índice único), então a tabela
   // da variante anterior tem de sair antes. Só acontece no modo `referencia`,
   // nunca no modo `api` — soltar `drop table` perto de um banco de produção é
   // o tipo de conveniência que se cobra uma vez só.
-  await banco.pool.query('drop table if exists marcacao, recadastro, convite cascade');
+  await banco.pool.query('drop table if exists marcacao, recadastro, convite, dispositivo cascade');
   await banco.pool.query(repoMarcacao.ddl);
   await banco.pool.query(repoConvite.ddl);
+  await banco.pool.query(repoAprovacao.ddl);
 
   return montar({
     nome: `referencia:${variante}`,
     base: api.base,
     pool: banco.pool,
-    procedencia: `API de aferencia (marcacao=${repoMarcacao.nome}, convite=${repoConvite.nome}) sobre Postgres real ${banco.proprio ? 'em container descartavel' : 'externo'}`,
+    procedencia: `API de aferencia (marcacao=${repoMarcacao.nome}, convite=${repoConvite.nome}, aprovacao=${repoAprovacao.nome}) sobre Postgres real ${banco.proprio ? 'em container descartavel' : 'externo'}`,
     // Quem trouxe o banco é quem o derruba: alvo que fecha container
     // emprestado deixa as variantes seguintes sem banco.
     encerrarExtra: async () => { await api.encerrar(); if (!bancoCompartilhado) await banco.parar(); }
@@ -115,6 +118,29 @@ function montar({ nome, base, pool, procedencia, encerrarExtra }) {
         [conviteId, PESSOA, hashToken(token)]
       );
       return { conviteId, token };
+    },
+
+    /** Um aparelho PENDENTE com codigo curto vivo, pronto para ser disputado. */
+    async semearAparelhoPendente() {
+      const dispositivoId = 'disp-' + crypto.randomUUID().slice(0, 8);
+      // Alfabeto sem O I L 0 1 (§1.3) — o codigo tem de ser digitavel, e um
+      // codigo de teste que usasse letra proibida seria recusado pela
+      // normalizacao antes de chegar na corrida, nas rotas reais.
+      const alfabeto = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+      const codigo = Array.from({ length: 6 }, () =>
+        alfabeto[crypto.randomInt(alfabeto.length)]).join('');
+      await pool.query(
+        `insert into dispositivo (dispositivo_id, pendente_id, estado, codigo_curto, criado_em)
+         values ($1, $2, 'pendente', $3, now())`,
+        [dispositivoId, 'pd-' + crypto.randomUUID().slice(0, 8), codigo]
+      );
+      return { dispositivoId, codigo };
+    },
+
+    /** A linha como ficou. É contra ela que se confere se o servidor mentiu. */
+    async lerAparelho(dispositivoId) {
+      const r = await pool.query('select * from dispositivo where dispositivo_id = $1', [dispositivoId]);
+      return r.rows[0] || null;
     },
 
     /** Linhas REALMENTE gravadas para este id_cliente. A metade que enxerga escrita dupla. */

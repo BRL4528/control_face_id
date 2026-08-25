@@ -217,3 +217,104 @@ export const VARIANTES = {
   marcacao: [marcacaoAtomica, marcacaoIngenua, marcacaoIngenuaComIndice],
   convite: [conviteAtomico, conviteIngenuo]
 };
+
+// ===========================================================================
+// APROVACAO DE APARELHO POR CODIGO  —  prova de posse fisica de uso unico
+// ===========================================================================
+//
+// Esta corrida e diferente das duas primeiras, e a diferenca importa para
+// quem for ler o resultado: aqui o dano NAO e uma linha duplicada. O aparelho
+// e um so e continua um so. O dano e o SERVIDOR MENTIR PARA O OPERADOR.
+//
+// /rh/aparelho/aprovar recebe `equipes_ids` no corpo (servidor-falso.js:1291) e
+// grava `aprovado_por` (:1319). Duas telas de RH digitando o mesmo codigo ao
+// mesmo tempo, cada uma com o SEU escopo de equipes:
+//
+//   ler-depois-gravar -> as duas leem 'pendente', as duas gravam, as duas
+//                        recebem 200 "aprovado". O aparelho fica com o escopo
+//                        de UMA delas. A outra pessoa foi informada de que
+//                        liberou o aparelho para a equipe dela, e nao liberou.
+//                        E a auditoria tem duas aprovacoes bem-sucedidas para
+//                        um codigo de uso unico -- "quem deixou este aparelho
+//                        entrar" passa a ter duas respostas.
+//
+// Por isso a assercao decisiva desta corrida nao e contagem, e COERENCIA:
+// o escopo persistido tem de pertencer a quem recebeu o 200. Um teste que so
+// contasse "o aparelho ficou ativo uma vez?" daria verde para o ingenuo, que
+// e exatamente o caso em que a prova de posse deixa de provar.
+
+const DDL_DISPOSITIVO_ATOMICO = `
+  create table if not exists dispositivo (
+    dispositivo_id text primary key,
+    pendente_id    text,
+    estado         text        not null,
+    codigo_curto   text,
+    criado_em      timestamptz not null,
+    equipes_ids    text[],
+    aprovado_por   text,
+    aprovado_em    timestamptz
+  );
+  -- Indice unico PARCIAL, como a interface manda: so onde estado='pendente'.
+  -- E ele que torna CODIGO_AMBIGUO (409, §1.3) estruturalmente impossivel.
+  -- No servidor falso essa impossibilidade vem de graca, porque
+  -- codigosPendentes e um Map indexado pelo proprio codigo -- e o arquivo
+  -- registra, na linha 1288, que por isso o caso "fica sem caminho de teste".
+  -- Num banco ela e uma escolha de DDL: sem este indice, dois pendentes podem
+  -- nascer com o mesmo codigo e aprovar por codigo passa a poder ativar o
+  -- aparelho ERRADO.
+  create unique index if not exists dispositivo_codigo_pendente
+    on dispositivo (codigo_curto) where estado = 'pendente';`;
+
+const DDL_DISPOSITIVO_SEM_INDICE = DDL_DISPOSITIVO_ATOMICO
+  .replace(/  -- Indice unico PARCIAL[\s\S]*$/, '');
+
+/**
+ * ATOMICA — compare-and-set. O unico caminho que ATIVA um aparelho, numa
+ * sentenca so, com a expiracao DENTRO da clausula (conferir expiracao numa
+ * leitura anterior e a janela que o campo existe para fechar).
+ */
+export const aprovacaoAtomica = {
+  nome: 'atomica',
+  ddl: DDL_DISPOSITIVO_ATOMICO,
+  async aprovarPorCodigo(pool, { codigo, criadoDepoisDe, equipesIds, usuario, agoraIso }) {
+    const r = await pool.query(
+      `update dispositivo
+          set estado = 'ativo', equipes_ids = $3, aprovado_por = $4,
+              aprovado_em = $5, codigo_curto = null
+        where codigo_curto = $1 and estado = 'pendente' and criado_em > $2
+      returning dispositivo_id`,
+      [codigo, criadoDepoisDe, equipesIds, usuario, agoraIso]
+    );
+    return { trocado: r.rowCount === 1 };
+  }
+};
+
+/**
+ * INGENUA — le, decide em JS, grava depois. Entre o SELECT e o UPDATE ha uma
+ * ida e volta de rede de verdade, e e nela que a segunda tela entra.
+ */
+export const aprovacaoIngenua = {
+  nome: 'ingenua',
+  ddl: DDL_DISPOSITIVO_SEM_INDICE,
+  async aprovarPorCodigo(pool, { codigo, criadoDepoisDe, equipesIds, usuario, agoraIso }) {
+    const atual = await pool.query(
+      'select dispositivo_id, estado, criado_em from dispositivo where codigo_curto = $1',
+      [codigo]
+    );
+    const linha = atual.rows[0];
+    if (!linha) return { trocado: false };
+    if (linha.estado !== 'pendente') return { trocado: false };
+    if (new Date(linha.criado_em).getTime() <= Date.parse(criadoDepoisDe)) return { trocado: false };
+
+    await pool.query(
+      `update dispositivo
+          set estado = 'ativo', equipes_ids = $2, aprovado_por = $3,
+              aprovado_em = $4, codigo_curto = null
+        where dispositivo_id = $1`,
+      [linha.dispositivo_id, equipesIds, usuario, agoraIso]
+    );
+    return { trocado: true };
+  }
+};
+
+VARIANTES.aprovacao = [aprovacaoAtomica, aprovacaoIngenua];

@@ -154,3 +154,72 @@ export function relatar(v) {
     .join('\n');
   return cabeca + '\n' + detalhe;
 }
+
+/**
+ * ALVO 3 — duas telas de RH aprovando o MESMO codigo ao mesmo tempo.
+ * Prova de posse fisica de uso unico (§1.3). Esta nas 8 rotas do teste.
+ *
+ * A assercao decisiva NAO e contagem — o aparelho e um so em qualquer caso.
+ * E COERENCIA: o escopo e o operador PERSISTIDOS tem de pertencer a quem
+ * recebeu o 200. Quando duas telas ganham, uma pessoa e informada de que
+ * liberou o aparelho para a equipe dela e nao liberou; e a auditoria passa a
+ * ter duas respostas para "quem deixou este aparelho entrar".
+ */
+export async function corridaAprovacao(alvo, { rodadas = RODADAS_PADRAO, simultaneas = SIMULTANEAS_PADRAO } = {}) {
+  const quebras = [];
+
+  for (let r = 0; r < rodadas; r++) {
+    const { dispositivoId, codigo } = await alvo.semearAparelhoPendente();
+
+    // Cada tela manda o SEU escopo e o SEU usuario. E o que torna visivel
+    // "quem ganhou de fato" versus "quem foi informado que ganhou".
+    const respostas = await emParalelo(simultaneas, async (i) => {
+      const resp = await fetch(`${alvo.base}/webhook/efrat/rh/aparelho/aprovar`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ codigo, usuario: `rh-${i}`, equipes_ids: [`eq-${i}`] })
+      });
+      return { usuario: `rh-${i}`, equipe: `eq-${i}`, status: resp.status, corpo: await lerJson(resp) };
+    });
+
+    const ganhadores = respostas.filter(x => x.status === 200 && x.corpo && x.corpo.ok === true);
+    const recusados = respostas.filter(x =>
+      x.status === 404 && x.corpo && x.corpo.erro && x.corpo.erro.codigo === 'CODIGO_NAO_ENCONTRADO').length;
+    const outros = respostas
+      .filter(x => !(x.status === 200 && x.corpo && x.corpo.ok === true)
+                && !(x.status === 404 && x.corpo && x.corpo.erro && x.corpo.erro.codigo === 'CODIGO_NAO_ENCONTRADO'))
+      .map(x => ({ http: x.status, codigo: x.corpo && x.corpo.erro && x.corpo.erro.codigo }));
+
+    const gravado = await alvo.lerAparelho(dispositivoId);
+
+    const falhas = [];
+    if (ganhadores.length !== 1) falhas.push(`aprovacoes bem-sucedidas=${ganhadores.length} (contrato: 1) <- prova de posse de uso unico usada ${ganhadores.length}x`);
+    if (recusados !== simultaneas - 1) falhas.push(`CODIGO_NAO_ENCONTRADO=${recusados} (contrato: ${simultaneas - 1})`);
+    if (outros.length) falhas.push(`respostas fora do contrato: ${JSON.stringify(outros.slice(0, 3))}`);
+    if (!gravado || gravado.estado !== 'ativo') falhas.push(`estado gravado=${gravado && gravado.estado} (contrato: ativo)`);
+
+    // A coerencia. Só é conferível quando houve exatamente um ganhador; com
+    // mais de um a falha já foi registrada acima, e apontar "o escopo é do
+    // outro" seria contar duas vezes o mesmo defeito.
+    if (ganhadores.length === 1 && gravado) {
+      const g = ganhadores[0];
+      if (gravado.aprovado_por !== g.usuario) {
+        falhas.push(`aprovado_por gravado=${gravado.aprovado_por} mas quem recebeu 200 foi ${g.usuario} <- o servidor mentiu para o operador`);
+      }
+      const escopo = Array.isArray(gravado.equipes_ids) ? gravado.equipes_ids.join(',') : String(gravado.equipes_ids);
+      if (escopo !== g.equipe) {
+        falhas.push(`equipes_ids gravado=[${escopo}] mas quem recebeu 200 pediu [${g.equipe}] <- aparelho ficou com escopo que ninguem confirmou`);
+      }
+    }
+
+    if (falhas.length) quebras.push({ rodada: r, dispositivoId, falhas, ganhadores: ganhadores.length });
+  }
+
+  return {
+    alvo: 'aprovacao-uso-unico',
+    rodadas, simultaneas,
+    quebrou: quebras.length > 0,
+    rodadasQuebradas: quebras.length,
+    quebras
+  };
+}
