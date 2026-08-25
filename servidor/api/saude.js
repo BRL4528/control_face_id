@@ -16,12 +16,22 @@ import { aplicarCors } from '../lib/origens.js';
 export default async function handler(req, res) {
   if (aplicarCors(req, res)) return;
 
+  // FORA de producao, a sonda diz TAMBEM em que banco ela caiu. Nao e
+  // inconsistencia com o paragrafo acima: o que nao pode vazar e a topologia da
+  // origem de PRODUCAO. Num preview a pergunta "estou no banco descartavel ou
+  // no da demo?" e exatamente o que precisa ser respondida ANTES de alguem
+  // rodar uma corrida que grava marcacao — e marcacao, por contrato, nunca e
+  // apagada. Descobrir isso depois nao tem conserto.
+  const revelaBanco = process.env.VERCEL_ENV !== 'production';
+
   let banco = 'sem_configuracao';
+  let nome = null;
   if (process.env.DATABASE_URL) {
     try {
       const sql = neon(process.env.DATABASE_URL);
-      await sql`select 1`;
+      const r = await sql`select current_database() as db`;
       banco = 'ok';
+      if (revelaBanco) nome = r[0].db;
     } catch {
       // Sem detalhe do erro na resposta: mensagem de driver vaza host e usuario.
       banco = 'indisponivel';
@@ -30,5 +40,7 @@ export default async function handler(req, res) {
 
   res.statusCode = banco === 'ok' ? 200 : 503;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.end(JSON.stringify({ ok: banco === 'ok', banco, servidor_hora: new Date().toISOString() }));
+  const corpo = { ok: banco === 'ok', banco, servidor_hora: new Date().toISOString() };
+  if (nome) { corpo.banco_nome = nome; corpo.ambiente = process.env.VERCEL_ENV || 'desconhecido'; }
+  res.end(JSON.stringify(corpo));
 }
