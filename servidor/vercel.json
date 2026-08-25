@@ -1,7 +1,20 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "regions": ["gru1"],
+  "buildCommand": "bash ./copiar-nucleo.sh",
+  "regions": [
+    "gru1"
+  ],
+  "rewrites": [
+    {
+      "source": "/efrat/:caminho*",
+      "destination": "/api/roteador?base=/efrat&caminho=:caminho*"
+    },
+    {
+      "source": "/webhook/efrat/:caminho*",
+      "destination": "/api/roteador?base=/webhook/efrat&caminho=:caminho*"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",

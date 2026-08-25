@@ -19,6 +19,78 @@ git log --oneline -1     # confira que está no commit combinado, NÃO em `main`
 
 ---
 
+## LEIA PRIMEIRO — o que só você consegue rodar
+
+Os comandos desta seção são **barrados no ambiente dos agentes** por um
+classificador de permissão local. Não é limitação da Vercel nem da conta. Nós
+preparamos tudo até a borda deles; a execução é sua.
+
+**Descobrir isso um a um amanhã custa uma parada por descoberta.** Por isso está
+aqui em cima, com a consequência de cada um — elas não são iguais, e é isso que
+diz onde gastar seu tempo primeiro.
+
+### 1. Publicar a API em produção — SEM ISSO NÃO HÁ TESTE
+
+```bash
+cd servidor && npm run publicar:prod && cd ..
+```
+
+Confira:
+
+```bash
+curl -s https://control-face-id-api.vercel.app/api/saude
+```
+
+**Esperado:** `{"ok":true,"banco":"ok","nucleo":"ok","rotas":8,...}`
+**Se `rotas` vier `0`:** a API subiu sem rota nenhuma. **PARE E CHAME A EQUIPE.**
+**Se não rodar:** não há API. O teste não acontece. **Prioridade máxima.**
+
+> `npm run publicar:prod` copia o núcleo do domínio e publica **no mesmo
+> comando**, de propósito: copiar hoje e publicar amanhã é como se fabrica uma
+> cópia velha.
+
+### 2. Publicar o app do operador em produção — SEM ISSO NÃO HÁ TESTE
+
+```bash
+vercel link --yes --project control-face-id --scope brl4528s-projects
+vercel deploy --prod --yes
+```
+
+Confira:
+
+```bash
+curl -sI https://control-face-id.vercel.app/ | grep -i content-security-policy
+```
+
+**Esperado:** um `connect-src` contendo `https://control-face-id-api.vercel.app`.
+**Se não rodar:** o cliente abre a versão antiga do app. O teste não acontece.
+
+### 3. Rotacionar o segredo de Protection Bypass — DEPOIS do teste
+
+O QA expôs esse segredo no terminal ao inspecionar `vercel curl -v`. Ele avisou
+por conta própria e **não o commitou**. Risco baixo (é preview, e o banco atrás
+é o descartável), mas é segredo e tem dono conhecido.
+
+No painel: **control-face-id-api → Settings → Deployment Protection → Protection
+Bypass for Automation → Regenerate**.
+
+**Não faça antes do teste:** é a única forma de o arnês do QA alcançar o preview,
+e rotacionar agora tira a medição sem ganho nenhum.
+**Se não rodar:** um segredo de preview segue válido. Não afeta o teste.
+
+### 4. Desligar Deployment Protection do preview — OPCIONAL
+
+Só se o QA pedir. Hoje ele já alcança o preview pelo bypass.
+**Se não rodar:** nada. Já está resolvido por outro caminho.
+
+### O que NÃO precisa da sua mão
+
+Já foi feito e conferido: banco provisionado e migrado, credenciais de teste,
+banco descartável do arnês, CSP nas três origens, guardas de CI, rewrites de
+rota. Você só publica e confere.
+
+---
+
 ## O mapa: três origens, e elas não são a mesma coisa
 
 | | Projeto Vercel | Onde | Publica o quê |
@@ -109,12 +181,13 @@ exercita. **Não é rota faltando.** Quem repetir este ambiente precisa rodar
 ## Passo 2 — Publicar a API
 
 ```bash
-cd servidor
-vercel deploy --prod --yes
-cd ..
+cd servidor && npm run publicar:prod && cd ..
 ```
 
-**Esperado:** termina com `readyState: "READY"` e `target: "production"`.
+**Esperado:** primeiro `nucleo/ copiado da raiz: N arquivos`, depois
+`readyState: "READY"` e `target: "production"`.
+
+Não use `vercel deploy --prod` direto: ele publica **sem** o núcleo do domínio.
 
 ### Conferir
 
@@ -125,11 +198,20 @@ curl -s https://control-face-id-api.vercel.app/api/saude
 **Esperado, literalmente:**
 
 ```json
-{"ok":true,"banco":"ok","servidor_hora":"..."}
+{"ok":true,"banco":"ok","nucleo":"ok","rotas":8,"servidor_hora":"..."}
 ```
 
-`"banco":"ok"` significa que a função **executou uma consulta no Postgres**, não
-que subiu. Se viesse `"banco":"indisponivel"` a resposta seria HTTP 503.
+Os três campos respondem coisas diferentes, e **todos** precisam estar certos:
+
+| campo | o que prova | se estiver errado |
+|---|---|---|
+| `"banco":"ok"` | a função **executou uma consulta** no Postgres | `"indisponivel"` → HTTP 503 |
+| `"nucleo":"ok"` | o núcleo do domínio foi **copiado no build e carrega** | `"ausente"` → publicou sem `npm run publicar:prod` |
+| `"rotas":8` | há **8 rotas registradas** | `0` → API vazia, e a resposta é 503 |
+
+**`"rotas":0` é 503 de propósito.** Uma origem de API sem rota nenhuma não está
+saudável, está vazia — e uma saúde que respondia `200` com zero rota foi
+exatamente o que escondeu, por horas, que nada estava publicado.
 
 > Produção **não** revela o nome do banco, e isso é proposital. Um preview
 > revela (`"banco_nome":"arnes"`), porque lá a pergunta "estou no banco
