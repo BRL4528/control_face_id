@@ -216,6 +216,34 @@ ele ainda; fica registrado como o próximo alvo natural, e como um lembrete de
 que "sem caminho de teste no servidor falso" e "impossível na API" são
 afirmações diferentes.
 
+## Duas guardas de construção que não guardam
+
+Achadas ao investigar um erro meu (`ctx.cripto` sem `sha256` derrubou uma
+medição com `TypeError`). A pergunta do API-4 foi a certa: *"`verificarCripto`
+não deveria ter pego isso?"*. Não pegou, e o motivo importa.
+
+**`verificarCripto` (`nucleo/contexto.js:35`) está exportada e não é chamada por
+ninguém.** Uma única ocorrência no repositório inteiro: a própria definição.
+Guarda morta — e parece ativa para quem lê o arquivo, que é o que a torna pior
+que a ausência dela.
+
+**`verificarRepositorio` (`nucleo/repositorio.js:98`) é chamada — mas pela
+implementação, não pela composição.** O único chamador é `nucleo/memoria.js:389`,
+no fim da própria fábrica. Cada repositório se autodeclara conferido.
+
+A assimetria: quem esquece um método é exatamente quem esqueceria a linha que
+detecta o método esquecido. E o repositório que mais precisa da guarda é o que
+ainda não existe — o adaptador Postgres do API-3 — enquanto o único protegido
+hoje é o de memória, escrito junto com a interface. **Guarda opcional protege
+quem já estava certo.** Sem ela, um método faltando não aparece no boot: aparece
+na primeira requisição que cair no buraco, que é literalmente o que o comentário
+do Arquiteto diz que ela existe para evitar.
+
+Ação barata já enviada ao API-3: terminar a fábrica com
+`return verificarRepositorio(repo)`. A correção estrutural — a composição chamar
+as duas guardas em vez de confiar na autoverificação — fica para depois do teste;
+mexer em composição de núcleo na véspera troca risco conhecido por desconhecido.
+
 ## Limite conhecido, declarado e não redescoberto
 
 **Idempotência continua ler-depois-gravar** (`nucleo/repositorio.js`,
