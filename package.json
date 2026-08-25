@@ -10,9 +10,10 @@
     "test:e2e": "playwright test",
     "serve": "node tests/e2e/servir.js",
     "pista": "./bin/pista",
-    "test:contrato": "node --test tests/contrato/*.test.js",
-    "test:contrato:api": "ARNES_ALVO=api ARNES_EXIGIR_BANCO=1 node --test tests/contrato/corrida-*.test.js",
-    "test:calibracao": "node --test tests/contrato/calibracao.test.js"
+    "test:contrato": "node --experimental-test-module-mocks --test-concurrency=1 --test tests/contrato/*.test.js",
+    "test:contrato:api": "ARNES_ALVO=api ARNES_EXIGIR_BANCO=1 node --experimental-test-module-mocks --test-concurrency=1 --test tests/contrato/corrida-*.test.js",
+    "test:calibracao": "node --experimental-test-module-mocks --test-concurrency=1 --test tests/contrato/calibracao.test.js",
+    "test:adaptador": "node --experimental-test-module-mocks --test-concurrency=1 --test tests/contrato/adaptador-real.test.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.50.0",
