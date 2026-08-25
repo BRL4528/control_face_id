@@ -529,9 +529,28 @@ export class Repositorio {
   // ==========================================================================
 
   /**
-   * §RH: autentica por usuario + chave (nao por token de aparelho). Devolve
-   * `{usuario, nome, sal, iteracoes, ativo}` e o material de conferencia da
-   * chave. A rota /rh/sal expoe SOMENTE sal e iteracoes.
+   * §RH: autentica por usuario + chave (nao por token de aparelho).
+   *
+   * DEVOLVE ESTES SEIS CAMPOS, e o sexto tem NOME e nao descricao:
+   *   { usuario, nome, sal, iteracoes, ativo, chave }
+   *
+   * `chave` e o material DERIVADO gravado (PBKDF2 do segredo com `sal` e
+   * `iteracoes`) -- nunca senha em claro. E o campo que decide o login:
+   * nucleo/http.js compara `req.corpo.chave` com ele.
+   *
+   * POR QUE ESTA ESCRITO ASSIM: a versao anterior desta doc nomeava CINCO
+   * campos e deixava o sexto -- o unico que decide o login -- como a frase "o
+   * material de conferencia da chave". Dois adaptadores escolheram dois nomes,
+   * os dois razoaveis: `chave` em memoria, `chave_hash` no Postgres (que e o
+   * nome da COLUNA, e o nome melhor). Ninguem errou; a interface nao disse. O
+   * resultado foi TODO login de RH devolvendo 401 com a senha certa, e tres das
+   * oito rotas do primeiro turno inalcancaveis na vespera do teste.
+   *
+   * A coluna PODE se chamar `chave_hash` -- e se chama, no Postgres. O
+   * adaptador apelida na saida (`{ ...linha, chave: linha.chave_hash }`). O nome
+   * do CAMPO do contrato e `chave`, e agora esta escrito em vez de suposto.
+   *
+   * A rota /rh/sal expoe SOMENTE `sal` e `iteracoes`.
    */
   async lerUsuarioRh(usuario) { this.#naoImplementado('lerUsuarioRh'); }
 

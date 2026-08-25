@@ -78,6 +78,27 @@ export async function autenticar(ctx, req, rota) {
 
   if (rota.auth === AUTH.RH) {
     const usuario = await ctx.repo.lerUsuarioRh(req.corpo.usuario);
+    // ADAPTADOR SEM O CAMPO `chave` NAO E SENHA ERRADA -- e contrato violado, e
+    // tem de dizer isso. Com `usuario.chave` undefined, a comparacao abaixo e
+    // sempre verdadeira e TODO login de RH devolve 401 "usuario ou senha
+    // invalidos": indistinguivel de senha errada, com a senha certa, a semente
+    // certa e a linha gravada certa. Custou tres das oito rotas na vespera do
+    // teste, e o 401 mandou procurar no lugar errado.
+    //
+    // RESSALVA QUE EU NAO ESCONDO, e e do QA julgar: 503 aqui distingue
+    // "usuario existe e o adaptador esta quebrado" de "usuario nao existe", e
+    // isso e um oraculo estreito de enumeracao. Aceitei porque a condicao so
+    // ocorre quando o adaptador nao devolve chave para NINGUEM -- ou seja,
+    // durante queda total do login de RH, quando nao ha login a proteger, e o
+    // diagnostico e o que encerra a queda. Discordando, o conserto e trocar por
+    // 401 e deixar so o console.error: reversao de uma linha.
+    if (usuario && usuario.chave == null) {
+      console.error('[api] lerUsuarioRh devolveu usuario SEM o campo `chave`. ' +
+        'O campo do contrato e `chave` (nucleo/repositorio.js); a coluna pode ' +
+        'se chamar chave_hash e o adaptador apelida na saida.');
+      return { ok: false, resposta: { status: 503,
+        corpo: erro('ADAPTADOR_SEM_CHAVE_RH', 'a origem nao consegue conferir credencial de RH') } };
+    }
     if (!usuario || req.corpo.chave !== usuario.chave) {
       // Corpo TEXTUAL, nao o objeto de erro do contrato: e o formato que o
       // painel do RH ja espera. Trocar aqui e mudanca de contrato, nao de
