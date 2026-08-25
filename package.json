@@ -5,13 +5,17 @@
   "type": "module",
   "description": "PWA de ponto por reconhecimento facial operado no celular do gestor",
   "scripts": {
-    "test": "npm run test:unit && npm run test:e2e",
+    "test": "npm run test:unit && npm run test:contrato && npm run test:e2e",
     "test:unit": "node --test tests/unit/*.test.js",
     "test:e2e": "playwright test",
     "serve": "node tests/e2e/servir.js",
-    "pista": "./bin/pista"
+    "pista": "./bin/pista",
+    "test:contrato": "node --test tests/contrato/*.test.js",
+    "test:contrato:api": "ARNES_ALVO=api ARNES_EXIGIR_BANCO=1 node --test tests/contrato/corrida-*.test.js",
+    "test:calibracao": "node --test tests/contrato/calibracao.test.js"
   },
   "devDependencies": {
-    "@playwright/test": "^1.50.0"
+    "@playwright/test": "^1.50.0",
+    "pg": "^8.23.0"
   }
 }
