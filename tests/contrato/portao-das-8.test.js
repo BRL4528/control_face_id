@@ -94,6 +94,7 @@ const ROTAS = [
 
 const medido = [];
 let controleNegativo = null;
+let identidade = null;
 // Calibracao: o portao ja nasceu VERMELHO (8/8 nao publicadas) e um portao que
 // nunca ficou verde pode estar quebrado NO SENTIDO VERDE -- por exemplo se a
 // lista de rotas tivesse um erro de digitacao, ele acusaria 404 para sempre e
@@ -103,6 +104,11 @@ let controleNegativo = null;
 const calibracao = [];
 
 /** @returns {{status: number|string, corpo: any}} */
+const url = r => BASE.replace(/\/$/, '') + r;
+const cabecalhos = () => Object.assign(
+  { 'content-type': 'application/json' },
+  BYPASS ? { 'x-vercel-protection-bypass': BYPASS } : {});
+
 async function bater(rota) {
   try {
     const r = await fetch(BASE.replace(/\/$/, '') + rota, {
@@ -126,7 +132,18 @@ const ehProtecao = x => !!(x.corpo && x.corpo.protection);
 before(async () => {
   if (!BASE) return;
 
-  // Controle negativo PRIMEIRO: sem ele, tudo abaixo pode ser ruido.
+  // PROCEDENCIA: quem respondeu. Impresso, nunca conferido — /api/saude e
+  // IDENTIDADE aqui, jamais atestado de saude; foi ele dizendo
+  // {"ok":true,"banco":"ok"} que fez as 8 parecerem de pe respondendo 404.
+  // Impresso INTEIRO de proposito: quando o DevOps acrescentar o sha do commit
+  // (T-B19BBE), ele aparece sozinho e "ambiente colado no numero" vira
+  // "ambiente E VERSAO" sem ninguem editar este arquivo na hora do aperto.
+  try {
+    const r = await fetch(url('/api/saude'), { headers: cabecalhos() });
+    identidade = JSON.parse(await r.text());
+  } catch { identidade = null; }
+
+  // Controle negativo: sem ele, tudo abaixo pode ser ruido.
   controleNegativo = await bater(ROTA_INEXISTENTE);
 
   for (const rota of ROTAS) {
@@ -134,6 +151,7 @@ before(async () => {
   }
 
   console.log(`\n[portao-das-8] ${BASE}`);
+  console.log(`  identidade: ${identidade ? JSON.stringify(identidade) : '(nao consegui ler /api/saude)'}`);
   console.log(`  controle negativo: ${controleNegativo.status}` +
     (controleNegativo.status === 404 ? ' (404 — a origem discrimina, medicao vale)'
                                      : ' <- NAO e 404: MEDICAO ANULADA'));
