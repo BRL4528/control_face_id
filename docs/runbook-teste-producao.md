@@ -31,6 +31,29 @@ diz onde gastar seu tempo primeiro.
 
 ### 1. Publicar a API em produção — SEM ISSO NÃO HÁ TESTE
 
+> **ANTES DE PUBLICAR, A SAÚDE DE PRODUÇÃO MENTE — e mente dizendo `ok:true`.**
+>
+> Se você conferir agora, vai ver o formato **velho**, de um deploy anterior:
+>
+> ```json
+> {"ok":true,"banco":"ok","servidor_hora":"..."}          ← MUNDO VELHO
+> ```
+>
+> Esse `ok:true` **não significa nada**: ele diz só que a função subiu e falou
+> com o banco. Não diz que existe rota nenhuma. Foi exatamente esse tipo de
+> `200` que fez cinco pessoas concluírem que o conjunto estava de pé quando
+> nada estava publicado.
+>
+> Depois de publicar, o formato é outro:
+>
+> ```json
+> {"ok":true,"banco":"ok","nucleo":"ok","rotas":8,...}    ← MUNDO NOVO
+> ```
+>
+> **Como saber em qual mundo você está, sem decorar nada:** procure os campos
+> `nucleo` e `rotas`. Se eles **não aparecem**, a resposta veio do deploy velho
+> e você ainda não publicou. Não existe `ok:true` legítimo sem `rotas`.
+
 ```bash
 cd servidor && npm run publicar:prod && cd ..
 ```
