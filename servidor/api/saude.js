@@ -31,21 +31,32 @@ export default async function handler(req, res) {
   // Entao a sonda carrega o adaptador, que por sua vez importa o nucleo: se a
   // copia faltou ou veio incompleta, a saude fica vermelha ANTES de alguem
   // depender disso.
-  let nucleo = 'ok';
-  try {
-    const { criarRepositorioPostgres } = await import('../persistencia/postgres.js');
-    if (typeof criarRepositorioPostgres !== 'function') nucleo = 'incompleto';
-  } catch {
-    nucleo = 'ausente';
-  }
-
-  // QUANTAS ROTAS ESTAO NO AR. Sem isto a saude mente: hoje ela respondia
-  // 200 com banco:ok e ZERO rota publicada, e cinco pessoas leram esse 200
-  // como "o conjunto esta de pe". Cada uma tinha medido o proprio pedaco de
-  // verdade; o buraco estava na junta, e a saude era o unico lugar que podia
-  // ter visto a junta — e nao olhava para ela.
-  const { roteador } = await import('../lib/rotas.js').then(m => m.carregarRotas());
+  // O SINAL PERCORRE O MESMO CAMINHO QUE A REQUISICAO, e por construcao —
+  // nao por lista.
+  //
+  // Duas versoes anteriores erraram do mesmo jeito, cada uma um degrau mais
+  // fundo: a primeira dizia 200 sem olhar rota nenhuma; a segunda importava
+  // persistencia/postgres.js e chamava isso de "nucleo ok", enquanto
+  // nucleo/dominio.js — que praticamente toda rota usa — nem carregava, porque
+  // reexporta funcoes puras de ../js/ que a copia de build nao trazia.
+  // Importar UM arquivo do nucleo prova que aquele arquivo carrega, nao que o
+  // nucleo carrega.
+  //
+  // Aqui a sonda MONTA O ROTEADOR REAL a partir da tabela real e RESOLVE uma
+  // rota, sem executa-la. O caminho resolvido sai da propria tabela, entao nao
+  // ha nome escrito a mao para ficar desatualizado. Se o roteador monta e
+  // resolve, entao tudo o que o despacho precisa carregou: rotas -> casos ->
+  // dominio -> js/coerencia + js/regras. Nao ha lista que possa ficar
+  // incompleta, porque nao ha lista.
+  const { roteador, erro: erroRotas } = await import('../lib/rotas.js').then(m => m.carregarRotas());
   const rotas = roteador ? roteador.caminhos().length : 0;
+
+  let nucleo = 'ausente';
+  if (roteador && rotas > 0) {
+    const primeira = roteador.caminhos()[0];
+    const achou = roteador.achar(primeira);
+    nucleo = achou && typeof achou.manipulador === 'function' ? 'ok' : 'incompleto';
+  }
 
   let banco = 'sem_configuracao';
   let nome = null;
@@ -66,7 +77,7 @@ export default async function handler(req, res) {
   const saudavel = banco === 'ok' && nucleo === 'ok' && rotas > 0;
   res.statusCode = saudavel ? 200 : 503;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  const corpo = { ok: saudavel, banco, nucleo, rotas, servidor_hora: new Date().toISOString() };
+  const corpo = { ok: saudavel, banco, nucleo, rotas, causa_rotas: rotas ? undefined : erroRotas, servidor_hora: new Date().toISOString() };
   if (nome) { corpo.banco_nome = nome; corpo.ambiente = process.env.VERCEL_ENV || 'desconhecido'; }
   res.end(JSON.stringify(corpo));
 }

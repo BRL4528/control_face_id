@@ -591,7 +591,19 @@ export function criarRepositorioPostgres({ connectionString } = {}) {
         SELECT usuario, nome, sal, iteracoes, chave_hash, ativo
           FROM efrat_usuario_rh WHERE usuario = ${usuario}
       `;
-      return linha || null;
+      if (!linha) return null;
+      // A COLUNA e `chave_hash`; o CAMPO que o resto do sistema le e `chave`.
+      // nucleo/http.js:81 compara `req.corpo.chave !== usuario.chave`, e a
+      // implementacao de referencia (nucleo/memoria.js, sobre o estado do
+      // servidor falso) devolve `chave`. Sem este apelido, `usuario.chave` e
+      // undefined e o login do RH falha SEMPRE — com a senha certa, com a
+      // semente certa e com a linha gravada certa.
+      //
+      // Achado por login de verdade contra a API no ar. A semente ja conferia a
+      // chave por re-derivacao e passava: a linha estava impecavel. O defeito
+      // morava na JUNTA entre a coluna e o leitor, que e o unico lugar que nem
+      // a semente nem o adaptador sozinhos conseguem ver.
+      return { ...linha, chave: linha.chave_hash };
     }
   };
 
