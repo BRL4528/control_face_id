@@ -56,17 +56,67 @@ jobs:
           node-version: 22
 
       - name: Sintaxe de todos os módulos
-        run: for f in js/*.js tests/e2e/*.js; do node --check "$f" || exit 1; done
+        run: |
+          # EXAUSTIVA POR CONSTRUÇÃO, e o motivo é concreto: a versão anterior
+          # varria `js/*.js tests/e2e/*.js` — duas pastas nomeadas à mão. No dia
+          # em que nucleo/ nasceu (API-1), ele nasceu SEM checagem nenhuma, e a
+          # guarda continuou verde dizendo "sintaxe de todos os módulos".
+          # Uma lista de pastas que alguém lembrou não é "todos".
+          #
+          # Agora o conjunto é derivado: todo .js versionado, menos os que não
+          # são nossos (vendor/, models/) e os que não são código-fonte.
+          alvos=$(git ls-files '*.js' '*.mjs' \
+            | grep -vE '^(vendor|models|node_modules)/' \
+            | grep -v '/node_modules/' || true)
+          if [ -z "$alvos" ]; then
+            echo "::error::nenhum .js encontrado — a guarda ficaria sem efeito"; exit 1
+          fi
+          falhou=0
+          for f in $alvos; do node --check "$f" || falhou=1; done
+          [ "$falhou" = 0 ] || { echo "::error::erro de sintaxe acima"; exit 1; }
+          echo "sintaxe conferida em $(echo "$alvos" | wc -l) arquivos"
 
       - name: Nenhum segredo aparente no código versionado
         run: |
-          if grep -rniE "(secret|api[_-]?key|bearer [a-z0-9]{16,}|ghp_[a-zA-Z0-9]{20,})" \
-               --include="*.js" --include="*.html" --include="*.json" \
-               js/ index.html manifest.json vercel.json; then
+          # servidor/ entrou na varredura, e e o alvo que mais importa: e a
+          # UNICA parte do repo que le segredo de ambiente (DATABASE_URL, senha
+          # do Postgres). O resto do projeto e site estatico, onde tudo que entra
+          # no bundle e publico por construcao — ali um "segredo" seria erro de
+          # conceito; aqui seria credencial de banco de producao no git.
+          #
+          # A varredura e sobre ARQUIVO VERSIONADO: .env e .env*.local estao no
+          # servidor/.gitignore e nunca chegam aqui. E o passo seguinte confere
+          # que continuam ignorados, porque gitignore tambem se edita por engano.
+          # tests/ fica de fora, e o motivo e chato de outra forma: os proprios
+          # testes DEFINEM padroes de deteccao de segredo (a guarda 5 de
+          # tests/unit/estaticos.test.js carrega /secret|password|bearer/ no
+          # codigo). Varrer tests/ com esta regra reprova o repo por causa das
+          # guardas do repo — ruido garantido, que treina todo mundo a ignorar.
+          # O caso perigoso em tests/ e credencial de verdade num arquivo de
+          # ambiente, e quem cobre isso e o passo seguinte, que varre TUDO.
+          alvos=$(git ls-files '*.js' '*.mjs' '*.html' '*.json' \
+            | grep -vE '^(vendor|models|tests)/' \
+            | grep -vE '(^|/)package-lock\.json$' || true)
+          test -n "$alvos" || { echo "::error::nenhum arquivo para varrer"; exit 1; }
+          if grep -rniE "(secret|api[_-]?key|bearer [a-z0-9]{16,}|ghp_[a-zA-Z0-9]{20,}|postgres(ql)?://[^\"'\''[:space:]]*:[^@\"'\''[:space:]]+@)" $alvos; then
             echo "::error::possível segredo commitado"
             exit 1
           fi
-          echo "nada encontrado"
+          echo "nada encontrado ($(echo "$alvos" | wc -l) arquivos)"
+
+      - name: Nenhum arquivo de ambiente versionado
+        run: |
+          # Uma string de conexao do Neon num .env commitado nao dispara a
+          # varredura acima em todo formato possivel, e um .env no repo publico
+          # e credencial de banco de PRODUCAO exposta. Aqui a regra e por
+          # AUSENCIA do arquivo, que e o mesmo padrao que isola as origens.
+          achados=$(git ls-files | grep -E '(^|/)\.env($|\.)' || true)
+          if [ -n "$achados" ]; then
+            echo "$achados"
+            echo "::error::arquivo de ambiente versionado — rode 'git rm --cached' e ROTACIONE o que estava nele"
+            exit 1
+          fi
+          echo "nenhum .env versionado"
 
       - name: O token do aparelho não pode estar no código
         run: |
@@ -262,10 +312,14 @@ jobs:
           # por isso é o lugar mais fácil de alguém colar um <script src="...">.
           publicados=$(git ls-files '*.html' '*.js' '*.css' '*.json' \
             | grep -vE '^(vendor|models|tests|docs|n8n|\.central-agentes|\.github)/' \
-            | grep -v '^package-lock\.json$')
+            | grep -vE '(^|/)package-lock\.json$')
+          # Qualquer package-lock.json, nao so o da raiz: servidor/ tem o seu, e
+          # lock cita registry.npmjs.org por definicao. Lock nao e asset servido.
           # publico/ entra de proposito: e a origem publica, o alvo mais exposto.
-          apibase_host=$(grep -oE "apiBase:\s*'https?://[^/']+" js/config.js | grep -oE 'https?://[^/'"'"']+' | head -1)
-          test -n "$apibase_host" || { echo "::error::nao consegui extrair o apiBase de js/config.js"; exit 1; }
+          # Valor EFETIVO, avaliado como o navegador avalia — nao o literal que
+          # o grep enxergava. Ver .github/scripts/origens.mjs (licao do T-F1E72A).
+          apibase_host=$(node .github/scripts/origens.mjs origens-permitidas)
+          test -n "$apibase_host" || { echo "::error::origens.json nao declarou origem nenhuma — a isencao ficaria cega"; exit 1; }
           echo "arquivos verificados:"; echo "$publicados" | sed 's/^/  /'
 
           proibidos='cdn\.jsdelivr\.net|unpkg\.com|cdnjs\.cloudflare\.com|fonts\.googleapis\.com|fonts\.gstatic\.com|ajax\.googleapis\.com|code\.jquery\.com|esm\.sh|skypack\.dev|googletagmanager\.com|google-analytics\.com'
@@ -286,6 +340,15 @@ jobs:
           # publico/js/ que cite origem externa deve falhar e ser uma decisao,
           # nao herdar isencao de vizinho.
           #
+          # servidor/vercel.json entra pelo $schema, mesma razao do vercel.json da
+          # raiz. E origens.json e a DECLARACAO das tres origens que esta propria
+          # guarda consulta — ele cita hostname por definicao, e .vercelignore o
+          # tira do deploy do app.
+          #
+          # A isencao de host agora usa o conjunto inteiro de origens.json e nao
+          # a apiBase do app sozinha: durante o corte n8n->API os dois hosts sao
+          # legitimos, e uma isencao de host unico reprovaria o corte no meio.
+          #
           # E o link do WhatsApp (wa.me) e NAVEGACAO, nao asset: um <a href> nao
           # carrega script, fonte nem imagem, entao nao e superficie de terceiro.
           # O contrato preve isso em §4.5 e a nota de la e literalmente para o
@@ -297,7 +360,9 @@ jobs:
             | grep -v '^vercel\.json:' \
             | grep -v '^publico/vercel\.json:' \
             | grep -vE 'href="https://wa\.me/' \
-            | { grep -v "^publico/js/config-face\.js:.*$apibase_host" || true; } || true)
+            | grep -v '^servidor/vercel\.json:' \
+            | grep -v '^origens\.json:' \
+            | { grep -vF "$apibase_host" || true; } || true)
           if [ -n "$sobra" ]; then
             echo "$sobra"
             echo "::error::origem externa em arquivo publicado — todo asset tem de ser local"
@@ -432,9 +497,13 @@ jobs:
           # deixava passar um fetch para qualquer outro host dentro dele — foi o
           # que eu fiz primeiro e a sabotagem pegou.
           # O host permitido sai do proprio js/config.js, entao ha uma fonte so.
-          apibase_host=$(grep -oE "apiBase:\s*'https?://[^/']+" js/config.js | grep -oE 'https?://[^/'"'"']+' | head -1)
-          test -n "$apibase_host" || { echo "::error::nao consegui extrair o apiBase de js/config.js — sem isso a isencao ficaria cega"; exit 1; }
-          echo "host permitido (apiBase de js/config.js): $apibase_host"
+          # Valor EFETIVO (nao grep) e agora o conjunto INTEIRO de origens
+          # declaradas: com o corte n8n->API a origem publica fala com duas
+          # durante a janela, e uma isencao de host unico ficaria cega para a
+          # outra exatamente quando o corte comecasse.
+          apibase_host=$(node .github/scripts/origens.mjs origens-permitidas)
+          test -n "$apibase_host" || { echo "::error::origens.json nao declarou origem nenhuma — a isencao ficaria cega"; exit 1; }
+          echo "hosts permitidos (origens.json):"; echo "$apibase_host" | sed 's/^/  /'
           if grep -rnE 'https?://' publico/ --include='*.html' --include='*.js' --include='*.css' \
                | grep -vF "$apibase_host"; then
             echo "::error::a origem publica nao pode citar origem externa — motor, fontes e modelos vem do build"
@@ -485,14 +554,17 @@ jobs:
             for (const d of ["default-src \x27self\x27", "script-src \x27self\x27", "font-src \x27self\x27", "frame-ancestors \x27none\x27"]) {
               if (!csp.includes(d)) falhar("a CSP da origem publica precisa de " + d);
             }
-            // O unico host externo tolerado e o apiBase do app.
+            // Os unicos hosts externos tolerados sao os declarados em
+            // origens.json. A versao anterior lia o apiBase por REGEX no texto
+            // de js/config.js — o literal, nao o valor efetivo — e so tolerava
+            // um host. Duas cegueiras: nao via sobreposicao de EFRAT_CFG
+            // (T-F1E72A) e reprovaria a janela de corte n8n->API, em que a
+            // pagina legitimamente pode falar com as duas. Quem decide agora e
+            // .github/scripts/guarda-origens.mjs, que roda em passo proprio e
+            // avalia o config como o navegador avalia.
             const externos = [...csp.matchAll(/https?:\/\/[^\s;]+/g)].map(m => m[0]);
-            const apiBase = fs.readFileSync("js/config.js", "utf8").match(/apiBase:\s*.(https?:\/\/[^\/\x27"]+)/)[1];
-            for (const h of externos) {
-              if (!h.startsWith(apiBase)) falhar("a CSP da origem publica libera host que nao e o apiBase: " + h);
-            }
-            if (!externos.length) falhar("a CSP da origem publica nao libera o apiBase — a pagina nao gravaria face nenhuma");
-            console.log("origem publica: cache, indexacao e CSP conferidos (apiBase " + apiBase + ")");
+            if (!externos.length) falhar("a CSP da origem publica nao libera backend nenhum — a pagina nao gravaria face nenhuma");
+            console.log("origem publica: cache, indexacao e CSP conferidos (" + externos.length + " host(s) externo(s), conferidos por guarda-origens.mjs)");
           '
 
       - name: O servidor de teste realmente ENVIA a política do _headers
@@ -584,6 +656,9 @@ jobs:
           fi
           echo "nenhum cabeçalho de teste fora de tests/ ($(echo "$alvos" | wc -l) arquivos varridos)"
 
+      - name: As três origens conferem entre si e com as CSPs (T-A4AAFD)
+        run: node .github/scripts/guarda-origens.mjs
+
       - name: npm run serve nunca aponta para produção (T-B1D7F6)
         run: |
           node --input-type=module -e '
@@ -601,6 +676,21 @@ jobs:
               console.error("::error::o servidor de teste entrega o app apontando para " + servida +
                 " — npm run serve registraria aparelho e bateria ponto em produção");
               process.exit(1);
+            }
+
+            // E nao pode ser NENHUMA das origens de producao declaradas. A
+            // checagem acima ja implicaria isto hoje, mas ela compara com o
+            // servidor local e nao nomeia ninguem: com a origem nova da API
+            // entrando no jogo, o dia em que "local" for resolvido de outro
+            // jeito o furo do T-B1D7F6 volta inteiro e calado. Aqui ele volta
+            // com o nome do host na tela.
+            const { declaradas } = await import("./.github/scripts/origens.mjs");
+            const { origens, legado } = declaradas();
+            for (const proibida of [origens.api, origens.app, origens.publica, legado].filter(Boolean)) {
+              if (servida === new URL(proibida).host) {
+                console.error("::error::npm run serve entrega o app apontando para a origem de PRODUCAO " + proibida);
+                process.exit(1);
+              }
             }
 
             // E o override que os specs injetam continua vencendo.
