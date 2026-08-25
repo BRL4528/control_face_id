@@ -15,7 +15,7 @@
 // 2026-08-25) -- e uma das duas razoes de a API existir.
 
 import { neon } from '@neondatabase/serverless';
-import { verificarRepositorio } from '../nucleo/repositorio.js';
+import { verificarRepositorio } from '../../nucleo/repositorio.js';
 
 export class NaoRevisado extends Error {
   constructor(nome) {
@@ -585,25 +585,35 @@ export function criarRepositorioPostgres({ connectionString } = {}) {
 
     // ==========================================================================
     // USUARIO DE RH
+    //
+    // So leitura, de proposito -- decisao do Orquestrador (2026-08-25), nao
+    // lacuna: nenhuma das 8 rotas do primeiro turno CRIA usuario de RH, e um
+    // inserirUsuarioRh aqui seria capacidade privilegiada de escrita que a
+    // producao carrega pra sempre sem nenhum caminho de produto exercitando
+    // ela. A linha de efrat_usuario_rh do teste nasce por SQL direto na
+    // semente do DevOps, excecao documentada. Gestao de usuario de RH como
+    // produto (rota, auth, auditoria de quem criou quem) e T-641E39. Ver o
+    // mesmo comentario em nucleo/repositorio.js -- se esta ausencia voltar
+    // como "necessidade tecnica" daqui a um mes, o motivo ja esta escrito
+    // nos dois lugares.
+    //
+    // P0 (achado do QA, 2026-08-25): a doc do metodo em nucleo/repositorio.js
+    // nomeia cinco campos e deixa o sexto -- "material de conferencia da
+    // chave", o unico que decide o login -- como frase, nao campo. memoria.js
+    // devolve `chave`; nucleo/http.js:81 compara `usuario.chave`. A coluna
+    // aqui chama chave_hash (nome melhor: e hash PBKDF2, nunca a chave em
+    // claro) mas o ALIAS na leitura tem de casar com o que http.js consome
+    // hoje -- e memoria.js, que ja e verde, nao vai mudar por minha causa.
+    // Opcao (a) do QA: risco zero pro que ja esta provado. Falta cartao
+    // pedindo ao Arquiteto pra NOMEAR este campo na interface (opcao c) --
+    // sem isso, o proximo adaptador escolhe um terceiro nome.
     // ==========================================================================
     async lerUsuarioRh(usuario) {
       const [linha] = await sql`
-        SELECT usuario, nome, sal, iteracoes, chave_hash, ativo
+        SELECT usuario, nome, sal, iteracoes, chave_hash AS chave, ativo
           FROM efrat_usuario_rh WHERE usuario = ${usuario}
       `;
-      if (!linha) return null;
-      // A COLUNA e `chave_hash`; o CAMPO que o resto do sistema le e `chave`.
-      // nucleo/http.js:81 compara `req.corpo.chave !== usuario.chave`, e a
-      // implementacao de referencia (nucleo/memoria.js, sobre o estado do
-      // servidor falso) devolve `chave`. Sem este apelido, `usuario.chave` e
-      // undefined e o login do RH falha SEMPRE — com a senha certa, com a
-      // semente certa e com a linha gravada certa.
-      //
-      // Achado por login de verdade contra a API no ar. A semente ja conferia a
-      // chave por re-derivacao e passava: a linha estava impecavel. O defeito
-      // morava na JUNTA entre a coluna e o leitor, que e o unico lugar que nem
-      // a semente nem o adaptador sozinhos conseguem ver.
-      return { ...linha, chave: linha.chave_hash };
+      return linha || null;
     }
   };
 
