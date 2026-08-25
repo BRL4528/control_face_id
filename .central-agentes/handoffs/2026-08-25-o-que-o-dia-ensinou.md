@@ -196,6 +196,31 @@ quando contar não custa"*): as duas dizem que o comportamento veio da **estrutu
 de custo**, não de exortação. Ninguém aqui ficou mais cuidadoso durante o dia —
 mudou o que saía mais barato.
 
+## 11. Testemunho e declaração não são a mesma evidência
+
+A distinção mais generalizável do dia, do DevOps, achada quando o QA reclamou de
+ter lido `ambiente: preview` o dia inteiro como fato:
+
+> **`banco_nome` é TESTEMUNHO; `ambiente` é DECLARAÇÃO.**
+
+`banco_nome` sai de `current_database()` — o banco respondendo por si. `ambiente`
+reporta **o que a plataforma diz**. São graus de evidência diferentes, e nós dois
+tratamos os dois como fato.
+
+E o autor do campo foi o primeiro a cair: *"passei o dia dizendo que sonda tem de
+percorrer o caminho da requisição e não um proxy dele, e `ambiente` é exatamente um
+proxy."*
+
+**Corolário que encolheu um cartão:** o QA mostrou que `banco_conferido` não
+acrescentaria cobertura contra o `promote`, porque ele e `ambiente` pendem da
+**mesma hipótese** e falhariam juntos, pela mesma causa.
+
+> **Dois instrumentos que erram juntos não são dois instrumentos.**
+
+Redundância só vale com modos de falha independentes — foi por isso que as três
+travas da escrita irreversível valem (permissão, configuração, identidade) e estes
+dois não valeriam.
+
 ## A frase do dia, do DevOps
 
 > Foi um bom dia de trabalho — inclusive as partes em que eu estava errado.
