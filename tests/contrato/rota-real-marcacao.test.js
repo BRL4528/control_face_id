@@ -127,9 +127,11 @@ test('a rota real segura a dedup quando o repositorio e atomico', pular, () => {
 
 test('a mesma rota REPROVA quando o repositorio e ler-depois-gravar', pular, () => {
   if (reprovar) assert.fail(reprovar);
-  assert.equal(
-    medido.ingenuo.rodadasQuebradas, RODADAS,
-    'A rota passou mesmo com repositorio ingenuo. Entao este teste nao esta medindo a ' +
-    'atomicidade do repositorio, e o verde do teste acima nao significa o que promete.'
+  // >= 1, e NAO === RODADAS — mesma razao de rota-real-aprovacao.test.js:
+  // a calibracao pergunta se o teste SABE reprovar, e uma rodada basta.
+  assert.ok(
+    medido.ingenuo.rodadasQuebradas >= 1,
+    `A rota passou em TODAS as ${RODADAS} rodadas com repositorio ingenuo. Entao este ` +
+    'teste nao esta medindo a atomicidade do repositorio, e o verde acima nao significa o que promete.'
   );
 });

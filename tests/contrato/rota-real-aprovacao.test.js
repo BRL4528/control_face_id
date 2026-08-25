@@ -167,9 +167,18 @@ test('aprovar() real: um codigo de uso unico ativa UMA vez, com repositorio atom
 
 test('a mesma aprovar() REPROVA quando o repositorio e ler-depois-gravar', pular, () => {
   if (reprovar) assert.fail(reprovar);
-  assert.equal(
-    medido.ingenuo.rodadasQuebradas, RODADAS,
-    'aprovar() passou mesmo com repositorio ingenuo — entao o verde acima nao mede a ' +
-    'prova de posse de uso unico, e nao vale como garantia.'
+  // >= 1, e NAO === RODADAS. A pergunta que a calibracao faz e "este teste
+  // SABE reprovar o ingenuo?", e uma rodada quebrada ja responde sim.
+  //
+  // Exigir as 5 foi defeito meu e me custou um vermelho intermitente: a
+  // deteccao por rodada e ~97,5% (medido: 39/40), entao P(as 5 quebrarem) e
+  // ~0,88 — ou seja ~12% de chance de a CALIBRACAO falhar sozinha, sem nada
+  // de errado com o instrumento. Rigor a mais no lugar errado nao deixa o
+  // teste mais forte: deixa ruidoso, e teste ruidoso e o que ensina a
+  // ignorar vermelho.
+  assert.ok(
+    medido.ingenuo.rodadasQuebradas >= 1,
+    `aprovar() passou em TODAS as ${RODADAS} rodadas com repositorio ingenuo. ` +
+    'Entao o verde acima nao mede a prova de posse de uso unico, e nao vale como garantia.'
   );
 });
