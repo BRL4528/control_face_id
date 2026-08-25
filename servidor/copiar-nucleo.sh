@@ -26,23 +26,42 @@ if [ -d ../nucleo ]; then
   cp -r ../nucleo nucleo
   echo "nucleo/ copiado da raiz: $(find nucleo -name '*.js' | wc -l) arquivos"
 
-  # O nucleo importa FUNCOES PURAS do cliente (../js/coerencia.js e
-  # ../js/regras.js): sao as mesmas regras que o navegador roda, e o ponto de
-  # elas serem compartilhadas e a API e o cliente nunca discordarem.
+  # O nucleo importa de FORA dele -- funcoes puras que o cliente tambem roda
+  # (js/coerencia.js, js/regras.js). Sao compartilhadas de proposito: e o que
+  # faz a API e o navegador nunca discordarem de regra.
   #
-  # A lista NAO e escrita a mao. Ela sai dos proprios imports, senao uma
-  # dependencia nova entra e o deploy quebra em runtime, na primeira
-  # requisicao -- que foi exatamente o que aconteceu quando rotas.js chegou
-  # trazendo dominio.js -> ../js/coerencia.js: a copia subiu sem esses dois e
-  # /api/saude acusou rotas:0.
-  mkdir -p js
-  deps=$(grep -rhoE "from '\.\./js/[a-zA-Z0-9_.-]+'" nucleo/ | sed "s#.*/js/##;s#'##" | sort -u)
-  test -n "$deps" || { echo "ERRO: nao consegui extrair as dependencias de ../js do nucleo"; exit 1; }
-  for f in $deps; do
-    test -f "../js/$f" || { echo "ERRO: nucleo importa js/$f e ele nao existe na raiz"; exit 1; }
-    cp "../js/$f" js/
+  # POR CONSTRUCAO, e nao por lista de dois nomes. A resolucao abaixo le os
+  # IMPORTS de verdade, copia o que eles pedem, e QUEBRA se aparecer um import
+  # que escape de nucleo/ por um caminho que este script nao sabe copiar.
+  # Hoje sao dois arquivos em js/; amanha dominio.js importa um terceiro, ou
+  # algo de outra pasta, e o script tem de falhar em vez de copiar de menos.
+  # Lista escrita a mao e como o .vercelignore e a guarda de sintaxe ficaram
+  # desatualizados neste mesmo repo.
+  rm -rf js
+  externos=$(grep -rhoE "from '\\.\\./[^']+'" nucleo/ \
+             | sed "s/from '//;s/'$//" | sort -u)
+  copiados=0
+  for imp in $externos; do
+    case "$imp" in
+      ../js/*)
+        arq="${imp#../js/}"
+        test -f "../js/$arq" || { echo "ERRO: nucleo importa $imp e o arquivo nao existe na raiz"; exit 1; }
+        mkdir -p js && cp "../js/$arq" "js/$arq"
+        copiados=$((copiados+1))
+        ;;
+      ../contexto.js|../dominio.js|../repositorio.js|../http.js|../memoria.js)
+        : # interno ao proprio nucleo (de nucleo/casos/), ja veio na copia
+        ;;
+      *)
+        echo "ERRO: nucleo importa '$imp', que escapa de nucleo/ por um caminho"
+        echo "  que este script nao sabe copiar. Acrescente o caso aqui -- ou a"
+        echo "  API sobe sem esse arquivo e quebra na primeira requisicao."
+        exit 1
+        ;;
+    esac
   done
-  echo "js/ compartilhado copiado: $(echo "$deps" | tr '\n' ' ')"
+  test "$copiados" -gt 0 || { echo "ERRO: nenhum arquivo externo copiado -- a resolucao de imports quebrou"; exit 1; }
+  echo "js/ compartilhado: $copiados arquivo(s), resolvidos dos imports"
 else
   test -d nucleo || {
     echo "ERRO: nao achei ../nucleo (a fonte) nem ./nucleo (a copia)."
