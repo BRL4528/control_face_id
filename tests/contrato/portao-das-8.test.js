@@ -19,10 +19,20 @@
 // isso o criterio e "qualquer coisa MENOS 404":
 //
 //   404  -> a rota nao esta publicada. E o defeito que este arquivo cacamos.
-//   400/401/403/422/429 -> a rota EXISTE e recusou a requisicao. E o esperado.
+//   4xx  -> a rota EXISTE e recusou a requisicao. E o esperado.
+//   5xx  -> a rota esta ROTEADA mas NAO ESTA DE PE. Tambem reprova (ver abaixo).
 //
-// Confundir os dois e o erro que ele previne: 401 parece falha e e sucesso
-// aqui; 404 parece "so falta configurar" e e a rota inexistente.
+// Confundir os dois primeiros e um erro que ele previne: 401 parece falha e e
+// sucesso aqui; 404 parece "so falta configurar" e e a rota inexistente.
+//
+// O 5xx entrou depois, avisado pelo Orquestrador a partir de uma mina real de
+// merge: o git junta dois consertos limpo, e SO PUBLICAR revela — a funcao
+// quebra com FUNCTION_INVOCATION_FAILED em TODAS as rotas enquanto /api/saude
+// continua VERDE. Com o criterio antigo ("qualquer coisa menos 404") o portao
+// chamaria as 8 de PUBLICADAS enquanto nenhuma responde. Quarta vez no mesmo
+// dia que um sinal tranquilizador aponta pro lugar errado.
+// Um 503 ADAPTADOR_SEM_CHAVE_RH cai aqui tambem, e deve: rota roteada com
+// adaptador quebrado nao e "de pe".
 //
 // ---------------------------------------------------------------------------
 // DEFEITO QUE ESTE ARQUIVO JA TEVE, achado pelo API-1 — e da familia que o
@@ -130,6 +140,8 @@ before(async () => {
   for (const m of medido) {
     const veredito = ehProtecao(m) ? 'PROTECAO (nao alcancou a API)'
       : m.status === 404 ? 'NAO PUBLICADA'
+      : typeof m.status === 'number' && m.status >= 500
+        ? 'QUEBRADA: ' + (m.corpo?.erro?.codigo || m.corpo?.code || 'funcao falhou')
       : typeof m.status === 'number' ? 'publicada' : 'erro';
     console.log(`  ${String(m.status).padEnd(6)} ${veredito.padEnd(30)} ${m.rota}`);
   }
@@ -178,6 +190,19 @@ test('as 8 rotas do primeiro turno estao publicadas (nenhuma 404)', pular, () =>
   const daPlataforma = medido.filter(ehProtecao).map(m => m.rota);
   assert.deepEqual(daPlataforma, [],
     'respostas vieram da PROTECAO da plataforma, nao da API: ' + daPlataforma.join(', '));
+  // 5xx ANTES de 404: rota roteada que explode e um estado diferente de rota
+  // inexistente, e a mensagem tem de dizer qual dos dois, senao manda procurar
+  // no lugar errado (roteamento vs. runtime).
+  const quebradas = medido
+    .filter(m => typeof m.status === 'number' && m.status >= 500)
+    .map(m => `${m.rota} -> ${m.status} ${m.corpo?.erro?.codigo || m.corpo?.code || ''}`.trim());
+  assert.deepEqual(
+    quebradas, [],
+    `${quebradas.length} rota(s) ROTEADAS mas QUEBRADAS (5xx). A rota existe e a funcao ` +
+    'falhou — nao e problema de roteamento, e de runtime/deploy. Se /api/saude estiver ' +
+    'verde ao mesmo tempo, e o caso classico: a saude nao exercita as rotas.\n  ' +
+    quebradas.join('\n  ')
+  );
   const ausentes = medido.filter(m => m.status === 404).map(m => m.rota);
   assert.deepEqual(
     ausentes, [],
