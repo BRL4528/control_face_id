@@ -85,13 +85,29 @@ export async function autenticar(ctx, req, rota) {
     // certa e a linha gravada certa. Custou tres das oito rotas na vespera do
     // teste, e o 401 mandou procurar no lugar errado.
     //
-    // RESSALVA QUE EU NAO ESCONDO, e e do QA julgar: 503 aqui distingue
-    // "usuario existe e o adaptador esta quebrado" de "usuario nao existe", e
-    // isso e um oraculo estreito de enumeracao. Aceitei porque a condicao so
-    // ocorre quando o adaptador nao devolve chave para NINGUEM -- ou seja,
-    // durante queda total do login de RH, quando nao ha login a proteger, e o
-    // diagnostico e o que encerra a queda. Discordando, o conserto e trocar por
-    // 401 e deixar so o console.error: reversao de uma linha.
+    // ESTE 503 E UM ORACULO DE ENUMERACAO, E ELE TEM DATA DE VALIDADE.
+    // Ele distingue "usuario existe e o adaptador esta quebrado" de "usuario
+    // nao existe". Julgado pelo QA e MANTIDO, com esta conta:
+    //
+    //   divulgacao marginal HOJE = zero, porque /rh/sal JA ENUMERA. Ela e
+    //   AUTH.ABERTA e devolve sal+iteracoes para usuario existente contra
+    //   "usuario ou senha invalidos" para inexistente -- de graca, em condicao
+    //   normal, sem depender de o adaptador estar quebrado (cartao T-1EF89D).
+    //   E a condicao aqui e tudo-ou-nada, nao seletiva por usuario: a coluna e
+    //   NOT NULL e o adaptador apelida no SELECT, entao "linha sem chave"
+    //   significa que NINGUEM entra.
+    //   contra o custo comprovado do 401 mentiroso, que mandou o QA procurar no
+    //   lugar errado e so nao custou mais porque ele reconferiu a re-derivacao
+    //   byte a byte contra o banco antes de acusar alguem.
+    //
+    // >>> DEPENDENCIA, e nao e "revisitar algum dia": quando T-1EF89D fechar e
+    // >>> /rh/sal parar de enumerar, ESTE 503 passa a ser o unico caminho de
+    // >>> enumeracao que sobrou e A CONTA INVERTE. Quem fechar T-1EF89D tem de
+    // >>> voltar aqui, senao fecha a enumeracao acreditando ter fechado e deixa
+    // >>> esta porta de pe. O conserto e trocar por 401 mantendo o
+    // >>> console.error: o diagnostico continua no log, so sai da resposta.
+    // Escrito aqui, e nao so no cartao, porque o cartao e onde a decisao vive e
+    // este e o lugar onde a pessoa que a desfaz esta olhando.
     if (usuario && usuario.chave == null) {
       console.error('[api] lerUsuarioRh devolveu usuario SEM o campo `chave`. ' +
         'O campo do contrato e `chave` (nucleo/repositorio.js); a coluna pode ' +
