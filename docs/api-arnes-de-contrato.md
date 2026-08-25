@@ -40,12 +40,13 @@ passar a linha de baixo.
 | Rota (caso de uso) do API-4 | `rota-real-*.test.js` | **MEDIDA** vs Postgres |
 | Adaptador do API-3, caminho de código | `adaptador-real.test.js` | **MEDIDO** vs Postgres |
 | Adaptador no driver e banco reais | `neon-real.test.js` | **MEDIDO** vs Neon |
-| **As 8 rotas estão publicadas?** | `portao-das-8.test.js` | **NÃO** — 8/8 respondem 404 |
-| Corridas por HTTP na pilha completa | — | **NÃO MEDIDA** (depende da linha acima) |
+| **As 8 rotas estão publicadas?** | `portao-das-8.test.js` | **SIM** — 8/8, em **preview** |
+| Corridas por HTTP na pilha completa | `corridas-http.test.js` | **MEDIDAS** — em **preview** |
 
-**As duas últimas linhas são o estado real da API hoje.** `servidor/api/roteador.js`
-existe e os rewrites funcionam; falta a **tabela de rotas** que ele despacha —
-por isso 404 e não 500: o roteador está vivo e não conhece caminho nenhum.
+**O ambiente faz parte do resultado.** Em 25/08 as 8 estão de pé em **preview**;
+**produção ainda responde 404** e tem `/api/saude` no formato velho. Um número
+verde sem o ambiente colado é lido como "a API está de pé", e alguém aponta o
+app para produção e recebe 404 nas oito. Sempre cole o ambiente no número.
 
 ### O buraco que quatro medições verdes não viram
 
