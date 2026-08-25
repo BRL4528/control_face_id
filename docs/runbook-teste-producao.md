@@ -273,6 +273,35 @@ Os três campos respondem coisas diferentes, e **todos** precisam estar certos:
 saudável, está vazia — e uma saúde que respondia `200` com zero rota foi
 exatamente o que escondeu, por horas, que nada estava publicado.
 
+### A PERGUNTA VEM ANTES DO CAMPO
+
+Os campos não têm todos o mesmo peso, e **qual deles manda depende do que você
+está perguntando**. Decida a pergunta primeiro:
+
+| Você quer saber | Quem responde |
+|---|---|
+| **"isto está funcionando?"** | `banco`, `nucleo`, `rotas` — eles observaram o que está executando |
+| **"isto é a versão que eu acabei de publicar?"** | **só** `commit` e `ref` |
+
+Para **"está funcionando"**, quando dois campos discordarem, acredite no
+primeiro grupo. Se `rotas:8` está verde e o `commit` parece estranho, o que
+está no ar funciona — investigue o carimbo, não a API.
+
+Para **"é a versão certa"**, o primeiro grupo é **mudo — e mudo não é
+concordar.** `rotas:8` diz que o roteador resolveu um caminho **neste**
+artefato. Não diz que este é o artefato **certo**. Um build antigo pode servir e
+responder `rotas:8` verde, porque ele funciona — só não é o que você publicou.
+
+> **É exatamente o estado de produção antes do passo 1.** A API responde com um
+> build anterior: nada confuso, nada quebrado, só velho. Aplicar a regra de
+> "está funcionando" a uma pergunta de versão faz você concluir "está tudo
+> certo" e parar de procurar — no único cenário em que precisa continuar.
+
+E uma armadilha no `arvore_suja`: **`true` é informação boa; `false` não é
+atestado.** Ele só diz que o repositório não tinha mudança não commitada no
+momento do carimbo — não diz nada sobre a montagem do artefato ter deixado
+arquivo para trás, que já aconteceu neste projeto. Não pare por causa dele.
+
 > Produção **não** revela o nome do banco, e isso é proposital. Um preview
 > revela (`"banco_nome":"arnes"`), porque lá a pergunta "estou no banco
 > descartável?" precisa de resposta antes de alguém gravar marcação.
