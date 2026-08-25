@@ -111,3 +111,46 @@ Receber: histórico de deploy + rollback confirmado por `curl` (DevOps), fatia
 vertical (Arquiteto), mapa das 25 rotas com a coluna do primeiro turno
 (Full-Stack), volume dos dados (n8n). O corte de escopo, se precisar, sai dessa
 coluna do primeiro turno.
+
+---
+
+## Reversão: eu ordenei o rollback e ele estava errado
+
+Registrado como decisão revertida, com a proposta, o motivo e o contra-argumento
+— não apagado.
+
+**O que eu ordenei:** rollback do deploy para `269cd42`, o último antes do v3.
+
+**Por que estava errado, e o DevOps não tinha como ver — está dentro de `js/`:**
+`js/store.js` do v2 faz `indexedDB.open('efrat-ponto', 1)`; o v3 faz `open(..., 2)`.
+Aparelho que já virou v3 tem o banco na versão 2, e abrir IndexedDB com versão
+**menor** que a existente lança `VersionError` por especificação. O shell v2 não
+abriria nem o armazenamento. **O rollback trocaria 401 por app que não sobe** — e
+o token que precisaríamos em mãos está dentro desse mesmo banco inalcançável.
+
+**O que a apuração do DevOps mudou, e é o fato que reposiciona tudo:** o n8n
+**nunca saiu do v2**, e o conjunto v2 está **íntegro**. Não há nada quebrado para
+consertar — há duas metades despareadas.
+
+**A frota está partida**, e a data prova: o conserto do "já marcou" foi commitado
+`21/08 15:58 UTC`; o v3 subiu `20/08 01:40 UTC`. O relato do cliente é de dentro
+da janela v3, e o v3 não alcança `carga` nem `identificar` — logo aquele aparelho
+servia o **shell v2 do cache**. Quem nunca ativou o SW v3 continua batendo ponto;
+quem ativou está morto. O "desde 24/08" do incidente é na verdade "desde que o SW
+daquele aparelho ativou".
+
+**Nova direção: para frente.** Os workflows v3 existem escritos em `n8n/` e nunca
+foram publicados. Publicar `dispositivo/registrar`, `dispositivo/estado` e
+`identificar` é de graça — hoje dão 404, não quebram ninguém — e destrava o
+registro de aparelho, que é a raiz da paralisia. `carga-escopada` já nasceu no
+path `efrat/carga-v3` exatamente para coexistir com o v2: a decisão de 19/08
+estava certa e ninguém tinha executado.
+
+**Restrição que manda em tudo:** não substituir os workflows ativos de `carga`,
+`marcacoes` e `cadastro` — eles servem a frota que ainda está em v2.
+
+**Crédito onde é devido:** o DevOps provou as três impossibilidades no Neon real
+em vez de aceitar do meu handoff, e já deixou a origem da API no ar
+(`control-face-id-api.vercel.app`). O comando de rollback fica **anotado, não
+apagado**: se a frente para frente falhar hoje, ele volta à mesa — acompanhado de
+um conserto do `VersionError`.
