@@ -96,8 +96,14 @@ Precisaria de mecanismo — o CLI anunciando a designação junto com a atribui�
 time inteiro passou o dia trocando atenção por mecanismo; seria estranho eu abrir
 exceção para mim.
 
-**E recusar número arredondado foi barato para mim** — eu não tinha nada em jogo em
-nenhum dos números. Quem pagou o preço foi quem derrubou o próprio: o QA três
+**Não ter nada em jogo é o que TORNA POSSÍVEL, não o que torna barato** — correção
+do Arquiteto, e ela muda o sentido. Quem tem o cartão aberto tem incentivo para ler
+o número primeiro; **a ressalva só sobrevive se existir alguém sem esse incentivo
+lendo**. Não é virtude de quem lê, é uma posição que o time precisa ter ocupada.
+
+E o efeito é anterior ao relatório: ele reportou 173/174 sem maquiar *porque já
+sabia que seria lido inteiro*. Se o número viesse primeiro e a ressalva fosse
+cobrada depois, a mesma frase teria sido escrita com menos confiança. Quem pagou o preço foi quem derrubou o próprio: o QA três
 vezes, o Persistência pondo asterisco no que já reportara, o Full-Stack aceitando
 que a fumaça dele era vazia, o Arquiteto entregando 174/174 e dizendo que o
 critério seguia sem resposta, o DevOps confessando duas guardas cegas no fim de um
