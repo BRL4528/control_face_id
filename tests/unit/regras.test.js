@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  tipoDaVez, vereditoPorDistancia, ranquear, precisaRevisao, emCooldown,
+  tipoDaVez, vereditoPorDistancia, ranquear, precisaRevisao, emCooldown, decisaoCooldown,
   itensParaRemover, itensRecusados, agoraCorrigido, calcularDeriva, cargaValida, euclidiana, dia,
   indicadores, espelho, gestorDeveMarcar,
   presencaPorEquipe, statusPresenca, serieDiaria, pendenciasPorMotivo, LIMIAR_PRESENCA,
@@ -68,6 +68,45 @@ test('cooldown impede marcacao repetida da mesma pessoa', () => {
   assert.equal(emCooldown('a', doDia, agora, 60000), true);
   assert.equal(emCooldown('b', doDia, agora, 60000), false);
   assert.equal(emCooldown('a', doDia, agora, 10000), false);
+});
+
+/**
+ * Achado de produção (cliente testando): reconhecer de novo quem acabou de
+ * marcar aqui, ainda na frente da câmera, virava a mensagem "já marcou agora
+ * há pouco" — o sistema acusando falha em quem tinha acabado de ter sucesso.
+ * decisaoCooldown() é a lógica que separa esse caso (silencioso) do caso em
+ * que o aviso continua útil (saiu e voltou depois, ainda em cooldown).
+ */
+test('decisaoCooldown: fora do cooldown geral segue fluxo normal (null), independente de presenca', () => {
+  const agora = Date.parse('2026-08-14T09:00:00Z');
+  const doDia = [{ pessoa_id: 'a', marcado_em: '2026-08-14T08:58:00Z' }]; // 120s atrás
+  assert.equal(decisaoCooldown('a', doDia, agora, 60000, true), null);
+  assert.equal(decisaoCooldown('a', doDia, agora, 60000, false), null);
+});
+
+test('decisaoCooldown: em cooldown e continua na frente desde que marcou aqui e "nada"', () => {
+  const agora = Date.parse('2026-08-14T09:00:00Z');
+  const doDia = [{ pessoa_id: 'a', marcado_em: '2026-08-14T08:59:57Z' }]; // 3s atrás
+  assert.equal(decisaoCooldown('a', doDia, agora, 60000, true), 'nada');
+});
+
+test('decisaoCooldown: em cooldown mas NAO continua na frente desde que marcou aqui e "mensagem" (saiu e voltou, ou chegou ja em cooldown de outro aparelho)', () => {
+  const agora = Date.parse('2026-08-14T09:00:00Z');
+  // mesmo poucos segundos atras: nao e o TEMPO que decide, e a presenca continua.
+  const doDia = [{ pessoa_id: 'a', marcado_em: '2026-08-14T08:59:57Z' }];
+  assert.equal(decisaoCooldown('a', doDia, agora, 60000, false), 'mensagem');
+});
+
+test('decisaoCooldown: mesmo muito tempo depois, presenca continua ainda e "nada" — nao e prazo, e presenca', () => {
+  const agora = Date.parse('2026-08-14T09:00:00Z');
+  const doDia = [{ pessoa_id: 'a', marcado_em: '2026-08-14T08:59:05Z' }]; // 55s atras, ainda dentro do cooldown de 60s
+  assert.equal(decisaoCooldown('a', doDia, agora, 60000, true), 'nada');
+});
+
+test('decisaoCooldown: pessoa diferente da que esta em cooldown segue fluxo normal (null)', () => {
+  const agora = Date.parse('2026-08-14T09:00:00Z');
+  const doDia = [{ pessoa_id: 'a', marcado_em: '2026-08-14T08:59:57Z' }];
+  assert.equal(decisaoCooldown('b', doDia, agora, 60000, true), null);
 });
 
 test('so sai da fila o que o servidor confirmou', () => {

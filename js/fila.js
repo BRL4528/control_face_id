@@ -9,7 +9,7 @@ import { Api } from './api.js';
 import { Face, DICA_ADORNO } from './face.js';
 import { Gestor } from './gestor.js';
 import {
-  tipoDaVez, vereditoPorDistancia, ranquear, emCooldown, agoraCorrigido,
+  tipoDaVez, vereditoPorDistancia, ranquear, decisaoCooldown, agoraCorrigido,
   euclidiana, dia
 } from './regras.js';
 import { $, esc, mostrar, toast, hora } from './ui.js';
@@ -35,6 +35,17 @@ function mensagemErroCadastro(erro) {
     || 'Falha ao enviar';
 }
 
+// Tempo que o comprovante fica na tela antes de reabrir a câmera sozinha
+// (comprovante()). Gestor tem mais tempo por causa do link "ver minha equipe".
+const COMPROVANTE_MS = { gestor: 6000, padrao: 3500 };
+
+// Quanto tempo sem detectar rosto nenhum até considerar que a pessoa saiu de
+// vista de verdade (rostoAusenteDesde, abaixo). Pequeno de propósito: existe
+// só pra um frame perdido por ruído normal (piscar, virar o rosto um
+// instante) não derrubar a continuidade à toa — não é uma janela de "acabou
+// de marcar", é debounce de detecção.
+const GRACA_AUSENCIA_ROSTO_MS = 1500;
+
 export const Fila = {
   dispositivo: null,
   carga: null,
@@ -49,6 +60,14 @@ export const Fila = {
   // Sessão de gestor (T-8FB792): só o servidor emite, só vive em memória
   // aqui (docs/adr-acesso-v3.md § Sessão facial do gestor). Nunca IndexedDB.
   sessaoGestor: null,
+  // Achado de produção: quem acabou de marcar e continua na frente da câmera
+  // não pode ser tratado como uma chegada nova quando o comprovante reabre a
+  // captura sozinha. `pessoaMarcouAquiId` guarda quem marcou por último AQUI
+  // — fica valendo enquanto o rosto não sumir de vista de verdade.
+  // `rostoAusenteDesde` é só o instante em que o rosto começou a sumir,
+  // usado internamente pelo debounce em `onQualidade` (ver `ligarCamera`).
+  pessoaMarcouAquiId: null,
+  rostoAusenteDesde: null,
 
   galeria() {
     return (this.carga.pessoas || []).concat(this.carga.sem_cadastro || []);
@@ -61,6 +80,8 @@ export const Fila = {
     this.dispositivo = dispositivo; this.carga = carga; this.deriva = deriva || 0;
     this.aoSair = aoSair;
     this.falhas = 0;
+    this.pessoaMarcouAquiId = null;
+    this.rostoAusenteDesde = null;
     mostrar('fila');
     $('cartao').innerHTML = '';
     await this.recarregarDia();
@@ -81,6 +102,18 @@ export const Fila = {
       $('camOff').classList.add('hide');
       Face.iniciar(v, $('overlay'), {
         onQualidade: q => {
+          // Continuidade de presença (achado de produção — ver
+          // `pessoaMarcouAquiId` acima): roda em TODO frame, mesmo durante
+          // 'processando', porque é sobre o rosto na câmera, não sobre o
+          // estado da fila.
+          if (q.rosto) {
+            this.rostoAusenteDesde = null;
+          } else {
+            if (this.rostoAusenteDesde == null) this.rostoAusenteDesde = Date.now();
+            else if (Date.now() - this.rostoAusenteDesde >= GRACA_AUSENCIA_ROSTO_MS) {
+              this.pessoaMarcouAquiId = null;
+            }
+          }
           if (this.estado === 'processando') return;
           const base = !q.rosto ? DICA_ADORNO : q.msg;
           $('dica').textContent = base + (Face.latencia ? ' · ' + Face.latencia + ' ms' : '');
@@ -174,7 +207,17 @@ export const Fila = {
   },
 
   confirmarCandidato(pessoa, dist, veredito, cap, online) {
-    if (emCooldown(pessoa.pessoa_id, this.doDia, Date.now(), cfg().cooldownMs)) {
+    const continuaAqui = this.pessoaMarcouAquiId === pessoa.pessoa_id;
+    const decisao = decisaoCooldown(pessoa.pessoa_id, this.doDia, Date.now(), cfg().cooldownMs, continuaAqui);
+    if (decisao === 'nada') {
+      // Achado de produção: mesma pessoa que acabou de marcar aqui, ainda na
+      // frente da câmera — o reabrir automático do comprovante reconheceu
+      // ela de novo. Não é falha, e não repete a mensagem: só volta a
+      // esperar um rosto diferente, em silêncio.
+      this.estado = 'aguardando';
+      return;
+    }
+    if (decisao === 'mensagem') {
       return this.falhou(pessoa.nome.split(' ')[0] + ' já marcou agora há pouco');
     }
     this.falhas = 0;
@@ -301,6 +344,10 @@ export const Fila = {
 
   async registrar(pessoa, cap, veredito, dist, origem, motivo) {
     this.estado = 'processando';
+    // Achado de produção: a partir daqui, enquanto o rosto dela não sumir de
+    // vista (onQualidade acima), um novo reconhecimento é a MESMA presença
+    // continuando, não uma chegada nova — decisaoCooldown() lê isso.
+    this.pessoaMarcouAquiId = pessoa.pessoa_id;
     const quando = agoraCorrigido(this.deriva);
     const tipo = tipoDaVez(this.doDia.filter(m => m.pessoa_id === pessoa.pessoa_id));
     const pos = await this.posicao();
@@ -385,7 +432,7 @@ export const Fila = {
     this._t = setTimeout(() => {
       $('cartao').innerHTML = '';
       this.estado = 'aguardando';
-    }, ehGestor ? 6000 : 3500);
+    }, ehGestor ? COMPROVANTE_MS.gestor : COMPROVANTE_MS.padrao);
   },
 
   async sincronizar() {

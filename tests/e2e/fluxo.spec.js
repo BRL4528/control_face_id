@@ -228,12 +228,58 @@ test('a tela marca entrada e depois saida do colaborador', async ({ page }) => {
   expect(tipos).toEqual(['entrada', 'saida']);
 });
 
-test('cooldown bloqueia a mesma pessoa em sequencia', async ({ page }) => {
+// Achado de produção (cliente testando, T-URGENTE-COOLDOWN): o comprovante
+// reabre a câmera sozinha depois de exibir (js/fila.js comprovante()), e se
+// a pessoa não saiu da frente, o mesmo rosto é reconhecido de novo bem ali —
+// o sistema "acusava falha" (mensagem de cooldown) em quem tinha acabado de
+// ter sucesso. js/regras.js decisaoCooldown() tem cobertura exaustiva da
+// lógica pura (tests/unit/regras.test.js); os dois testes abaixo provam a
+// FIAÇÃO real: o caminho que não deve mostrar nada, e o caminho que ainda
+// precisa mostrar, lado a lado — sem o segundo, o primeiro só prova que a
+// mensagem sumiu, não que ela some pelo motivo certo.
+
+test('mesma pessoa parada na frente depois do comprovante nao repete a mensagem, e o loop continua vivo', async ({ page }) => {
   await abrir(page, ctx.url, 'p-ana');
   await aprovarDispositivo(page, ctx);
   await abrirPonto(page);
   await marcar(page, 'p-ana');
-  await expect(page.locator('#cartao')).toContainText('já marcou', { timeout: 25000 });
+  // marcar() já esperou o comprovante fechar. p-ana continua "na frente"
+  // (rosto fingido não mudou) — o reabrir automático reconhece ela de novo
+  // dentro da janela curta (COMPROVANTE_MS.padrao 3500 + folga 2000 = 5500ms
+  // em js/fila.js). Espera cobrir esse ciclo inteiro com folga.
+  await page.waitForTimeout(6000);
+  // ANCORA NEGATIVA sozinha seria vácua — provaria só que o teste não viu a
+  // mensagem, não que ela não apareceu por estar corrigida. A prova de que
+  // o ciclo realmente rodou e foi silenciado de propósito, e não que o loop
+  // travou ou nunca reconheceu nada, é o passo seguinte: reconhecer OUTRA
+  // pessoa com sucesso normal, provando que a fila continua viva em
+  // 'aguardando', não travada nem mostrando aviso que só não deu tempo de
+  // aparecer.
+  expect(await page.locator('#cartao').textContent()).not.toContain('já marcou');
+  const outra = await marcar(page, 'p-bruno');
+  expect(outra.recibo).toContain('ENTRADA');
+});
+
+test('pessoa em cooldown que nao acabou de marcar aqui ainda mostra a mensagem', async ({ page }) => {
+  await abrir(page, ctx.url, 'p-ana');
+  await aprovarDispositivo(page, ctx);
+  await abrirPonto(page);
+  // Chama confirmarCandidato() direto em vez de esperar o reconhecimento
+  // natural: simula "marcou em outro aparelho e chegou aqui" (ou "saiu e
+  // voltou depois") sem depender de tempo real de câmera/reconhecimento, e
+  // sem o mesmo risco de corrida do reconhecimento automático que o teste
+  // acima já cobre pelo caminho real. 30s atrás fica dentro do cooldown de
+  // 60s e fora da janela curta de 5,5s — é exatamente o caso que o aviso
+  // continua existindo para cobrir.
+  await page.evaluate(() => {
+    const pessoa = window.__EFRAT.Fila.galeria().find(p => p.pessoa_id === 'p-ana');
+    window.__EFRAT.Fila.doDia = [{
+      pessoa_id: 'p-ana', tipo: 'entrada',
+      marcado_em: new Date(Date.now() - 30000).toISOString()
+    }];
+    window.__EFRAT.Fila.confirmarCandidato(pessoa, 0.1, 'aceito', null, false);
+  });
+  await expect(page.locator('#cartao')).toContainText('já marcou', { timeout: 5000 });
 });
 
 // R1 (docs/plano-v3.md): /efrat/carga passa a ser escopado por equipe do
