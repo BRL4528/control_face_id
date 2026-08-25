@@ -66,42 +66,24 @@ intocadas, até API-4 portar — rota a rota, com os 174 verdes a cada passo.
 
 ---
 
-## ⚠️ `nucleo/` NÃO CARREGA SOZINHO NA ORIGEM DA API (aberto em 25/08)
+## `nucleo/` importa de `js/`, e a origem da API precisa dos dois
 
 `nucleo/dominio.js` importa `../js/coerencia.js` e `../js/regras.js` — as
-funções puras compartilhadas com o cliente, fonte única de propósito.
-`servidor/copiar-nucleo.sh` copia **só `nucleo/`**. Dentro de `servidor/`, esses
-imports resolvem para `servidor/js/coerencia.js`, **que não existe**:
+funções puras compartilhadas com o cliente, fonte única de propósito. A origem
+da API tem raiz própria (`servidor/`), então o núcleo chega lá por **cópia de
+build** (`servidor/copiar-nucleo.sh`).
 
-```
-Cannot find module .../servidor/js/coerencia.js
-        imported from .../servidor/nucleo/dominio.js
-```
+Em 25/08 essa cópia levava só `nucleo/`, e nada que importasse `dominio.js`
+carregava — `Cannot find module .../servidor/js/coerencia.js`. **Resolvido:** o
+script deriva a lista dos próprios `import`s do núcleo e aborta o build se algum
+faltar, então dependência nova entra sozinha e dependência quebrada mata o
+build. Verificado nos dois sentidos, inclusive por sabotagem.
 
-Consequência: nada que importe `dominio.js` carrega — e `aparelho.js` e
-`marcacao.js` importam. A API sobe e toda rota falha.
+Duas lições que sobrevivem ao conserto, porque a família se repetiu cinco vezes
+naquele dia:
 
-**E o sinal mentia:** `/api/saude` reportava `"nucleo":"ok"` porque conferia que
-os **arquivos** estavam lá, não que o domínio **importa**. Quarta ocorrência da
-mesma família num dia. Conferir arquivo não prova nada; `await
-import('nucleo/dominio.js')` prova.
-
-### O preview de 25/08 está CONTAMINADO — não confie nele
-
-O preview `control-face-id-cli25ofks` só carrega porque **`servidor/js/` foi
-criado à mão**, na máquina de quem publicou:
-
-```
-mkdir -p servidor/js && cp js/coerencia.js js/regras.js servidor/js/
-```
-
-Isso **não** está em `copiar-nucleo.sh`, **não** é versionado e **não** se
-reproduz. Qualquer redeploy de outra máquina — inclusive o de produção — volta a
-quebrar, e volta a quebrar com `/api/saude` dizendo `nucleo: ok`.
-
-**Não commite `servidor/js/`.** Ele é contorno, não conserto. O conserto é no
-`copiar-nucleo.sh` (dono: DevOps), e tem de ser **por construção** — copiar o
-que `nucleo/` de fato importa — e não uma lista de dois arquivos que a próxima
-dependência fura em silêncio.
-
-Enquanto isso: um verde nesta origem mede **o código**, e não **o deploy**.
+- **Conserto por construção, não por lista.** "Copie esses dois arquivos"
+  resolveria o caso e furaria em silêncio na próxima dependência.
+- **Prove o mecanismo, não o artefato.** `/api/saude` dizia `"nucleo":"ok"`
+  conferindo que os arquivos existiam, não que o domínio importava. Arquivo
+  presente não prova nada; `await import('nucleo/dominio.js')` prova.
