@@ -32,7 +32,19 @@ export async function obterCarga(ctx, req) {
   // — e o dado mais barato da secao, e forma a REFERENCIA (o modelo_id mais
   // recente visto no caminho do app). Tolerado ausente: cliente antigo nao
   // quebra o sincronismo por isso.
-  if (req.corpo.modelo_id) await ctx.repo.definirReferenciaModeloApp(req.corpo.modelo_id);
+  //
+  // Duas escritas, nao uma: definirReferenciaModeloApp SO move a referencia
+  // (nucleo/memoria.js:336 -- de proposito, um metodo faz uma coisa).
+  // registrarModeloObservado e quem alimenta a tabela de observacao
+  // (primeira/ultima aparicao, origens) que o servidor falso pre-extracao
+  // fazia nas DUAS junto (fechado no closure antigo `definirReferenciaModeloApp`).
+  // Achado na auditoria dos blocos removidos (T-D3DC5C, pedido do
+  // Orquestrador) -- nenhum e2e cobre estado.modelosObservados hoje, entao
+  // essa perda era invisivel por construcao.
+  if (req.corpo.modelo_id) {
+    await ctx.repo.registrarModeloObservado(req.corpo.modelo_id, 'app', req.agoraIso);
+    await ctx.repo.definirReferenciaModeloApp(req.corpo.modelo_id);
+  }
 
   const pessoas = await ctx.repo.listarPessoas();
   return {
