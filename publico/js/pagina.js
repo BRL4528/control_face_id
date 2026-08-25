@@ -5,7 +5,7 @@
 // js/fila.js, js/gestor.js, js/cripto.js, nem `mostrar` de js/ui.js (é a
 // função que aponta pro painel do RH — não tem lugar aqui).
 import { $, esc, toast } from './ui.js';
-import { Face } from './face.js';
+import { Face, avaliarPoseLote } from './face.js';
 import { ApiFace } from './api-face.js';
 
 const cfg = () => window.EFRAT_CFG;
@@ -41,6 +41,13 @@ const MENSAGENS_LOTE = {
   COERENCIA_INSUFICIENTE: 'As 3 fotos ficaram muito diferentes entre si, então não deu pra usar esse cadastro. Tire as 3 de novo, com calma, uma de cada vez.',
   FOTOS_IGUAIS: 'As 3 fotos ficaram iguais demais, então não deu pra usar esse cadastro. Tire as 3 de novo, mexendo um pouco a cabeça entre elas.'
 };
+
+// Gate de pose ENTRE as 3 fotos (T-5EC67B/T-A17B32), local ao cliente —
+// `avaliarPoseLote` nunca manda landmark ao servidor (js/regras.js:427).
+// Mesmo princípio de §4.4 dos códigos acima: é gate de QUALIDADE, não de
+// identidade, então não consome o link.
+const MENSAGEM_POSE_INCONSISTENTE =
+  'As 3 fotos ficaram com a pose muito diferente entre si. Tire as 3 de novo olhando reto pra frente, do mesmo jeito nas três.';
 
 let capturas = []; // { descritor, thumb }
 
@@ -99,6 +106,14 @@ async function tirarFoto() {
     if (!r.ok) { telaCaptura(mensagemErroFoto(r.motivo)); return; }
     capturas.push(r);
     if (capturas.length < 3) { telaCaptura(); return; }
+    const pose = avaliarPoseLote(capturas.map(c => c.landmarks), cfg());
+    if (!pose.ok) {
+      // Mesma regra de §4.4 aplicada acima: reseta o lote e deixa tentar de
+      // novo na mesma sessão, sem consumir o link.
+      capturas = [];
+      telaCaptura(MENSAGEM_POSE_INCONSISTENTE);
+      return;
+    }
     await enviar();
   } finally {
     capturando = false;

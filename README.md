@@ -356,6 +356,7 @@ Detalhes em [`docs/oclusao-e-roteiro.md`](docs/oclusao-e-roteiro.md) e [`docs/va
 - A deduplicação depende de **envio único em voo** no cliente, porque a Data Table do n8n não tem índice único. Há teste cobrindo isso.
 - O servidor **não reconfere a biometria** — a decisão é a que veio do aparelho. Fragilidade conhecida enquanto o adversário for o gestor; resolve quando a extração do embedding migrar para o servidor.
 - Uma empresa só, sem isolamento por tenant. Token sem expiração.
+- **O cadastro não recusa uma foto por "queixo baixo" isolada — só compara a pose das 3 fotos entre si.** Medir se uma cabeça está inclinada, sozinha, exigiria assumir um valor de referência do que é "olhar reto pra frente", e esse valor muda de pessoa pra pessoa (formato de rosto, idade). Cravar esse valor recusaria mais gente com um formato de rosto do que com outro — e faria isso sem ninguém decidir que era essa a intenção. Por isso o sistema não tenta: ele é cego a inclinação absoluta de cabeça, **igual para todo mundo, de propósito**. O que ele checa é diferente: se as 3 fotos do mesmo cadastro têm pose parecida entre si — se uma foto vier com a cabeça muito mais baixa que as outras duas, o cadastro pede para repetir as 3 fotos.
 
 Nada disso é acidente: o piloto existe para medir FNMR, FTA, latência e taxa de registro manual em campo.
 

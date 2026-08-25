@@ -3,6 +3,28 @@
 import { euclidiana, yaw } from './regras.js';
 import { calcularModeloId } from './modelo.js';
 
+// Re-exportada para quem monta o lote de 3 fotos (T-A17B32): a página
+// pública tem fecho de import fechado e só pode importar deste módulo, não
+// direto de regras.js (publico/js/pagina.js:1-6) — então o gate de pose
+// (js/regras.js:427, "SÓ RODA NO CLIENTE") passa por aqui.
+export { avaliarPoseLote } from './regras.js';
+
+// Landmarks fixas, rosto de frente, para o modo fingido (`window.__EFRAT_FAKE_FACE`):
+// sem isto, `capturas[i].landmarks` viria `undefined` em teste e
+// `avaliarPoseLote` quebraria ao ler `.positions`. Mesma pose nas 3 capturas
+// fingidas → inconsistência zero → gate nunca reprova o que já passava antes
+// desta mudança.
+const LANDMARKS_FINGIDAS = {
+  positions: (() => {
+    const p = [];
+    p[36] = { x: 100, y: 150, z: 0 };
+    p[45] = { x: 200, y: 150, z: 0 };
+    p[30] = { x: 150, y: 190, z: 20 };
+    p[8] = { x: 150, y: 255, z: 5 };
+    return p;
+  })()
+};
+
 const cfg = () => window.EFRAT_CFG;
 
 const NORM = 160;
@@ -264,7 +286,7 @@ export const Face = {
       const semente = String(f.pessoa || 'x');
       for (let i = 0; i < 128; i++) base[i] = ((semente.charCodeAt(i % semente.length) * (i + 7)) % 100) / 100;
     }
-    return { descritor: base, thumb: 'data:image/jpeg;base64,TEST', qualidade: { ok: true, sharp: 300, bright: 120 } };
+    return { descritor: base, thumb: 'data:image/jpeg;base64,TEST', qualidade: { ok: true, sharp: 300, bright: 120 }, landmarks: LANDMARKS_FINGIDAS };
   },
 
   /**
@@ -400,7 +422,7 @@ export const Face = {
       if (dets && dets.length === 1) {
         const det = dets[0];
         const q = avaliar(det, cv, det.detection.box);
-        if (q.ok) return { ok: true, descritor: Array.from(det.descriptor), thumb: miniatura(cv, det.detection.box, 128), qualidade: q };
+        if (q.ok) return { ok: true, descritor: Array.from(det.descriptor), thumb: miniatura(cv, det.detection.box, 128), qualidade: q, landmarks: det.landmarks };
         if (i === max - 1) return { ok: false, motivo: 'qualidade', qualidade: q };
       } else if (i === max - 1) {
         return { ok: false, motivo: 'sem_rosto' };
