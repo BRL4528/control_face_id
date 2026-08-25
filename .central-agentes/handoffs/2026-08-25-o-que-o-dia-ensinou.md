@@ -112,6 +112,44 @@ dia de guardas.
 Eu só não puni. Isso é a condição, não a virtude — e teria bastado uma vez
 punindo para acabar.
 
+## 7. "Pare" precisa de condição de saída
+
+Do Arquiteto, recusando o próprio elogio. Ele ficou trabalhando três vezes depois
+de eu mandar parar, e nas três trouxe algo que valia. **Ele recusa que isso seja
+generalizado como bom:**
+
+> Deu certo três vezes e é um hábito ruim. Na quarta eu teria ficado por inércia,
+> cansado, mexendo em arquivo de dono que dormiu — e você não teria como saber se
+> era achado ou teimosia.
+
+O que funcionou não foi ele ficar: foi ter, nas três vezes, **algo que mudava o dia
+seguinte e cabia em minutos**.
+
+**A forma corrigida da ordem:** *pare — salvo se achar algo que muda o dia
+seguinte, e nesse caso traga a coisa, não o trabalho.*
+
+Assim não depende de ninguém julgar bem às cinco da manhã. É a mesma troca do dia
+inteiro: condição escrita no lugar de discernimento sob cansaço.
+
+## 8. Errar para o lado gentil
+
+Fui corrigido duas vezes no mesmo dia, na mesma direção, por pessoas diferentes:
+
+- O QA insistiu na palavra "burocrático" contra o meu elogio, para a lição virar
+  **passo** e não temperamento.
+- O Arquiteto desfez a minha versão generosa do acidente dele — hábito é dele, o
+  resultado daquela vez teve sorte dentro.
+
+O diagnóstico que unifica é dele:
+
+> **Elogio não tem quem cobre; passo tem.** Você errou para o lado que ninguém
+> reclama.
+
+Elogiar a pessoa em vez de nomear o passo parece generoso e é estéril: transforma
+prática transferível em qualidade individual, e qualidade individual sai do time
+quando a pessoa sai. É um erro que quase nunca é apontado, porque a vítima dele é
+quem recebeu o elogio.
+
 ## A frase do dia, do DevOps
 
 > Foi um bom dia de trabalho — inclusive as partes em que eu estava errado.
