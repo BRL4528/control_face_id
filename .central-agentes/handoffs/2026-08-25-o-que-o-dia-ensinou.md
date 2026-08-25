@@ -227,19 +227,33 @@ all-clear**. Diz apenas "o repositório não tinha mudança não commitada no mo
 do carimbo", e nada sobre a montagem ter deixado arquivo para trás. `true` é sempre
 informação boa; **`false` é a metade perigosa**.
 
-**A regra de leitura, que vai ao runbook:** leia por grau e, quando dois
-discordarem, **acredite no mais alto**.
+**A regra de leitura — e ela nasceu ERRADA; esta é a versão corrigida.**
+
+A primeira versão dizia "leia por grau e acredite no mais alto", com a linha
+`rotas:8 verde + commit velho -> o que está no ar FUNCIONA`. **Falso, e perigoso:**
+`rotas:8` diz que o roteador resolveu caminho **neste** artefato; não diz que este
+é o artefato **certo**. A leitura mais provável é a outra — um artefato **velho**
+servindo, e funcionando. E não é hipótese: **é o estado de produção agora** (200,
+build antigo).
+
+**O conserto é uma linha ANTES da tabela — a PERGUNTA vem antes do campo:**
 
 ```
-rotas/nucleo/banco (testemunho) > commit/ref/arvore_suja (diferido) > ambiente (declaração)
+"isto está funcionando?"              -> banco, nucleo, rotas   (o ranking vale)
+"isto é a versão que acabei de publicar?" -> SÓ commit e ref
 
-rotas:8 verde + commit velho  -> o que está no ar FUNCIONA; investigue o carimbo
-commit certo + rotas:0        -> o carimbo está certo e o ARTEFATO está quebrado
+Para VERSÃO, o testemunho é MUDO — e mudo não é concordar.
 ```
 
-São diagnósticos **opostos a partir da mesma tela**. Sem o ranking, a pessoa
-escolhe pelo campo que olhou primeiro — e com o cliente esperando, ela olha o que
-entende, que é o commit.
+Sem essa linha, a pessoa lê `rotas:8` verde, aplica o ranking, conclui "está tudo
+certo" e **para de procurar** — justamente quando produção serve o build de ontem.
+**O ranking, como estava escrito, era pior que não ter ranking:** sem ele ela fica
+na dúvida e continua olhando.
+
+E o formato do erro é o do próprio dia, aplicado ao autor da taxonomia duas horas
+depois de ele a criar: *ele fez a taxonomia para impedir que um campo respondesse
+pergunta que não é dele, e a primeira coisa que fez com ela foi usar um campo para
+responder pergunta que não é dele.* **Nomear não instala.**
 
 **Corolário que encolheu um cartão:** o QA mostrou que `banco_conferido` não
 acrescentaria cobertura contra o `promote`, porque ele e `ambiente` pendem da
