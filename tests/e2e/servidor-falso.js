@@ -554,6 +554,16 @@ export function criarServidor(opts = {}) {
           // gate). Aqui o equivalente e so contar quando a autenticacao nao
           // rejeitou -- senao um 401 de credencial errada conta como chamada
           // de RH, que o contador antigo nunca fez.
+          //
+          // PREMISSA que este `!== 401` carrega, e que nao e garantida por
+          // construcao (achado do Orquestrador, 2026-08-25): hoje nenhuma
+          // das tres rotas abaixo devolve 401 por motivo NENHUM alem de
+          // AUTH.RH rejeitar -- entao status!==401 e um proxy seguro de
+          // "autenticou". Se qualquer uma delas passar a devolver 401 por
+          // outra razao (ex.: sessao/token proprio no futuro), este contador
+          // passa a SUBCONTAR silenciosamente -- ele so erra pra menos, entao
+          // nao quebra teste nenhum, so mente. Se alguma das tres ganhar um
+          // 401 novo, confira este `if` antes de confiar no numero.
           if (resposta.status !== 401
               && ['/efrat/rh/aparelho/aprovar', '/efrat/rh/aparelhos', '/efrat/rh/face/cadastrar'].includes(requisicao.caminho)) {
             estado.chamadas.rh = (estado.chamadas.rh || 0) + 1;
