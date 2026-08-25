@@ -39,7 +39,25 @@ quebras num **arquivo executável**. E o limite recursivo continua, mas num luga
 muito melhor: **um arquivo só que falha alto, em vez de N guardas que mentem
 baixo.**
 
-Não decidido: é desenho de processo, e não se decide na madrugada da véspera.
+**E o QA fechou a recursão, em vez de deixá-la aberta como eu tinha feito:**
+
+> Remova a possibilidade em vez de acertar a coordenação; mande alguém tentar
+> derrubar o que você removeu; **e aceite que o último elo dessa corrente é sempre
+> humano e periódico, nunca automático.**
+
+A prova está no próprio dia: quem derrubou o portão dele foi **o Arquiteto**, não
+um teste dele. E as duas guardas cegas do DevOps foram achadas **por acidente**.
+A regressão é real e não fecha sozinha.
+
+**E uma inversão que ele descobriu vivendo:** o portão das 8 só tinha ficado
+**vermelho**. *Portão que nunca ficou verde pode estar quebrado no sentido verde* —
+a calibração habitual prova que o instrumento sabe reprovar, e não que sabe
+aprovar. Ele calibrou contra um servidor que serve as 8. E essa calibração, por sua
+vez, nunca foi derrubada por ninguém.
+
+Não decidido: é desenho de processo, e não se decide na madrugada da véspera. Fica
+aberto **de propósito** — fechá-lo virando mais um teste seria fingir que o último
+elo é automático.
 
 ## 3. Rotular a procedência é um PASSO DO TRABALHO
 
