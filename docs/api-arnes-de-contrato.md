@@ -26,6 +26,45 @@ Num banco, com driver de verdade, há E/S entre ler e gravar. A mesma linha de
 código passa a perder a corrida. Por isso a medição tem de acontecer **onde a
 propriedade custa**.
 
+## O QUE ESTÁ MEDIDO, E EM QUE CAMADA — leia isto primeiro
+
+Atualizado em 25/08. Cada linha é uma camada diferente, e uma camada verde **não
+diz nada** sobre a de cima. Foi exatamente somar camadas verdes que quase deixou
+passar a linha de baixo.
+
+| Camada | Arquivo | Estado |
+|---|---|---|
+| Instrumento sabe reprovar? | `calibracao.test.js` | **AFERIDO** — 3 corridas × 3 implementações |
+| Adaptador em memória mede corrida? | `memoria-nao-mede.test.js` | **NÃO, e está provado** |
+| Reconhecimento tem rosto no banco? | `prontidao-reconhecimento.test.js` | **MEDIDO** |
+| Rota (caso de uso) do API-4 | `rota-real-*.test.js` | **MEDIDA** vs Postgres |
+| Adaptador do API-3, caminho de código | `adaptador-real.test.js` | **MEDIDO** vs Postgres |
+| Adaptador no driver e banco reais | `neon-real.test.js` | **MEDIDO** vs Neon |
+| **As 8 rotas estão publicadas?** | `portao-das-8.test.js` | **NÃO** — 8/8 respondem 404 |
+| Corridas por HTTP na pilha completa | — | **NÃO MEDIDA** (depende da linha acima) |
+
+**As duas últimas linhas são o estado real da API hoje.** `servidor/api/roteador.js`
+existe e os rewrites funcionam; falta a **tabela de rotas** que ele despacha —
+por isso 404 e não 500: o roteador está vivo e não conhece caminho nenhum.
+
+### O buraco que quatro medições verdes não viram
+
+| quem | mediu | atravessava a Vercel? |
+|---|---|---|
+| QA | casos de uso direto | não |
+| API-4 | fumaça in-process (`criarServidor()`) | não |
+| API-3 | adaptador vs Postgres e Neon | não |
+| API-2 | `/api/saude` | é a única função publicada |
+
+Quatro medições honestas, todas verdes, e o conjunto respondia 404 para as 8
+rotas. `/api/saude` devolvendo `{"ok":true,"banco":"ok"}` fazia tudo **parecer**
+de pé — o sinal mais tranquilizador possível apontando para o lugar errado.
+
+A lição não é "desconfiem mais", que é inacionável. É que a pergunta **"e a
+junta?"** não era tarefa de ninguém: ficou implicitamente do Orquestrador porque
+*sobrou*, não porque foi atribuída. **Medição fim-a-fim é item de trabalho com
+dono e arquivo, não um resumo que emerge de somar relatórios.** Agora tem os dois.
+
 ## O que o arnês mede
 
 Dois alvos, os dois sob **concorrência real** (8 requisições simultâneas, 5
@@ -141,10 +180,30 @@ tempo.
 ## Como rodar
 
 ```bash
-npm run test:contrato      # tudo: as duas corridas + a calibração
-npm run test:calibracao    # só a aferição do instrumento
-npm run test:contrato:api  # A MEDIÇÃO QUE VALE (exige API-4; veja abaixo)
+npm run test:contrato   # tudo o que roda sem credencial (containers descartáveis)
+npm run test:calibracao # só a aferição do instrumento
+npm run test:adaptador  # adaptador do API-3 vs Postgres em container
+npm run test:neon       # adaptador vs Neon real   (exige ARNES_PG_URL_ESCRITA)
+npm run test:portao     # as 8 rotas estão publicadas? (exige ARNES_API_BASE)
 ```
+
+Variáveis, todas opcionais — sem elas os testes que dependem delas **pulam com
+motivo declarado**, nunca passam vazios:
+
+| Variável | Para quê |
+|---|---|
+| `ARNES_PG_URL` | leitura no banco da demo (`neondb`) — sondas de contagem |
+| `ARNES_PG_URL_ESCRITA` | escrita no banco **descartável** (`arnes`) |
+| `ARNES_API_BASE` | origem HTTP da API, para o portão das 8 |
+| `ARNES_BYPASS` | `x-vercel-protection-bypass` de preview protegido |
+| `ARNES_EXIGIR_BANCO=1` | troca pulo por **reprovação** — é como o CI roda |
+
+`ARNES_PG_URL_ESCRITA` tem trava própria: se apontar para qualquer banco que não
+seja `arnes`, `neon-real.test.js` **reprova em vez de rodar**. Aquele arquivo
+grava marcações e não consegue limpar — marcação, por contrato, nunca é
+alterada, então erro ali é irreversível por desenho. Duas travas com donos e
+modos de falha independentes: a do DevOps por permissão (`GRANT`), a minha por
+configuração. As duas caírem juntas exige dois enganos sem relação.
 
 Não usa Playwright e não usa navegador — **não disputa a pista** (`bin/pista`).
 Sobe um `postgres:16-alpine` descartável, ou usa `ARNES_PG_URL` se ela existir.
@@ -259,7 +318,7 @@ teste que reprova por uma escolha deliberada é teste que alguém vai desligar.
 
 Escopo honesto, para ninguém ler garantia onde não há:
 
-- Só **3 das 25 rotas**. São as que justificam a existência da API e as que gateiam o teste; as
+- Corridas em **3 das 25 rotas** (o portão das 8 confere publicação, não comportamento). São as que justificam a existência da API e as que gateiam o teste; as
   outras 22 seguem provadas pelos e2e contra o servidor falso — o que, para
   elas, é adequado, porque não dependem de atomicidade.
 - Autenticação, limite de volume, coerência das 3 fotos e idempotência **não
