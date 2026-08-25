@@ -41,11 +41,20 @@ baixo.**
 
 Não decidido: é desenho de processo, e não se decide na madrugada da véspera.
 
-## 3. Rotular é engenharia, não acabamento
+## 3. Rotular a procedência é um PASSO DO TRABALHO
 
-Do QA. Ele foi pendurar a identidade da origem no número por razão burocrática —
-deixar o relatório menos ambíguo — e **foi isso que expôs que o teste que grava
-não tinha trava de ambiente**. Não foi rigor, foi arrumação.
+Não é acabamento, e não é temperamento de quem faz. Registro assim porque o QA
+insistiu na palavra "burocrático" de propósito, contra o meu elogio:
+
+> Se ficar como "o QA é cuidadoso", morre comigo. Se ficar como "rotular a
+> procedência é um passo do trabalho, e ele encontra coisa que medir não
+> encontra", o próximo faz sem precisar ser eu.
+
+**Temperamento não se delega.** O passo, sim.
+
+O caso: pendurar a identidade da origem no número **expôs que o teste que grava
+não tinha trava de ambiente** — um risco vivo desde que as rotas subiram, que
+nenhuma das medições anteriores tinha alcançado.
 
 > Dizer de onde o resultado veio obriga a percorrer o caminho que o produziu, e é
 > aí que aparece o que o resultado sozinho nunca mostraria.
