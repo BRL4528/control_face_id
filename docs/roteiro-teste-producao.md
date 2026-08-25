@@ -266,15 +266,11 @@ pontos abaixo contra os erros reais que a API devolve.
 - Passo 2, "Código inválido": é fallback do app (`r.erro || 'Código
   inválido'`) — se a API preencher `r.erro` com outra coisa, o texto real
   na tela muda.
-- Passo 3, erro ao "Salvar biometria": RESOLVIDO em 2026-08-25 — Biometria
-  (bdf5f40f33) vai implementar reuso do texto já aprovado de `js/fila.js`
-  (COERENCIA_INSUFICIENTE/FOTOS_IGUAIS/VETORES_INVALIDOS, mesma família de
-  captura ao vivo) em `salvarBiometria()` de `js/rh.js`, em vez do texto de
-  "escolha de arquivo" do upload. Aval dado, texto do roteiro já atualizado
-  para as 3 frases reais. **Confirmar antes do teste que o commit realmente
-  saiu** — se não sair a tempo, o texto real ainda será o cru (`bio.erro` ou
-  "Falha ao gravar biometria"), e a coluna "se vier diferente" do Passo 3
-  precisa voltar pra genérica.
+- Passo 3, erro ao "Salvar biometria": FECHADO e confirmado por e2e (8/8
+  verde, Biometria/bdf5f40f33, 2026-08-25) — `salvarBiometria()` em
+  `js/rh.js` agora reusa o texto já aprovado de `js/fila.js`
+  (COERENCIA_INSUFICIENTE/FOTOS_IGUAIS/VETORES_INVALIDOS). Texto do roteiro
+  já é o real, sem ressalva pendente.
 - `VETORES_INVALIDOS` no upload (js/rh.js) segue sem decodificar — combinado
   que fica pra depois por ser caminho quase inalcançável (client já bloqueia
   os 3 slots antes do botão habilitar). Não afeta o roteiro de amanhã
