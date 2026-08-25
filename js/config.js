@@ -21,7 +21,17 @@
 // pega (T-F1E72A), mas só depois. Decisão e motivo em docs/fase3-contrato.md
 // § Restrição de arquitetura, item 1.
 window.EFRAT_CFG = Object.assign({
-  apiBase: 'https://n8n.samasc.com.br/webhook', // se alterar o domínio, atualize connect-src em _headers e vercel.json
+  // A API PRÓPRIA. Trocado do n8n em 25/08/2026, decisão do Orquestrador: as 8
+  // rotas do primeiro turno vivem aqui, e no n8n as três de aparelho nunca
+  // foram publicadas — apontar para lá faria `registrar` dar 404 e mandar todo
+  // mundo procurar no lugar errado.
+  //
+  // ISTO E A CSP VIAJAM JUNTOS, SEMPRE, NO MESMO DEPLOY. connect-src em
+  // _headers E em vercel.json já libera esta origem e o n8n ao mesmo tempo, de
+  // propósito: voltar é editar só esta linha, e volta que exige republicar CSP
+  // não é volta. Há guarda de CI conferindo que a apiBase EFETIVA (avaliada
+  // como o navegador avalia, não grepada) está no connect-src dos dois.
+  apiBase: 'https://control-face-id-api.vercel.app',
 
   // Distância euclidiana entre descritores de 128 dimensões.
   limiarAceite: 0.45,   // abaixo disso registra direto

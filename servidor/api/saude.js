@@ -10,6 +10,9 @@
 // Nao devolve nome de banco, versao, host nem contagem de tabela: sonda publica
 // e sem autenticacao, entao ela diz VIVO ou NAO, e nada sobre a topologia.
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { neon } from '@neondatabase/serverless';
 import { aplicarCors } from '../lib/origens.js';
 
@@ -74,10 +77,28 @@ export default async function handler(req, res) {
 
   // rotas === 0 e 503 DE PROPOSITO. Uma origem de API sem rota nenhuma nao esta
   // saudavel, esta vazia — e o custo de chamar isso de 200 ja foi medido hoje.
+  // QUAL COMMIT ESTA NO AR (T-B19BBE). Carimbado no build por
+  // copiar-nucleo.sh, porque a Vercel nao injeta VERCEL_GIT_COMMIT_SHA em
+  // deploy por CLI.
+  //
+  // SHA COMPLETO, 40 caracteres, combinado com o QA: dois instrumentos
+  // mostrando recortes diferentes do mesmo commit produzem exatamente a duvida
+  // que este campo existe para matar. Com o inteiro nao ha recorte que possa
+  // divergir — qualquer recorte do outro lado e prefixo deste.
+  //
+  // `arvore_suja` vale tanto quanto o sha. Deploy feito com mudanca nao
+  // commitada tem um sha que MENTE sobre o que esta no ar, e sha que mente e
+  // pior que sha ausente: ausencia nao atesta nada, atestado falso atesta.
+  let versao = { commit: null, ref: null, arvore_suja: null };
+  try {
+    const aqui = path.dirname(fileURLToPath(import.meta.url));
+    versao = JSON.parse(fs.readFileSync(path.join(aqui, '..', 'versao.json'), 'utf8'));
+  } catch { /* sem carimbo: os campos ficam null e isso ja e a informacao */ }
+
   const saudavel = banco === 'ok' && nucleo === 'ok' && rotas > 0;
   res.statusCode = saudavel ? 200 : 503;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  const corpo = { ok: saudavel, banco, nucleo, rotas, causa_rotas: rotas ? undefined : erroRotas, servidor_hora: new Date().toISOString() };
+  const corpo = { ok: saudavel, commit: versao.commit, ref: versao.ref, arvore_suja: versao.arvore_suja, banco, nucleo, rotas, causa_rotas: rotas ? undefined : erroRotas, servidor_hora: new Date().toISOString() };
   if (nome) { corpo.banco_nome = nome; corpo.ambiente = process.env.VERCEL_ENV || 'desconhecido'; }
   res.end(JSON.stringify(corpo));
 }

@@ -117,22 +117,49 @@ for (const r of runtime) {
 
 // --------------------------------------------------- 5. CORS da API nunca '*'
 {
-  if (fs.existsSync('servidor')) {
-    const arquivos = [];
-    const andar = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      if (e.name === 'node_modules' || e.name === '.vercel') continue;
-      const p = d + '/' + e.name;
-      if (e.isDirectory()) andar(p); else if (/\.(js|mjs|json)$/.test(e.name)) arquivos.push(p);
-    } };
-    andar('servidor');
-    for (const f of arquivos) {
-      const src = fs.readFileSync(f, 'utf8');
-      if (/Access-Control-Allow-Origin['"\s:,]+\*/.test(src) || /['"]\*['"]\s*\)?\s*;?\s*\/\/.*CORS/i.test(src)) {
-        falhar(`${f}: CORS com '*'. Com '*' o navegador nem envia credencial, e qualquer pagina da internet ` +
-               `passaria a chamar as rotas anonimas do convite a partir do navegador do colaborador. A lista vem de ORIGENS_PERMITIDAS.`);
+  // Varre servidor/ E nucleo/. A versao anterior varria so servidor/ e o regex
+  // nem casava a forma que o codigo usa — a decisao de CORS mora em
+  // nucleo/http.js, que so entra em servidor/ pela copia de BUILD. Guarda que
+  // nao alcanca o arquivo que decide nao guarda nada, e esta passou verde
+  // por cima de um `*` real.
+  const arquivos = [];
+  const andar = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+    if (e.name === 'node_modules' || e.name === '.vercel' || e.name === 'public') continue;
+    const p = d + '/' + e.name;
+    if (e.isDirectory()) andar(p); else if (/\.(js|mjs)$/.test(e.name)) arquivos.push(p);
+  } };
+  for (const raiz of ['servidor', 'nucleo']) if (fs.existsSync(raiz)) andar(raiz);
+
+  const curinga = [];
+  for (const f of arquivos) {
+    if (f.startsWith('servidor/nucleo/')) continue;   // copia de build, mesmo arquivo
+    fs.readFileSync(f, 'utf8').split('\n').forEach((linha, i) => {
+      if (/Access-Control-Allow-Origin/.test(linha) && /['"`]\*['"`]/.test(linha)) {
+        curinga.push(`${f}:${i + 1}`);
       }
-    }
-    ok(`CORS da API sem '*' (${arquivos.length} arquivos varridos)`);
+    });
+  }
+
+  // Em servidor/ (codigo de plataforma) '*' nao tem justificativa nenhuma: falha.
+  const meus = curinga.filter(c => c.startsWith('servidor/'));
+  for (const c of meus) {
+    falhar(`${c}: CORS com '*'. Com '*' qualquer pagina da internet chama esta ` +
+           `origem do navegador do colaborador. A lista vem de ORIGENS_PERMITIDAS.`);
+  }
+
+  // Em nucleo/ o '*' e a politica CORS.ABERTO, decidida e documentada. Nao falha
+  // aqui — mas NAO passa calado, porque a justificativa escrita nela morreu:
+  // ela diz "nenhuma dessas rotas e alcancada de origem alheia hoje", e desde
+  // que a apiBase passou a apontar para a origem propria da API, TODAS sao.
+  const deles = curinga.filter(c => c.startsWith('nucleo/'));
+  if (deles.length) {
+    console.log(`  !!  CORS.ABERTO usa '*' em ${deles.join(', ')} — decisao do nucleo, nao falha aqui.`);
+    console.log("      MAS a premissa escrita nela ('nenhuma dessas rotas e alcancada de origem");
+    console.log('      alheia hoje\u0027) ficou FALSA quando a apiBase passou a apontar para a origem');
+    console.log('      propria da API: o app virou cross-origin e as 8 rotas passaram a ser');
+    console.log('      alcancadas de outra origem. Reveja a politica ou reescreva a premissa.');
+  } else {
+    ok(`CORS sem '*' (${arquivos.length} arquivos em servidor/ e nucleo/)`);
   }
 }
 

@@ -74,6 +74,14 @@ curl -s https://control-face-id-api.vercel.app/api/saude
 
 ### 2. Publicar o app do operador em produção — SEM ISSO NÃO HÁ TESTE
 
+> **A ORDEM AQUI NÃO É PREFERÊNCIA, É DEPENDÊNCIA.** O app agora aponta para a
+> origem própria da API (`js/config.js`), não mais para o n8n. Se você publicar
+> o app **antes** do passo 1, ele vai falar com uma API que ainda não tem rota
+> nenhuma — e o sintoma no aparelho é "não consegui conectar", que não aponta
+> para a causa.
+>
+> Só publique o app depois de o passo 1 responder `"rotas":8`.
+
 ```bash
 vercel link --yes --project control-face-id --scope brl4528s-projects
 vercel deploy --prod --yes
@@ -111,6 +119,35 @@ Só se o QA pedir. Hoje ele já alcança o preview pelo bypass.
 Já foi feito e conferido: banco provisionado e migrado, credenciais de teste,
 banco descartável do arnês, CSP nas três origens, guardas de CI, rewrites de
 rota. Você só publica e confere.
+
+---
+
+## Se você fez um merge antes de publicar — leia isto
+
+**Depois de qualquer merge, PUBLIQUE e confira por curl antes de confiar.**
+Teste de unidade, fumaça e até a saúde da API passam por cima da classe de
+defeito abaixo.
+
+Aconteceu na madrugada de 25/08 e está cartado como **T-99A2E3**. A forma:
+
+Duas pessoas editaram `servidor/persistencia/postgres.js` em **linhas
+diferentes** — uma corrigiu a leitura da chave do RH, a outra corrigiu o caminho
+de um `import`. O git resolveu o merge **limpo**, sem conflito, sem avisar
+ninguém. Só que uma das versões trazia o caminho de import antigo, e o resultado
+publicado foi:
+
+```
+todas as 8 rotas   → FUNCTION_INVOCATION_FAILED
+/api/saude         → 200, "ok":true, "rotas":8
+```
+
+A saúde ficou verde porque **ela não passa pelo adaptador de banco**. O sinal
+mais tranquilizador possível apontando para o lugar errado.
+
+**O que fazer:** depois de integrar qualquer coisa, rode o passo 5 (a varredura
+das 8 rotas) e olhe o **corpo**, não só o status. Se as 8 responderem
+`FUNCTION_INVOCATION_FAILED` com a saúde verde, é exatamente este caso —
+**PARE E CHAME A EQUIPE**, e diga que é a T-99A2E3.
 
 ---
 
@@ -235,6 +272,35 @@ Os três campos respondem coisas diferentes, e **todos** precisam estar certos:
 **`"rotas":0` é 503 de propósito.** Uma origem de API sem rota nenhuma não está
 saudável, está vazia — e uma saúde que respondia `200` com zero rota foi
 exatamente o que escondeu, por horas, que nada estava publicado.
+
+### A PERGUNTA VEM ANTES DO CAMPO
+
+Os campos não têm todos o mesmo peso, e **qual deles manda depende do que você
+está perguntando**. Decida a pergunta primeiro:
+
+| Você quer saber | Quem responde |
+|---|---|
+| **"isto está funcionando?"** | `banco`, `nucleo`, `rotas` — eles observaram o que está executando |
+| **"isto é a versão que eu acabei de publicar?"** | **só** `commit` e `ref` |
+
+Para **"está funcionando"**, quando dois campos discordarem, acredite no
+primeiro grupo. Se `rotas:8` está verde e o `commit` parece estranho, o que
+está no ar funciona — investigue o carimbo, não a API.
+
+Para **"é a versão certa"**, o primeiro grupo é **mudo — e mudo não é
+concordar.** `rotas:8` diz que o roteador resolveu um caminho **neste**
+artefato. Não diz que este é o artefato **certo**. Um build antigo pode servir e
+responder `rotas:8` verde, porque ele funciona — só não é o que você publicou.
+
+> **É exatamente o estado de produção antes do passo 1.** A API responde com um
+> build anterior: nada confuso, nada quebrado, só velho. Aplicar a regra de
+> "está funcionando" a uma pergunta de versão faz você concluir "está tudo
+> certo" e parar de procurar — no único cenário em que precisa continuar.
+
+E uma armadilha no `arvore_suja`: **`true` é informação boa; `false` não é
+atestado.** Ele só diz que o repositório não tinha mudança não commitada no
+momento do carimbo — não diz nada sobre a montagem do artefato ter deixado
+arquivo para trás, que já aconteceu neste projeto. Não pare por causa dele.
 
 > Produção **não** revela o nome do banco, e isso é proposital. Um preview
 > revela (`"banco_nome":"arnes"`), porque lá a pergunta "estou no banco
