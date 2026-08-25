@@ -211,6 +211,36 @@ E o autor do campo foi o primeiro a cair: *"passei o dia dizendo que sonda tem d
 percorrer o caminho da requisição e não um proxy dele, e `ambiente` é exatamente um
 proxy."*
 
+**Terceiro grau, achado pelo QA:** `commit`, `ref` e `arvore_suja` não são
+declaração — são **testemunho DIFERIDO**. `git rev-parse` observou algo real, mas
+**em outro momento e sobre outra coisa**: são testemunho sobre o *repositório*, e a
+pergunta que fazemos a eles é sobre o *artefato*.
+
+Prova concreta, do próprio dia: se o carimbo estivesse no ar naquele deploy em que
+o `copiar-nucleo.sh` deixou `js/coerencia.js` para trás, ele responderia
+`commit c65cff0`, `arvore_suja false` — **tudo verdade** — com o artefato quebrado.
+Sha limpo, deploy quebrado, carimbo honesto.
+
+**E o DevOps somou uma contra um campo dele:** dos três diferidos, `arvore_suja:
+false` é o mais enganoso. Os outros soam como identificador; **este lê como
+all-clear**. Diz apenas "o repositório não tinha mudança não commitada no momento
+do carimbo", e nada sobre a montagem ter deixado arquivo para trás. `true` é sempre
+informação boa; **`false` é a metade perigosa**.
+
+**A regra de leitura, que vai ao runbook:** leia por grau e, quando dois
+discordarem, **acredite no mais alto**.
+
+```
+rotas/nucleo/banco (testemunho) > commit/ref/arvore_suja (diferido) > ambiente (declaração)
+
+rotas:8 verde + commit velho  -> o que está no ar FUNCIONA; investigue o carimbo
+commit certo + rotas:0        -> o carimbo está certo e o ARTEFATO está quebrado
+```
+
+São diagnósticos **opostos a partir da mesma tela**. Sem o ranking, a pessoa
+escolhe pelo campo que olhou primeiro — e com o cliente esperando, ela olha o que
+entende, que é o commit.
+
 **Corolário que encolheu um cartão:** o QA mostrou que `banco_conferido` não
 acrescentaria cobertura contra o `promote`, porque ele e `ambiente` pendem da
 **mesma hipótese** e falhariam juntos, pela mesma causa.
