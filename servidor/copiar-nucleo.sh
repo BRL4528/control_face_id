@@ -21,6 +21,37 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# --------------------------------------------------------------------------
+# GUARDA: nada em servidor/ pode importar SUBINDO DOIS NIVEIS para nucleo/.
+# (guarda do Arquiteto, script do DevOps -- revise e desfaca se discordar)
+#
+# No deploy a raiz E servidor/, e o nucleo chega por COPIA em servidor/nucleo/.
+# De servidor/persistencia/, subir UM nivel acha a copia; subir DOIS aponta
+# para a pasta nucleo/ da RAIZ DO REPO, que NAO EXISTE no pacote publicado.
+#
+# Por que isto nao pode ficar so na revisao humana: LOCAL as duas resolvem,
+# porque a raiz do repo esta ali. So publicar revela, e o sintoma e
+# FUNCTION_INVOCATION_FAILED em TUDO com /api/saude VERDE -- porque saude nao
+# importa persistencia/postgres.js. Em 25/08 dois ramos tinham a versao certa
+# (um nivel) e dois a errada (dois niveis), e o git faz merge LIMPO dos dois
+# consertos porque sao linhas diferentes: nada impedia um merge de reintroduzir
+# a errada e apagar um conserto que ninguem estava olhando.
+#
+# Vale para arquivo NOVO tambem, e nao so para o que quebrou -- e por isso e
+# guarda e nao conserto. Mesmo principio da resolucao de imports abaixo: por
+# construcao, nao por lista de nomes que alguem precisa manter.
+#
+# Exclui nucleo/ (e copia, nao e autorado aqui) e node_modules.
+fora=$(grep -rn "from '\.\./\.\./nucleo/" . \
+         --include='*.js' --include='*.mjs' \
+         --exclude-dir=nucleo --exclude-dir=node_modules --exclude-dir=.vercel || true)
+if [ -n "$fora" ]; then
+  echo "$fora"
+  echo "ERRO: import subindo DOIS niveis para nucleo/ dentro de servidor/."
+  echo "  No deploy a raiz e servidor/ e a pasta acima nao existe: use '../nucleo/...'."
+  exit 1
+fi
+
 if [ -d ../nucleo ]; then
   rm -rf nucleo js
   cp -r ../nucleo nucleo
