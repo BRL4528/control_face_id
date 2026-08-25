@@ -53,6 +53,14 @@ export function criarRepositorioMemoria({ estado, pessoas, rhUsuario }) {
       return id ? copia(estado.dispositivos.get(id)) : null;
     },
 
+    async lerDispositivoPorCodigoPendente(codigo, agoraMs, expiraEmMs) {
+      const id = estado.codigosPendentes.get(codigo);
+      const linha = id && estado.dispositivos.get(id);
+      if (!linha || linha.estado !== 'pendente') return null;
+      if (!linha.criado_em || (agoraMs - Date.parse(linha.criado_em)) > expiraEmMs) return null;
+      return copia(linha);
+    },
+
     async listarDispositivos() { return copias([...estado.dispositivos.values()]); },
 
     async inserirDispositivoSeAusente(dispositivo) {
