@@ -278,7 +278,6 @@ export function criarServidor(opts = {}) {
       cors: CORS.ABERTO, manipulador: cadastrarFace }
   ]);
 
-  const alfabetoCodigo = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   const requestId = () => crypto.randomUUID();
   const erro = (codigo, mensagem, campo) => ({
     ok: false, erro: Object.assign({ codigo, mensagem }, campo ? { campo } : {}),
@@ -289,30 +288,12 @@ export function criarServidor(opts = {}) {
     return valor.startsWith('Bearer ') ? valor.slice(7) : '';
   };
   const hashCredencial = valor => crypto.createHash('sha256').update(String(valor)).digest('base64url');
-  const codigoAleatorio = () => {
-    let codigo = '';
-    for (let i = 0; i < 6; i++) codigo += alfabetoCodigo[crypto.randomInt(alfabetoCodigo.length)];
-    return codigo;
-  };
-  // T-87615C: código pendente não fica prova de posse válida pra sempre —
-  // depois de 24h o aparelho recebe um novo na próxima consulta de estado
-  // (mostrarAparelhosCodigoExpirado) e o antigo para de resolver no /rh/aparelho.
-  const EXPIRA_PENDENTE_MS = opts.expiraPendenteMs || 24 * 60 * 60 * 1000;
   // Intervalo que o servidor manda o aparelho esperar antes de reconsultar.
   // js/app.js:207 obedece o servidor de proposito, entao quem testa o ciclo de
   // liberacao pode encurtar o passo sem enfraquecer a prova: o que esta sob
   // teste e a tela virar SO pelo poll de fundo, nao o intervalo valer 15s.
   // Sem a opcao, os valores continuam os mesmos de antes (10 e 15).
   const consultarAposS = padrao => (opts.consultarAposS == null ? padrao : opts.consultarAposS);
-  const codigoExpirado = dispositivo =>
-    !dispositivo.criado_em || (Date.now() - Date.parse(dispositivo.criado_em)) > EXPIRA_PENDENTE_MS;
-  const novoCodigoUnico = () => {
-    for (let tentativa = 0; tentativa < 3; tentativa++) {
-      const codigo = codigoAleatorio();
-      if (!estado.codigosPendentes.has(codigo)) return codigo;
-    }
-    return null;
-  };
   // Toda chamada autenticada de aparelho conta como "uso" — é o que a aba
   // Aparelhos do RH mostra como "último uso" nos aprovados (T-87615C).
   const dispositivoAutenticado = (req, dispositivoId) => {
@@ -323,12 +304,6 @@ export function criarServidor(opts = {}) {
     return dispositivo;
   };
 
-  // T-C20AD3 (§1.2 pedidos_da_mesma_rede_1h): sal fixo de teste, só para o
-  // hash não ser o IP cru. NUNCA é o sal de deploy real — este arquivo é
-  // fake server, o valor não pode viajar para configuração nenhuma que vá
-  // ao ar.
-  const SAL_IP_TESTE = 'sal-fake-servidor-de-teste-nao-e-producao';
-  const hashIp = ip => crypto.createHash('sha256').update(SAL_IP_TESTE + String(ip)).digest('base64url');
   // `estado.ipSimulado` (não cabeçalho) para os testes forjarem "outra
   // origem" — achado do DevOps: um cabeçalho tem forma de protocolo e é
   // exatamente o que alguém copiaria pro workflow real do n8n sem sentir
@@ -341,58 +316,12 @@ export function criarServidor(opts = {}) {
   // tests/ mesmo assim, como defesa em profundidade.
   const ipDaRequisicao = req => String(estado.ipSimulado || req.socket.remoteAddress || 'desconhecido');
 
-  // Resumo leve de UA para a tela do RH (§1.2 `ua_resumida`) — não é parser
-  // completo, só o suficiente pra distinguir "Chrome 141 · Android 14" de
-  // "Safari · iOS" nos casos comuns; UA que não casa nenhum padrão volta como
-  // veio, truncado, em vez de inventar rótulo.
-  const resumirUa = ua => {
-    const texto = String(ua || '');
-    const nav = texto.match(/(Chrome|Firefox|Edg|OPR|Safari)\/(\d+)/);
-    const so =
-      texto.match(/Android\s*([\d.]+)/) ? 'Android ' + texto.match(/Android\s*([\d.]+)/)[1] :
-      texto.match(/iPhone OS ([\d_]+)/) ? 'iOS ' + texto.match(/iPhone OS ([\d_]+)/)[1].replace(/_/g, '.') :
-      texto.match(/Windows NT ([\d.]+)/) ? 'Windows' :
-      texto.match(/Mac OS X/) ? 'macOS' :
-      texto.match(/Linux/) ? 'Linux' : null;
-    const nomeNav = nav && (nav[1] === 'Edg' ? 'Edge' : nav[1] === 'OPR' ? 'Opera' : nav[1]);
-    if (!nomeNav && !so) return texto.slice(0, 60);
-    return [nomeNav && (nomeNav + ' ' + nav[2]), so].filter(Boolean).join(' · ');
-  };
-
-  // §1.3 LIMITE_APROVACAO: mais de 10 códigos errados do mesmo usuário de RH
-  // em 5 minutos. Contagem é por usuário, não por aparelho — é sobre alguém
-  // tentando adivinhar código, não sobre um aparelho específico.
-  const JANELA_LIMITE_APROVACAO_MS = 5 * 60 * 1000;
-  const LIMITE_APROVACAO_TENTATIVAS = 10;
-  const tentativasApovacaoRestantes = usuario => {
-    const agora = Date.now();
-    const lista = (estado.limitesAprovacao.get(usuario) || []).filter(t => agora - t < JANELA_LIMITE_APROVACAO_MS);
-    estado.limitesAprovacao.set(usuario, lista);
-    return { bloqueado: lista.length >= LIMITE_APROVACAO_TENTATIVAS, lista, agora };
-  };
-  const registrarTentativaAprovacaoErrada = usuario => {
-    const { lista, agora } = tentativasApovacaoRestantes(usuario);
-    lista.push(agora);
-    estado.limitesAprovacao.set(usuario, lista);
-  };
-  const retryAfterAprovacao = usuario => {
-    const lista = estado.limitesAprovacao.get(usuario) || [];
-    const maisAntiga = Math.min(...lista);
-    return Math.max(1, Math.ceil((JANELA_LIMITE_APROVACAO_MS - (Date.now() - maisAntiga)) / 1000));
-  };
-
-  // T-81C721 (§2.1e, docs/adr-acesso-v3.md efrat_auditoria_identificacao):
-  // TODA tentativa de aprovar, certa ou errada, com ou sem 429 — nunca só o
-  // limite estourando, senão o padrão paciente (poucas tentativas por dia,
-  // nunca batendo o teto) não deixa rastro nenhum. NUNCA guarda o código
-  // tentado — ele não serve para investigar, só transformaria o log numa
-  // lista de códigos para quem ler o log.
-  const registrarAuditoriaAprovacao = (resultado, pendenteId) => {
-    estado.auditoriaAprovacao.push({
-      usuario_rh: rhUsuario.usuario, instante: new Date().toISOString(),
-      pendente_id: pendenteId || null, resultado, request_id: requestId()
-    });
-  };
+  // Resumo de UA, o limite de tentativas de aprovacao e a auditoria de
+  // aprovacao saem daqui: moram em nucleo/dominio.js (resumirUa,
+  // JANELA_LIMITE_APROVACAO_MS, LIMITE_APROVACAO_TENTATIVAS,
+  // segundosAteLiberar) e nucleo/casos/aparelho.js, que le/escreve o limite
+  // pelo repositorio (tentativasNaJanela/registrarTentativaErrada/
+  // registrarAuditoriaAprovacao) em vez do Map local.
 
   // C1-C3 do contrato (fase3-contrato.md §0): chave de idempotência no CORPO
   // pras rotas /efrat/rh/* (credencial já é corpo). Mesma chave + mesmo corpo

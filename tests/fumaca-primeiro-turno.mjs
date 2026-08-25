@@ -105,12 +105,18 @@ const marc = await chamar('POST', '/efrat/marcacoes', {
 }, { Authorization: 'Bearer ' + SEGREDO_APARELHO });
 conferir('marcacoes -> aceita', marc.status === 200 && marc.json.resumo.aceitas === 1, marc);
 
-// dedup: reenviar o mesmo id_cliente tem que voltar duplicado, nao aceitar de novo
+// dedup SEQUENCIAL (formato): reenviar o mesmo id_cliente depois que o
+// primeiro ja respondeu tem que voltar duplicado. Isso prova que o caminho
+// de dedup existe e responde certo -- NAO prova a invariante sob corrida
+// (dois lotes concorrentes com o mesmo id_cliente, so um pode aceitar). Essa
+// e outra pergunta, e so tem resposta contra Postgres (ver o cabecalho do
+// arquivo) -- achado do QA (Revisor QA/Security), pra ninguem ler as duas
+// frases parecidas e achar que sao a mesma prova.
 const marc2 = await chamar('POST', '/efrat/marcacoes', {
   dispositivo_id: 'disp-smoke-1',
   marcacoes: [{ id_cliente: 'cli-smoke-1', pessoa_id: 'p-ana', marcado_em: new Date().toISOString(), tipo: 'entrada', veredito: 'aceito' }]
 }, { Authorization: 'Bearer ' + SEGREDO_APARELHO });
-conferir('marcacoes dedup -> duplicado', marc2.status === 200 && marc2.json.resumo.duplicadas === 1, marc2);
+conferir('marcacoes dedup sequencial (formato, nao corrida) -> duplicado', marc2.status === 200 && marc2.json.resumo.duplicadas === 1, marc2);
 
 servidor.close();
 console.log(falhas === 0 ? '\nTUDO OK' : `\n${falhas} FALHA(S)`);

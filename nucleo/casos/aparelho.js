@@ -247,6 +247,16 @@ export async function aprovar(ctx, req) {
   // CODIGO_AMBIGUO (409, §1.3) nao tem caminho aqui: o codigo curto e indice
   // unico entre as linhas pendentes, entao duas pendentes com o mesmo codigo
   // sao estruturalmente impossiveis.
+  //
+  // ESSA INVARIANTE NAO E DESTE ARQUIVO -- e do indice unico PARCIAL em
+  // codigo_curto WHERE estado='pendente' que a migration do Persistencia
+  // (API-3) precisa criar. Ate a migration existir e ficar confirmada, este
+  // comentario e uma suposicao, nao um fato: sem o indice, dois pendentes
+  // podem nascer com o mesmo codigo e aprovar() pode ativar o aparelho
+  // ERRADO sem erro nenhum (achado do QA, Revisor QA/Security, 2026-08-25 --
+  // mesma suposicao repetida em tests/e2e/servidor-falso.js no comentario do
+  // CODIGO_AMBIGUO antigo, que ja nomeava "banco real" como a condicao que
+  // quebra ela).
 
   const equipesIds = Array.isArray(b.equipes_ids) ? b.equipes_ids : [];
   if (equipesIds.length === 0) {
