@@ -383,18 +383,6 @@ export function criarRepositorioMemoria({ estado, pessoas, rhUsuario }) {
     // ======================================================================
     async lerUsuarioRh(usuario) {
       return rhUsuario && rhUsuario.usuario === usuario ? Object.assign({}, rhUsuario) : null;
-    },
-
-    // Em memoria ha UM usuario de RH (o do servidor falso, vindo por opts).
-    // Reinserir o mesmo devolve inserido:false com o que ja existe -- que e o
-    // que faz a semente ser reexecutavel.
-    async inserirUsuarioRh(novo) {
-      if (rhUsuario && rhUsuario.usuario === novo.usuario) {
-        return { inserido: false, usuario: Object.assign({}, rhUsuario) };
-      }
-      if (rhUsuario) return { inserido: false, usuario: Object.assign({}, rhUsuario) };
-      rhUsuario = Object.assign({}, novo);
-      return { inserido: true, usuario: Object.assign({}, rhUsuario) };
     }
   };
 
