@@ -1,5 +1,10 @@
 # Vale para o projeto do APP DO OPERADOR, cujo Root Directory e a raiz do repo.
 #
+# Regra desta lista: o deploy do app publica SO o que o navegador carrega.
+# Tudo o mais e ausencia deliberada, nao esquecimento.
+
+# --- As outras duas origens ---
+#
 # publico/ e o Root Directory de OUTRO projeto da Vercel, a origem publica do
 # cadastro de face. Ele nao pode ser publicado junto com o app: a pagina publica
 # rodando na origem do app leria o IndexedDB 'efrat-ponto' e com ele a
@@ -9,3 +14,39 @@
 #
 # Ha guarda de CI conferindo que esta linha continua aqui.
 publico
+
+# servidor/ e o Root Directory do TERCEIRO projeto, a origem da API. Mesmo
+# argumento, e um a mais: servidor/ e o unico lugar do repo que le segredo de
+# ambiente (DATABASE_URL). Codigo que espera env var de banco nao tem nada que
+# fazer num deploy estatico.
+servidor
+
+# --- Codigo de servidor que o navegador nunca carrega ---
+#
+# nucleo/ e o dominio da API extraido do servidor falso (cartao API-1): puro,
+# sem HTTP e sem armazenamento. Ele chega na origem da API por COPIA DE BUILD,
+# a partir desta arvore, do mesmo jeito que publico/copiar-assets.sh traz
+# vendor/ e models/ — fonte de verdade unica aqui, copia la. Publicar tambem no
+# app criaria uma terceira copia, servida por uma origem que nao a executa.
+nucleo
+
+# --- O que ja NAO era 'o que vai ao ar', so que o .vercelignore nao sabia ---
+#
+# A guarda 'Nenhum asset externo, fonte remota ou script de terceiro no que vai
+# ao ar' monta a lista de arquivos publicados EXCLUINDO estas pastas. Ou seja: o
+# repo ja tratava tests/, docs/ e n8n/ como fora do deploy, e o .vercelignore
+# discordava em silencio — a guarda varria um conjunto e a Vercel publicava
+# outro, maior. Alinhado aqui para os dois falarem do mesmo conjunto.
+tests
+docs
+n8n
+bin
+.central-agentes
+.github
+playwright.config.js
+test-results
+playwright-report
+
+# origens.json declara as tres origens para as guardas de CI. E configuracao de
+# repositorio, nao arquivo que o navegador busque.
+origens.json
