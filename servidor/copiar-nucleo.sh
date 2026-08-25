@@ -62,6 +62,30 @@ if [ -d ../nucleo ]; then
   done
   test "$copiados" -gt 0 || { echo "ERRO: nenhum arquivo externo copiado -- a resolucao de imports quebrou"; exit 1; }
   echo "js/ compartilhado: $copiados arquivo(s), resolvidos dos imports"
+
+  # CARIMBO DE VERSAO (T-B19BBE). A Vercel NAO injeta VERCEL_GIT_COMMIT_SHA em
+  # deploy por CLI -- conferido, a variavel nao existe -- entao o sha e gravado
+  # aqui, no unico momento que sabe qual arvore esta subindo.
+  #
+  # SHA COMPLETO, 40 caracteres, nunca recortado. O cartao existe porque dois
+  # instrumentos mostrando recortes DIFERENTES do mesmo commit produzem a duvida
+  # que o campo deveria matar. Com o sha inteiro nao ha recorte para divergir: se
+  # o outro lado mostra 7, 8 ou 12, o inteiro CONTEM o que ele mostra, e a
+  # comparacao vira "um comeca com o outro" em vez de "os dois sao iguais".
+  #
+  # E `arvore_suja` importa tanto quanto o sha: publicar com mudanca nao
+  # commitada e um sha que MENTE sobre o que esta no ar -- atestado falso, que e
+  # pior que nao ter atestado. O campo denuncia em vez de esconder.
+  if command -v git >/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
+    sha=$(git rev-parse HEAD)
+    suja=$([ -n "$(git status --porcelain)" ] && echo true || echo false)
+    printf '{"commit":"%s","arvore_suja":%s}\n' "$sha" "$suja" > versao.json
+    echo "versao carimbada: ${sha} (arvore suja: ${suja})"
+  else
+    echo "ERRO: sem git aqui, nao da para carimbar a versao."
+    echo "  Publique da arvore do repo, com \`npm --prefix servidor run publicar\`."
+    exit 1
+  fi
 else
   test -d nucleo || {
     echo "ERRO: nao achei ../nucleo (a fonte) nem ./nucleo (a copia)."
@@ -75,7 +99,8 @@ else
   for f in $(grep -rhoE "from '\.\./js/[a-zA-Z0-9_.-]+'" nucleo/ | sed "s#.*/js/##;s#'##" | sort -u); do
     test -f "js/$f" || { echo "ERRO: a copia do nucleo importa js/$f e ele nao veio junto"; exit 1; }
   done
-  echo "nucleo/ presente na copia: $(find nucleo js -name '*.js' | wc -l) arquivos"
+  test -f versao.json || { echo "ERRO: versao.json nao veio junto -- /api/saude nao saberia dizer o que esta no ar"; exit 1; }
+  echo "nucleo/ presente na copia: $(find nucleo js -name '*.js' | wc -l) arquivos, versao carimbada"
 fi
 
 # A Vercel exige um diretorio de saida estatico quando ha buildCommand. Este
