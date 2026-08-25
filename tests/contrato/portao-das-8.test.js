@@ -24,6 +24,32 @@
 // Confundir os dois e o erro que ele previne: 401 parece falha e e sucesso
 // aqui; 404 parece "so falta configurar" e e a rota inexistente.
 //
+// ---------------------------------------------------------------------------
+// DEFEITO QUE ESTE ARQUIVO JA TEVE, achado pelo API-1 — e da familia que o
+// paragrafo acima descreve, uma camada ACIMA dela.
+// ---------------------------------------------------------------------------
+// Com Deployment Protection ligada, a Vercel responde 401 "Protected deployment"
+// em TUDO — inclusive numa rota que nao existe (medido: 401 tambem em
+// /webhook/efrat/rota-que-nao-existe-de-jeito-nenhum). Como 401 e o caso de
+// SUCESSO declarado aqui, o portao daria VERDE nas 8 sem NUNCA ter alcancado a
+// API. O sinal mais tranquilizador possivel apontando pro lugar errado, de novo.
+//
+// Duas defesas, e a primeira e a que generaliza:
+//
+//  1. CONTROLE NEGATIVO NO ALVO VIVO. Antes de julgar as 8, o portao pede uma
+//     rota que com certeza NAO existe. Ela TEM de dar 404. Se nao der, a origem
+//     nao sabe distinguir rota existente de inexistente e NENHUMA conclusao
+//     sobre as 8 e possivel — a rodada e ANULADA, nao aprovada. Isso pega
+//     protecao de plataforma, rewrite catch-all, WAF e pagina de erro de proxy,
+//     nao so o caso da Vercel.
+//  2. FORMA DO CORPO. Resposta que traz `protection` e da PLATAFORMA, nao da
+//     API. Nenhuma resposta assim conta como rota publicada.
+//
+// A licao pra quem mexer aqui: a calibracao contra o servidor-falso (no fim
+// deste arquivo) prova que o portao sabe ficar verde, mas NAO prova que ele
+// sabe ficar vermelho CONTRA A ORIGEM DE VERDADE. Sao duas perguntas, e so a
+// segunda depende de como aquela origem esta configurada hoje.
+//
 // ORIGEM: ARNES_API_BASE. Sem ela, PULA com motivo declarado — nao inventa
 // verde. Se a origem for protegida (preview da Vercel), ARNES_BYPASS carrega o
 // cabecalho x-vercel-protection-bypass; NUNCA literal no codigo.
@@ -42,6 +68,9 @@ const pular = BASE ? {} : {
 // As 8 do primeiro turno (decisao do Orquestrador em 25/08, apos o Designer
 // achar que sem rh/face/cadastrar ninguem e reconhecivel e o teste morre no
 // passo 3).
+/** Rota que nao pode existir. Se ela nao der 404, a origem nao discrimina. */
+const ROTA_INEXISTENTE = '/webhook/efrat/rota-que-nao-existe-de-jeito-nenhum';
+
 const ROTAS = [
   '/webhook/efrat/dispositivo/registrar',
   '/webhook/efrat/dispositivo/estado',
@@ -54,6 +83,7 @@ const ROTAS = [
 ];
 
 const medido = [];
+let controleNegativo = null;
 // Calibracao: o portao ja nasceu VERMELHO (8/8 nao publicadas) e um portao que
 // nunca ficou verde pode estar quebrado NO SENTIDO VERDE -- por exemplo se a
 // lista de rotas tivesse um erro de digitacao, ele acusaria 404 para sempre e
@@ -62,28 +92,46 @@ const medido = [];
 // calibracao.test.js: um alarme que grita para tudo nao esta medindo.
 const calibracao = [];
 
+/** @returns {{status: number|string, corpo: any}} */
+async function bater(rota) {
+  try {
+    const r = await fetch(BASE.replace(/\/$/, '') + rota, {
+      method: 'POST',
+      headers: Object.assign(
+        { 'content-type': 'application/json' },
+        BYPASS ? { 'x-vercel-protection-bypass': BYPASS } : {}),
+      body: '{}'
+    });
+    let corpo = null;
+    try { corpo = JSON.parse(await r.text()); } catch { /* nao-JSON: fica null */ }
+    return { status: r.status, corpo };
+  } catch (e) {
+    return { status: 'ERRO_REDE: ' + String(e.message).slice(0, 60), corpo: null };
+  }
+}
+
+/** Resposta da PLATAFORMA (protecao), nao da API. */
+const ehProtecao = x => !!(x.corpo && x.corpo.protection);
+
 before(async () => {
   if (!BASE) return;
+
+  // Controle negativo PRIMEIRO: sem ele, tudo abaixo pode ser ruido.
+  controleNegativo = await bater(ROTA_INEXISTENTE);
+
   for (const rota of ROTAS) {
-    let status;
-    try {
-      const r = await fetch(BASE.replace(/\/$/, '') + rota, {
-        method: 'POST',
-        headers: Object.assign(
-          { 'content-type': 'application/json' },
-          BYPASS ? { 'x-vercel-protection-bypass': BYPASS } : {}),
-        body: '{}'
-      });
-      status = r.status;
-    } catch (e) {
-      status = 'ERRO_REDE: ' + String(e.message).slice(0, 60);
-    }
-    medido.push({ rota, status });
+    medido.push(Object.assign({ rota }, await bater(rota)));
   }
+
   console.log(`\n[portao-das-8] ${BASE}`);
+  console.log(`  controle negativo: ${controleNegativo.status}` +
+    (controleNegativo.status === 404 ? ' (404 — a origem discrimina, medicao vale)'
+                                     : ' <- NAO e 404: MEDICAO ANULADA'));
   for (const m of medido) {
-    const veredito = m.status === 404 ? 'NAO PUBLICADA' : (typeof m.status === 'number' ? 'publicada' : 'erro');
-    console.log(`  ${String(m.status).padEnd(6)} ${veredito.padEnd(14)} ${m.rota}`);
+    const veredito = ehProtecao(m) ? 'PROTECAO (nao alcancou a API)'
+      : m.status === 404 ? 'NAO PUBLICADA'
+      : typeof m.status === 'number' ? 'publicada' : 'erro';
+    console.log(`  ${String(m.status).padEnd(6)} ${veredito.padEnd(30)} ${m.rota}`);
   }
 }, { timeout: 180000 });
 
@@ -106,7 +154,30 @@ before(async () => {
 
 after(() => { if (servidorLocal) servidorLocal.close(); });
 
+test('controle negativo: a origem responde 404 numa rota inexistente', pular, () => {
+  assert.ok(controleNegativo, 'controle negativo nao foi executado');
+  assert.equal(
+    ehProtecao(controleNegativo), false,
+    'A origem respondeu com a pagina de PROTECAO da plataforma, nao com a API. ' +
+    'Sem ARNES_BYPASS valido nada aqui alcanca a API, e o portao inteiro seria ' +
+    'verde sem ter medido nada. Isto e "nao medi", nunca "esta publicado".'
+  );
+  assert.equal(
+    controleNegativo.status, 404,
+    `Uma rota que nao existe respondeu ${controleNegativo.status} em vez de 404. ` +
+    'Entao esta origem NAO distingue rota existente de inexistente, e nenhuma ' +
+    'conclusao sobre as 8 e possivel: a medicao esta ANULADA, nao aprovada. ' +
+    'Causas tipicas: protecao de plataforma, rewrite catch-all, WAF, proxy.'
+  );
+});
+
 test('as 8 rotas do primeiro turno estao publicadas (nenhuma 404)', pular, () => {
+  // Depende do controle negativo: sem ele, "nenhuma 404" nao significa nada.
+  assert.equal(controleNegativo && controleNegativo.status, 404,
+    'controle negativo nao passou — veja o teste acima. Sem ele este resultado nao vale.');
+  const daPlataforma = medido.filter(ehProtecao).map(m => m.rota);
+  assert.deepEqual(daPlataforma, [],
+    'respostas vieram da PROTECAO da plataforma, nao da API: ' + daPlataforma.join(', '));
   const ausentes = medido.filter(m => m.status === 404).map(m => m.rota);
   assert.deepEqual(
     ausentes, [],
