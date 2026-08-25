@@ -1030,6 +1030,23 @@ export const Rh = {
     } finally { $('btnCapCad').disabled = false; }
   },
 
+  /**
+   * Mesmo texto de js/fila.js:26-30 (recadastro do gestor em campo), não o de
+   * mensagemErroUploadLote abaixo — os dois passam pela mesma avaliarLoteFace,
+   * mas aqui e em fila.js é captura AO VIVO ("tire de novo"); no upload é
+   * escolha de arquivo já pronto ("escolha outra"). Reuso confirmado com o
+   * Designer (T-A17B32, 2026-08-25): mecanismo igual ao de fila.js, mecanismo
+   * diferente do upload — por isso o texto vem de lá, não daqui do upload.
+   */
+  mensagemErroCameraLote(codigo) {
+    const M = {
+      COERENCIA_INSUFICIENTE: 'As 3 fotos não deram certo — pareceram de pessoas diferentes. Tire as 3 de novo com calma; se continuar assim, avise o RH.',
+      FOTOS_IGUAIS: 'As 3 fotos ficaram iguais demais. Mova um pouco a cabeça entre as capturas e tente de novo.',
+      VETORES_INVALIDOS: 'As fotos não ficaram boas pra usar. Tire as 3 de novo, com boa luz e o rosto bem visível.'
+    };
+    return M[codigo] || null;
+  },
+
   async salvarBiometria() {
     const c = this.capturas;
     const p = this.alvoCadastro;
@@ -1048,7 +1065,10 @@ export const Rh = {
       modelo_id: Face.modeloId, idempotency_key: this.idempotencyKeyNova()
     });
     $('btnSalvarBio').disabled = false;
-    if (!bio.ok) { toast(bio.erro || 'Falha ao gravar biometria', 'bad'); return; }
+    if (!bio.ok) {
+      toast(this.mensagemErroCameraLote(bio.codigo) || bio.erro || 'Falha ao gravar biometria', 'bad');
+      return;
+    }
     toast('Biometria salva', 'ok');
     this.pararCamCad();
     $('areaBio').innerHTML = '';
@@ -1151,7 +1171,11 @@ export const Rh = {
   mensagemErroUploadLote(codigo) {
     const M = {
       COERENCIA_INSUFICIENTE: 'Essas 3 fotos ficaram muito diferentes entre si — pode ser iluminação, ângulo, ou fotos de pessoas diferentes. Escolha 3 fotos mais parecidas, da mesma pessoa e com boa luz.',
-      FOTOS_IGUAIS: 'As 3 fotos são iguais ou quase iguais. Escolha 3 fotos diferentes entre si, tiradas em momentos diferentes.'
+      FOTOS_IGUAIS: 'As 3 fotos são iguais ou quase iguais. Escolha 3 fotos diferentes entre si, tiradas em momentos diferentes.',
+      // Fallback genérico do Designer (T-A17B32, 2026-08-25): caminho quase
+      // inalcançável (o botão só habilita com os 3 slots válidos), então não
+      // ganhou frase própria por código — resolve sem deixar o código órfão.
+      VETORES_INVALIDOS: 'Uma das fotos não pode ser usada. Escolha outra.'
     };
     return M[codigo] || null;
   },

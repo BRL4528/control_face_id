@@ -93,6 +93,31 @@ test('câmera grava por /efrat/rh/face/cadastrar — nunca pela rota antiga de a
   expect(pessoa.modelo_id).toBe('fingido');
 });
 
+test('câmera: lote incoerente (3 pessoas diferentes) é recusado com o texto de fila.js, não o de upload (T-A17B32)', async ({ page }) => {
+  await abrir(page, ctx.url);
+  await logarRh(page);
+  await abrirBiometriaDe(page, 'p-ana');
+  await page.click('#btnModoCamera');
+
+  // Mesma técnica de semente por nome do teste de upload (linha ~170), só que
+  // via `.pessoa` em vez de nome de arquivo — aqui a captura é ao vivo, sem
+  // arquivo nenhum.
+  for (const nome of ['pessoa-um', 'pessoa-dois', 'pessoa-tres']) {
+    await page.evaluate(n => { window.__EFRAT_FAKE_FACE.pessoa = n; }, nome);
+    await page.click('#btnCapCad');
+  }
+  await expect(page.locator('#btnSalvarBio')).toBeEnabled();
+  await page.click('#btnSalvarBio');
+
+  // Texto de js/fila.js (captura ao vivo, "tire de novo"), NUNCA o de
+  // mensagemErroUploadLote ("escolha 3 fotos") — mecanismo é o mesmo, mas a
+  // ação pedida à pessoa é diferente (T-A17B32, achado do Designer).
+  await expect(page.locator('.toast.bad')).toContainText('Tire as 3 de novo com calma');
+  await expect(page.locator('.toast.bad')).not.toContainText('Escolha');
+  const pessoa = ctx.pessoas.find(p => p.pessoa_id === 'p-ana');
+  expect(pessoa.origem).not.toBe('rh_camera'); // recusado, nada gravado
+});
+
 test('upload: posição vazia e posição que falhou têm sinal visual diferente', async ({ page }) => {
   await abrir(page, ctx.url);
   await logarRh(page);
