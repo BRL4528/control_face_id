@@ -585,6 +585,17 @@ export function criarRepositorioPostgres({ connectionString } = {}) {
 
     // ==========================================================================
     // USUARIO DE RH
+    //
+    // So leitura, de proposito -- decisao do Orquestrador (2026-08-25), nao
+    // lacuna: nenhuma das 8 rotas do primeiro turno CRIA usuario de RH, e um
+    // inserirUsuarioRh aqui seria capacidade privilegiada de escrita que a
+    // producao carrega pra sempre sem nenhum caminho de produto exercitando
+    // ela. A linha de efrat_usuario_rh do teste nasce por SQL direto na
+    // semente do DevOps, excecao documentada. Gestao de usuario de RH como
+    // produto (rota, auth, auditoria de quem criou quem) e T-641E39. Ver o
+    // mesmo comentario em nucleo/repositorio.js -- se esta ausencia voltar
+    // como "necessidade tecnica" daqui a um mes, o motivo ja esta escrito
+    // nos dois lugares.
     // ==========================================================================
     async lerUsuarioRh(usuario) {
       const [linha] = await sql`
