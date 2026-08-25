@@ -15,7 +15,7 @@
 // 2026-08-25) -- e uma das duas razoes de a API existir.
 
 import { neon } from '@neondatabase/serverless';
-import { verificarRepositorio } from '../../nucleo/repositorio.js';
+import { verificarRepositorio } from '../nucleo/repositorio.js';
 
 export class NaoRevisado extends Error {
   constructor(nome) {
