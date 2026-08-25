@@ -107,6 +107,37 @@ Foi por isso que o arnês roda em **Postgres e não em `node:sqlite`**: a API do
 ingênuo passaria — repetindo, num banco, a mesma atomicidade de graça do `Map`.
 O arnês mediria o instrumento errado uma camada abaixo.
 
+## Adaptador em memória dá VERDE com qualquer implementação
+
+Aconteceu neste projeto e vai acontecer de novo: alguém roda a corrida contra
+`nucleo/memoria.js` e reporta "20 aprovações concorrentes, 25 lotes
+concorrentes, exatamente 1 vencedor, nunca dois". O número é verdadeiro. Não
+prova nada. E é convincente, que é o que o torna perigoso.
+
+`tests/contrato/memoria-nao-mede.test.js` mede as duas lado a lado — o mesmo
+`if (existe) … else grava`, byte por byte, só mudando onde o dado mora:
+
+| Mesmo ler-depois-gravar, 25 simultâneas, 5 rodadas | Rodadas quebradas | Pior caso |
+|---|---|---|
+| em **memória** | 0/5 | **1** vencedor |
+| em **banco** | 5/5 | **25** vencedores |
+
+As asserções desse arquivo são invertidas de propósito: exige **verde** em
+memória (para documentar que ali o teste não pode falhar) e **vermelho** em
+banco.
+
+**Subir de 20 para 200 concorrentes não ajuda.** Não é pressão insuficiente: em
+memória a janela entre ler e gravar tem **largura zero** — uma thread, nenhum
+`await` no meio. Nenhuma quantidade de concorrência abre uma janela que não
+existe. Só mudar onde o dado mora abre.
+
+Corolário para ler qualquer relatório desta fase: *"as 8 rotas existem e
+respondem no formato do contrato"* e *"as invariantes de concorrência se
+sustentam"* são perguntas com dependências diferentes. A primeira o adaptador em
+memória responde bem. A segunda ele não responde de jeito nenhum. Somar as duas
+num "8 rotas testadas sob concorrência" seria falso nas duas metades ao mesmo
+tempo.
+
 ## Como rodar
 
 ```bash
