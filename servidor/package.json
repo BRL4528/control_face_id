@@ -1,0 +1,11 @@
+{
+  "name": "control-face-id-servidor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Origem propria da API do Efrat Ponto — terceira origem do projeto",
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.2"
+  }
+}
