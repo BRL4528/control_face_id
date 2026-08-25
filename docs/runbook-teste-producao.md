@@ -122,6 +122,35 @@ rota. Você só publica e confere.
 
 ---
 
+## Se você fez um merge antes de publicar — leia isto
+
+**Depois de qualquer merge, PUBLIQUE e confira por curl antes de confiar.**
+Teste de unidade, fumaça e até a saúde da API passam por cima da classe de
+defeito abaixo.
+
+Aconteceu na madrugada de 25/08 e está cartado como **T-99A2E3**. A forma:
+
+Duas pessoas editaram `servidor/persistencia/postgres.js` em **linhas
+diferentes** — uma corrigiu a leitura da chave do RH, a outra corrigiu o caminho
+de um `import`. O git resolveu o merge **limpo**, sem conflito, sem avisar
+ninguém. Só que uma das versões trazia o caminho de import antigo, e o resultado
+publicado foi:
+
+```
+todas as 8 rotas   → FUNCTION_INVOCATION_FAILED
+/api/saude         → 200, "ok":true, "rotas":8
+```
+
+A saúde ficou verde porque **ela não passa pelo adaptador de banco**. O sinal
+mais tranquilizador possível apontando para o lugar errado.
+
+**O que fazer:** depois de integrar qualquer coisa, rode o passo 5 (a varredura
+das 8 rotas) e olhe o **corpo**, não só o status. Se as 8 responderem
+`FUNCTION_INVOCATION_FAILED` com a saúde verde, é exatamente este caso —
+**PARE E CHAME A EQUIPE**, e diga que é a T-99A2E3.
+
+---
+
 ## O mapa: três origens, e elas não são a mesma coisa
 
 | | Projeto Vercel | Onde | Publica o quê |
