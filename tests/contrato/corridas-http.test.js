@@ -11,6 +11,25 @@
 //      ficar verde sobre uma linha que a API NUNCA conseguiria criar. Semear
 //      pela rota prova o caminho de criacao junto.
 //
+// TRAVA DE AMBIENTE — este arquivo GRAVA, e por isso ela existe.
+//
+// As corridas registram aparelhos e gravam marcacoes DE VERDADE, pelas rotas.
+// Nao ha como limpar depois: marcacao, por contrato, nunca e alterada. Apontar
+// isto para a origem de producao encheria a aba Aparelhos do cliente de
+// "Arnes ..." pendentes e o livro de marcacoes de pontos de gente que nao
+// existe — no dia da apresentacao, e de forma irreversivel POR DESENHO.
+//
+// Entao antes de escrever qualquer coisa o arquivo pergunta ao /api/saude em
+// que BANCO aquela origem esta, e so roda contra o descartavel. Repare que o
+// /api/saude e usado aqui como IDENTIDADE, nunca como atestado de saude — foi
+// justamente ele respondendo {"ok":true,"banco":"ok"} que fez as 8 rotas
+// parecerem de pe enquanto respondiam 404 o dia inteiro.
+//
+// E a terceira trava, com dono e modo de falha diferentes das outras duas:
+// a do DevOps por GRANT, a de neon-real.test.js por connection string, esta
+// por resposta da propria origem. As tres cairem juntas exige tres enganos sem
+// relacao entre si.
+//
 // AMBIENTE: mede o que ARNES_API_BASE apontar, e o relatorio TEM de dizer qual.
 // Em 25/08 as 8 estao publicadas em PREVIEW e producao ainda responde 404 — um
 // numero verde sem o ambiente colado seria lido como "a API esta de pe" e
@@ -47,11 +66,36 @@ async function post(rota, corpo, extra) {
   return { status: r.status, json };
 }
 
+const BANCO_DESCARTAVEL = 'arnes';
+
 const medido = {};
 let erroDeSemeadura = null;
+let identidade = null;
+let recusa = null;
 
 before(async () => {
   if (!BASE) return;
+  // --- 0. IDENTIDADE DA ORIGEM, antes de escrever qualquer coisa.
+  try {
+    const r = await fetch(url('/api/saude'), { headers: cabecalhos() });
+    identidade = JSON.parse(await r.text());
+  } catch (e) {
+    recusa = 'nao consegui ler /api/saude para identificar a origem: ' + String(e.message);
+    return;
+  }
+  if (identidade && identidade.protection) {
+    recusa = 'a origem respondeu com a PROTECAO da plataforma — ARNES_BYPASS ausente ou expirado. NAO MEDI.';
+    return;
+  }
+  if (identidade?.banco_nome !== BANCO_DESCARTAVEL) {
+    recusa = `RECUSA DE SEGURANCA: a origem ${BASE} usa o banco ` +
+      `"${identidade?.banco_nome ?? '(nao informado)'}", nao "${BANCO_DESCARTAVEL}". ` +
+      'Este arquivo GRAVA aparelhos e marcacoes pelas rotas e nao consegue limpar — ' +
+      'marcacao nunca e alterada. Nao rodo fora do banco descartavel. ' +
+      '(Producao nao informa banco_nome de proposito, entao ela cai aqui tambem.)';
+    return;
+  }
+
   try {
     const marca = 'qa' + Date.now().toString(36);
     const segredo = 'seg-' + crypto.randomUUID();
@@ -141,6 +185,7 @@ before(async () => {
     medido.aprovacao = { ganhadores: ganhadores.length, recusados, outros };
 
     console.log(`\n[corridas-http] AMBIENTE: ${BASE}`);
+    console.log(`  identidade da origem: ${JSON.stringify(identidade)}`);
     console.log(`  marcacao duplicada .... ${medido.marcacao.quebradas}/${RODADAS_MARCACAO} quebradas | pior caso ${piorAceitos} aceito(s)`);
     console.log(`  aprovacao (1 rodada) .. ${medido.aprovacao.ganhadores} aprovacao(oes), ${recusados} CODIGO_NAO_ENCONTRADO` +
       (outros.length ? ` | fora do contrato: ${JSON.stringify(outros)}` : ''));
@@ -149,18 +194,25 @@ before(async () => {
   }
 }, { timeout: 600000 });
 
+test('a origem e o banco descartavel, nunca producao', pular, () => {
+  assert.equal(recusa, null, recusa || '');
+});
+
 test('a semeadura pelas rotas reais funcionou', pular, () => {
+  assert.equal(recusa, null, 'origem recusada; nada foi medido');
   assert.equal(erroDeSemeadura, null,
     'nao consegui semear pelas rotas reais, entao NAO MEDI as corridas:\n' + (erroDeSemeadura && erroDeSemeadura.message));
 });
 
 test('HTTP: mesmo id_cliente simultaneo -> um aceito, resto duplicado', pular, () => {
+  assert.equal(recusa, null, 'origem recusada; nada foi medido');
   assert.equal(erroDeSemeadura, null, 'semeadura falhou; este resultado nao existe');
   assert.equal(medido.marcacao.quebradas, 0,
     `pior caso: ${medido.marcacao.piorAceitos} aceitos para o mesmo id_cliente, na pilha completa.`);
 });
 
 test('HTTP: mesmo codigo simultaneo -> uma aprovacao so', pular, () => {
+  assert.equal(recusa, null, 'origem recusada; nada foi medido');
   assert.equal(erroDeSemeadura, null, 'semeadura falhou; este resultado nao existe');
   assert.equal(medido.aprovacao.ganhadores, 1,
     `${medido.aprovacao.ganhadores} aprovacoes bem-sucedidas para um codigo de uso unico.`);
