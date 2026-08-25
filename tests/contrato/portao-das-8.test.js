@@ -27,8 +27,9 @@
 // ORIGEM: ARNES_API_BASE. Sem ela, PULA com motivo declarado — nao inventa
 // verde. Se a origem for protegida (preview da Vercel), ARNES_BYPASS carrega o
 // cabecalho x-vercel-protection-bypass; NUNCA literal no codigo.
-import test, { before } from 'node:test';
+import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { criarServidor } from '../e2e/servidor-falso.js';
 
 const BASE = process.env.ARNES_API_BASE;
 const BYPASS = process.env.ARNES_BYPASS;
@@ -53,6 +54,13 @@ const ROTAS = [
 ];
 
 const medido = [];
+// Calibracao: o portao ja nasceu VERMELHO (8/8 nao publicadas) e um portao que
+// nunca ficou verde pode estar quebrado NO SENTIDO VERDE -- por exemplo se a
+// lista de rotas tivesse um erro de digitacao, ele acusaria 404 para sempre e
+// pareceria estar funcionando. Aqui ele e apontado para um servidor que
+// comprovadamente serve as 8, e EXIGE verde. E a mesma disciplina de
+// calibracao.test.js: um alarme que grita para tudo nao esta medindo.
+const calibracao = [];
 
 before(async () => {
   if (!BASE) return;
@@ -79,6 +87,25 @@ before(async () => {
   }
 }, { timeout: 180000 });
 
+let servidorLocal;
+
+before(async () => {
+  const criado = criarServidor({});
+  servidorLocal = criado.servidor;
+  await new Promise(r => servidorLocal.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${servidorLocal.address().port}`;
+  for (const rota of ROTAS) {
+    const r = await fetch(base + rota, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}'
+    });
+    calibracao.push({ rota, status: r.status });
+  }
+  const naoPublicadas = calibracao.filter(m => m.status === 404).length;
+  console.log(`\n[portao-das-8 · calibracao] servidor que SERVE as 8: ${8 - naoPublicadas}/8 vistas como publicadas`);
+}, { timeout: 120000 });
+
+after(() => { if (servidorLocal) servidorLocal.close(); });
+
 test('as 8 rotas do primeiro turno estao publicadas (nenhuma 404)', pular, () => {
   const ausentes = medido.filter(m => m.status === 404).map(m => m.rota);
   assert.deepEqual(
@@ -93,4 +120,19 @@ test('as 8 rotas do primeiro turno estao publicadas (nenhuma 404)', pular, () =>
 test('nenhuma rota falha por rede ou origem inalcancavel', pular, () => {
   const ruins = medido.filter(m => typeof m.status !== 'number');
   assert.deepEqual(ruins, [], 'origem inalcancavel: ' + JSON.stringify(ruins));
+});
+
+// ---------------------------------------------------------------------------
+// A calibracao. Sem ela, "8/8 NAO PUBLICADA" poderia ser um defeito do portao
+// (lista de rotas errada, metodo errado, base mal montada) em vez de um fato
+// sobre a API -- e as duas coisas sao indistinguiveis olhando so o vermelho.
+// ---------------------------------------------------------------------------
+test('calibracao: contra um servidor que SERVE as 8, o portao fica verde', () => {
+  const ausentes = calibracao.filter(m => m.status === 404).map(m => m.rota);
+  assert.deepEqual(
+    ausentes, [],
+    'O portao acusou 404 contra um servidor que serve estas rotas. Entao o ' +
+    'vermelho dele NAO prova nada sobre a API: prova que a lista de rotas, o ' +
+    'metodo ou a montagem da URL estao errados aqui dentro.\n  ' + ausentes.join('\n  ')
+  );
 });
