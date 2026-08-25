@@ -304,6 +304,34 @@ Ação barata já enviada ao API-3: terminar a fábrica com
 as duas guardas em vez de confiar na autoverificação — fica para depois do teste;
 mexer em composição de núcleo na véspera troca risco conhecido por desconhecido.
 
+## Riscos aceitos, e a data de validade de cada aceite
+
+Um aceite justificado por *"já existe um caminho pior"* **precisa nomear qual
+caminho** — senão ninguém sabe o que reavaliar quando o pior for consertado.
+Risco aceito por comparação deixa de ser aceitável no dia em que o maior fecha.
+
+| Aceito | Porque hoje | Expira quando |
+|---|---|---|
+| `503 ADAPTADOR_SEM_CHAVE_RH` distingue "usuário existe e o adaptador quebrou" de "usuário não existe" — oráculo estreito de enumeração | divulgação marginal **zero**: `/rh/sal` é rota **aberta** e já enumera usuário, então o atacante não precisa do 503; e a condição só ocorre em queda **total** do login de RH, quando não há login a proteger e o diagnóstico é o que encerra a queda | **T-7B0D12** fechar o oráculo do `/rh/sal`. Aí o 503 vira o único caminho de enumeração e a conta inverte. Amarrado em **T-A6C276**. |
+
+## As corridas NUNCA rodam contra produção
+
+Decisão do Orquestrador, registrada aqui para não ser renegociada sob pressão —
+nem com "só uma vez para ter certeza".
+
+`corridas-http.test.js` **grava**: registra aparelhos e grava marcações de
+verdade, pelas rotas. Corrida contra o livro do cliente não é medição, é
+**contaminação** — e irreversível **por desenho**, porque marcação nunca é
+alterada. Um ponto de gente que não existe fica no registro para sempre, e não
+há comando que desfaça.
+
+Contra produção, então, só o que é não-destrutivo: o **portão das 8** (POSTa
+corpo vazio, que é recusado) e a **identidade** do `/api/saude`. As invariantes
+de concorrência ficam provadas em **preview**, na mesma pilha e no mesmo código
+— e isso é o mais forte que dá para ter sem sujar o cliente. O número de
+produção é *"8 rotas publicadas"*, nunca *"corridas verdes"*, e essa é a
+resposta certa, não uma lacuna.
+
 ## Limite conhecido, declarado e não redescoberto
 
 **Idempotência continua ler-depois-gravar** (`nucleo/repositorio.js`,
