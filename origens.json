@@ -1,0 +1,35 @@
+{
+  "_leia": "As tres origens do projeto, mais o backend legado. Fonte unica para as CSPs e para as guardas de CI. A tabela em prosa vive em publico/LEIA-ME.md; esta e a versao que a maquina confere. Origem separada e a fronteira REAL (IndexedDB, Cache Storage e escopo de service worker isolam por origem, nao por caminho) -- confundir duas delas desfaz o isolamento sem quebrar nada visivelmente, que e o pior jeito de errar. Por isso ha guarda conferindo que as tres sao distintas entre si.",
+
+  "app": {
+    "origem": "https://control-face-id.vercel.app",
+    "projeto_vercel": "control-face-id",
+    "raiz": ".",
+    "o_que_e": "App do operador: o gestor bate ponto e o RH administra. Unico que registra service worker e unico que guarda a credencial de 256 bits do aparelho no IndexedDB 'efrat-ponto'.",
+    "dominio_proprio": "a confirmar com o cliente"
+  },
+
+  "publica": {
+    "origem": null,
+    "projeto_vercel": "a criar",
+    "raiz": "publico",
+    "o_que_e": "Pagina de uso unico onde o colaborador abre o link e cadastra o rosto. Sem service worker, sem IndexedDB, sem cache.",
+    "dominio_proprio": "a definir",
+    "_pendente": "O projeto da Vercel com Root Directory publico/ ainda nao existe (cartao T-600DD4). Enquanto 'origem' for null, a guarda de CI so nao consegue conferir esta linha -- ela nao afrouxa as outras."
+  },
+
+  "api": {
+    "origem": "https://control-face-id-api.vercel.app",
+    "projeto_vercel": "control-face-id-api",
+    "raiz": "servidor",
+    "o_que_e": "A API propria, no lugar do n8n. E CROSS-ORIGIN de proposito para as outras duas: e isso que mantem a API fora do handler de fetch do sw.js do app, que e cache-first. Mesma origem faria uma resposta de marcacao poder vir do cache -- o app diria 'registrado' para algo que o servidor nunca recebeu (docs/vercel-na-frente-do-n8n.md).",
+    "dominio_proprio": "a definir"
+  },
+
+  "legado": {
+    "origem": "https://n8n.samasc.com.br",
+    "base": "https://n8n.samasc.com.br/webhook",
+    "o_que_e": "O n8n do piloto. Sai quando o corte do cartao API-6 terminar.",
+    "_por_que_ainda_esta_aqui": "Janela de corte. As CSPs liberam n8n E a API ao mesmo tempo de proposito: rollback do corte e trocar o apiBase de volta, e rollback que exige republicar CSP nao e rollback. Quando o corte fechar, esta entrada sai e as CSPs perdem o host do n8n -- a politica fica MAIS fechada, nao menos."
+  }
+}
