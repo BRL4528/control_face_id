@@ -1,0 +1,48 @@
+// Alocação diária + cerca virtual — a operação que o RH faz todo dia.
+//
+// Recebe UM dia e uma lista de alocações; cada uma diz qual colaborador, em qual
+// equipe e onde (cerca: lat, lng, raio). Idempotente por (empresa, dia,
+// colaborador): realocar alguém é sobrescrever a linha do dia dele — é o que
+// permite "arrastar o pin e salvar" sem duplicar.
+//
+// Como o RH normalmente aloca a equipe inteira no mesmo ponto, o cliente manda a
+// cerca uma vez e a lista de colaboradores; expandimos aqui. Também aceita cerca
+// por item, para o caso de gente no mesmo dia em locais diferentes.
+import { db, novoId } from '../_lib/db.js';
+import { autenticarRh } from '../_lib/auth.js';
+import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
+
+export default async function handler(req, res) {
+  if (cors(req, res)) return;
+  if (exigeMetodo(req, res, 'POST')) return;
+  const rh = autenticarRh(req);
+  if (!rh) return erro(res, 401, 'SESSAO_INVALIDA', 'faça login novamente');
+
+  const b = corpo(req);
+  const dia = String(b.dia || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const equipeId = b.equipe_id;
+  const cercaBase = b.cerca || {};
+  const itens = Array.isArray(b.colaboradores) ? b.colaboradores : [];
+  if (!itens.length) return erro(res, 400, 'CORPO_INVALIDO', 'nenhum colaborador para alocar');
+
+  const sql = db();
+  let gravadas = 0;
+  for (const it of itens) {
+    // Cada item pode ser só o id (usa a cerca base) ou um objeto com cerca própria.
+    const colaboradorId = typeof it === 'string' ? it : it.colaborador_id;
+    if (!colaboradorId) continue;
+    const cerca = (typeof it === 'object' && it.cerca) ? it.cerca : cercaBase;
+    const eq = (typeof it === 'object' && it.equipe_id) || equipeId;
+    if (cerca.lat == null || cerca.lng == null || !eq) continue;
+
+    await sql`
+      INSERT INTO alocacao (id, empresa_id, dia, colaborador_id, equipe_id, cerca_lat, cerca_lng, cerca_raio_m)
+      VALUES (${novoId()}, ${rh.empresa_id}, ${dia}, ${colaboradorId}, ${eq},
+              ${cerca.lat}, ${cerca.lng}, ${Number(cerca.raio_m) || 200})
+      ON CONFLICT (empresa_id, dia, colaborador_id) DO UPDATE SET
+        equipe_id = EXCLUDED.equipe_id, cerca_lat = EXCLUDED.cerca_lat,
+        cerca_lng = EXCLUDED.cerca_lng, cerca_raio_m = EXCLUDED.cerca_raio_m`;
+    gravadas++;
+  }
+  return ok(res, { dia, gravadas });
+}
