@@ -6,3 +6,6 @@ tests/fixtures/*.y4m
 *.log
 .env
 _to_delete/
+.vercel
+.env*
+pnpm-lock.yaml
