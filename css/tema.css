@@ -242,3 +242,32 @@ nav button.on,.nav-item.on{background:var(--azul-bg);color:var(--azul-esc)}
 .check span{font-size:13.5px}
 /* MapLibre respeita o raio do container */
 #mapa .maplibregl-map{border-radius:12px}
+
+/* ---------------- biometria (layout compacto) ---------------- */
+.bio .biogrid{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}
+/* Câmera com teto de tamanho — não empurra a tela pra baixo */
+.biocam{width:200px;height:200px;flex:0 0 auto;aspect-ratio:1/1;border-radius:12px;overflow:hidden;position:relative;background:var(--surface-2)}
+.biocam video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+.bio .shots{display:flex;gap:8px;flex:1;min-width:140px}
+.bio .shots>div{width:56px;height:56px;border-radius:9px;border:1px dashed var(--linha-3);
+  display:flex;align-items:center;justify-content:center;color:var(--muted);font-weight:700;overflow:hidden;background:var(--surface-2)}
+.bio .shots>div.vazio{border-style:dashed}
+.bio .shots img{width:100%;height:100%;object-fit:cover}
+.biobtns{display:flex;gap:8px;margin-top:10px}
+.biobtns .act{margin-top:0}
+.biostatus{margin:10px 0 4px;font-size:12.5px;padding:9px 11px;border-radius:9px;
+  background:var(--surface-2);border:1px solid var(--linha);color:var(--ink-2);min-height:38px;display:flex;align-items:center}
+.biostatus.ok{border-color:var(--verde);color:var(--verde-ink);background:var(--verde-bg)}
+.biostatus.warn{border-color:var(--ambar);color:#8a6d00}
+.biostatus.bad{border-color:var(--vermelho);color:var(--vermelho)}
+
+/* ---------------- botões mini na linha do colaborador ---------------- */
+.act.ghost.mini{width:auto;margin:0;padding:9px 12px;font-size:12px}
+.linha-item{display:flex;align-items:center;gap:10px}
+.linha-item img{width:40px;height:40px;border-radius:8px;object-fit:cover;flex:0 0 auto}
+
+/* ---------------- código de ativação ---------------- */
+.codigo-box{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.codigo-box>div{flex:1;min-width:150px;background:var(--surface-2);border:1px solid var(--linha);border-radius:10px;padding:10px 12px}
+.codigo-box .lb{display:block;margin-bottom:4px}
+.codigo-box .cod{font-size:14px;font-weight:600;color:var(--ink);word-break:break-all}

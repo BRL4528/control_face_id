@@ -40,6 +40,7 @@ export default async function handler(req, res) {
 
   return ok(res, {
     usuario: { nome: rh.nome, usuario: rh.usuario },
+    empresa_id: empresa,   // o app do colaborador usa como "código da empresa" no pareamento
     periodo_dias: dias,
     servidor_hora: new Date().toISOString(),
     equipes, pessoas, marcacoes, locais,

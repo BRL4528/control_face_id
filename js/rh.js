@@ -428,24 +428,64 @@ export const Rh = {
             (p.ativo ? '' : ' <span class="tag">inativo</span>') + '</div>' +
           '<div class="mt">' + esc(p.matricula) + ' · ' + esc(this.nomeEquipe(p.equipe_id)) +
             (p.tem_biometria ? '' : ' · <span class="warnfg">sem biometria</span>') + '</div></div>' +
-          '<button class="act ghost" style="width:auto;margin:0;padding:9px 12px;font-size:12px" data-bio="' + p.pessoa_id + '">' +
+          '<button class="act ghost mini" data-codigo="' + esc(p.matricula) + '" data-nome="' + esc(p.nome) + '">Código</button>' +
+          '<button class="act ghost mini" data-bio="' + p.pessoa_id + '">' +
             (p.tem_biometria ? 'Refazer' : 'Biometria') + '</button>' +
           '</div>').join('') +
       '</div>' +
       '<div id="areaBio"></div>';
 
     $('btnNovaPessoa').onclick = async () => {
+      const nome = $('pNome').value.trim(), matricula = $('pMat').value.trim();
+      if (!nome || !matricula) { toast('Informe nome e matrícula', 'warn'); return; }
       const r = await ApiRh.colaborador(this.token, {
-        nome: $('pNome').value.trim(), matricula: $('pMat').value.trim(),
-        equipe_id: $('pEquipe').value, papel: $('pPapel').value
+        nome, matricula, equipe_id: $('pEquipe').value, papel: $('pPapel').value
       });
       if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
       toast('Colaborador salvo', 'ok');
       await this.recarregar();
+      // Mostra o código de ativação logo após salvar — é o que o RH envia ao
+      // funcionário para ele ativar o ponto no próprio celular.
+      this.mostrarCodigoAtivacao(nome, matricula);
     };
     $('rh-pessoas').querySelectorAll('button[data-bio]').forEach(b => {
       b.onclick = () => this.abrirBiometria(b.dataset.bio);
     });
+    $('rh-pessoas').querySelectorAll('button[data-codigo]').forEach(b => {
+      b.onclick = () => this.mostrarCodigoAtivacao(b.dataset.nome, b.dataset.codigo);
+    });
+  },
+
+  /**
+   * Código de ativação do colaborador. Não é senha — é o par (código da empresa
+   * + matrícula) que ele digita UMA vez no app para parear o celular. Mostra com
+   * botão de copiar e um texto pronto para mandar no WhatsApp.
+   */
+  mostrarCodigoAtivacao(nome, matricula) {
+    const empresa = this.dados.empresa_id || '';
+    const primeiro = String(nome || '').split(' ')[0];
+    const texto = 'Olá ' + primeiro + '! Ative seu ponto facial:\n' +
+      '1. Abra ' + location.origin + '\n' +
+      '2. Toque em ATIVAR MEU PONTO\n' +
+      '3. Código da empresa: ' + empresa + '\n' +
+      '4. Sua matrícula: ' + matricula + '\n' +
+      'Depois é só olhar para a câmera e piscar.';
+    $('areaBio').innerHTML =
+      '<div class="card"><h2>Código de ativação de ' + esc(nome) + '</h2>' +
+        '<p class="nota" style="margin:-4px 0 12px">Envie estes dados ao funcionário. Ele usa uma vez para ativar o ponto no próprio celular.</p>' +
+        '<div class="codigo-box">' +
+          '<div><span class="lb">Código da empresa</span><div class="mono cod">' + esc(empresa) + '</div></div>' +
+          '<div><span class="lb">Matrícula</span><div class="mono cod">' + esc(matricula) + '</div></div>' +
+        '</div>' +
+        '<button class="act" id="btnCopiarConvite">Copiar mensagem para WhatsApp</button>' +
+        '<button class="act ghost" id="btnFecharCodigo">Fechar</button>' +
+      '</div>';
+    $('btnCopiarConvite').onclick = async () => {
+      try { await navigator.clipboard.writeText(texto); toast('Mensagem copiada', 'ok'); }
+      catch (e) { toast('Copie manualmente os dados acima', 'warn'); }
+    };
+    $('btnFecharCodigo').onclick = () => { $('areaBio').innerHTML = ''; };
+    $('areaBio').scrollIntoView({ behavior: 'smooth', block: 'start' });
   },
 
   async abrirBiometria(pessoaId) {
@@ -453,30 +493,51 @@ export const Rh = {
     if (!p) return;
     this.alvoCadastro = p;
     this.capturas = [];
+    // Layout compacto: a câmera fica num quadro de tamanho fixo (não empurra a
+    // tela), as 3 miniaturas ao lado, e uma linha de status sempre visível.
     $('areaBio').innerHTML =
-      '<div class="card"><h2>Biometria de ' + esc(p.nome) + '</h2>' +
-        '<div class="camwrap" style="aspect-ratio:1/1">' +
-          '<video id="videoCad" playsinline muted autoplay></video>' +
-          '<div class="camoff" id="camOffCad">A câmera liga na primeira captura</div>' +
+      '<div class="card bio"><h2>Biometria de ' + esc(p.nome) + '</h2>' +
+        '<p class="nota" style="margin:-4px 0 10px">3 fotos de frente, boa luz. Sem boné, óculos escuros ou máscara. Pode tirar na hora ou enviar do arquivo.</p>' +
+        '<div class="biogrid">' +
+          '<div class="camwrap biocam">' +
+            '<video id="videoCad" playsinline muted autoplay></video>' +
+            '<div class="camoff" id="camOffCad">Câmera desligada</div>' +
+          '</div>' +
+          '<div class="shots" id="cadShots"></div>' +
         '</div>' +
-        '<div class="shots" id="cadShots"></div>' +
-        '<button class="act ghost" id="btnCapCad">Capturar 1/3</button>' +
+        '<div id="bioStatus" class="biostatus"></div>' +
+        '<div class="biobtns">' +
+          '<button class="act" id="btnCapCad">📷 Tirar foto</button>' +
+          '<button class="act ghost" id="btnUploadCad">🖼️ Enviar imagem</button>' +
+          '<input type="file" id="fileCad" accept="image/*" class="hide" multiple>' +
+        '</div>' +
         '<button class="act" id="btnSalvarBio" disabled>Salvar biometria</button>' +
         '<button class="act ghost" id="btnFecharBio">Fechar</button>' +
-        '<p class="nota" style="margin-top:10px">Sem boné, óculos escuros ou máscara. Mova um pouco a cabeça entre as capturas.</p>' +
       '</div>';
     this.pintarShots();
+    this.bioStatus('Toque em "Tirar foto" ou "Enviar imagem" para começar.');
     $('btnCapCad').onclick = () => this.capturarCadastro();
+    $('btnUploadCad').onclick = () => $('fileCad').click();
+    $('fileCad').onchange = e => this.enviarImagens(e.target.files);
     $('btnSalvarBio').onclick = () => this.salvarBiometria();
     $('btnFecharBio').onclick = () => { this.pararCamCad(); $('areaBio').innerHTML = ''; };
     $('areaBio').scrollIntoView({ behavior: 'smooth', block: 'start' });
   },
 
+  /** Linha de status/rastreio: o RH entende o que está acontecendo e por quê. */
+  bioStatus(msg, tipo) {
+    const el = $('bioStatus');
+    if (!el) return;
+    el.textContent = msg;
+    el.className = 'biostatus' + (tipo ? ' ' + tipo : '');
+  },
+
   pintarShots() {
     $('cadShots').innerHTML = [0, 1, 2].map(i =>
-      this.capturas[i] ? '<div><img src="' + this.capturas[i].thumb + '"></div>' : '<div>' + (i + 1) + '</div>').join('');
+      this.capturas[i] ? '<div><img src="' + this.capturas[i].thumb + '"></div>' : '<div class="vazio">' + (i + 1) + '</div>').join('');
     $('btnSalvarBio').disabled = this.capturas.length < 3;
-    $('btnCapCad').textContent = this.capturas.length < 3 ? 'Capturar ' + (this.capturas.length + 1) + '/3' : 'Completo';
+    const btn = $('btnCapCad');
+    if (btn) btn.textContent = this.capturas.length < 3 ? '📷 Tirar foto (' + this.capturas.length + '/3)' : '📷 Completo';
   },
 
   async ligarCamCad() {
@@ -487,7 +548,10 @@ export const Rh = {
       await $('videoCad').play();
       $('camOffCad').classList.add('hide');
       return true;
-    } catch (e) { toast('Sem acesso à câmera', 'bad'); return false; }
+    } catch (e) {
+      this.bioStatus('Sem acesso à câmera (' + e.name + '). Use "Enviar imagem".', 'bad');
+      return false;
+    }
   },
 
   pararCamCad() {
@@ -495,19 +559,59 @@ export const Rh = {
   },
 
   async capturarCadastro() {
+    if (this.capturas.length >= 3) { this.bioStatus('Já tem 3 fotos. Salve ou remova para refazer.', 'warn'); return; }
+    if (!Face.pronto) { this.bioStatus('Reconhecimento ainda carregando, aguarde…', 'warn'); return; }
+    this.bioStatus('Ligando a câmera…');
     if (!(await this.ligarCamCad())) return;
     $('btnCapCad').disabled = true;
+    this.bioStatus('Analisando o rosto…');
     try {
       const r = await Face.capturar($('videoCad'));
-      if (!r) { toast('Nenhum rosto — tire óculos escuros ou máscara', 'warn'); return; }
-      if (r.reprovado) { toast('Qualidade insuficiente: ' + r.qualidade.msg, 'warn'); return; }
+      if (!r) { this.bioStatus('Nenhum rosto detectado. Aproxime, melhore a luz e tente de novo.', 'bad'); return; }
+      if (r.reprovado) { this.bioStatus('Qualidade insuficiente: ' + r.qualidade.msg + '. Tente de novo.', 'warn'); return; }
       this.capturas.push(r);
       this.pintarShots();
+      this.bioStatus(this.capturas.length + ' de 3 capturadas. ' +
+        (this.capturas.length < 3 ? 'Mova um pouco a cabeça e capture de novo.' : 'Pronto para salvar.'), 'ok');
+    } catch (e) {
+      this.bioStatus('Erro ao capturar: ' + (e.message || e), 'bad');
     } finally { $('btnCapCad').disabled = false; }
+  },
+
+  /** Upload de imagens do arquivo — mesmo gate de qualidade da câmera. */
+  async enviarImagens(files) {
+    if (!files || !files.length) return;
+    if (!Face.pronto) { this.bioStatus('Reconhecimento ainda carregando, aguarde…', 'warn'); return; }
+    for (const file of files) {
+      if (this.capturas.length >= 3) break;
+      this.bioStatus('Lendo "' + file.name + '"…');
+      try {
+        const img = await this.carregarImagem(file);
+        const r = await Face.capturarDeImagem(img);
+        if (!r) { this.bioStatus('Sem rosto em "' + file.name + '". Escolha uma foto de frente, nítida.', 'bad'); continue; }
+        if (r.reprovado) { this.bioStatus('"' + file.name + '": ' + r.qualidade.msg + '. Tente outra.', 'warn'); continue; }
+        this.capturas.push(r);
+        this.pintarShots();
+        this.bioStatus(this.capturas.length + ' de 3 prontas.', 'ok');
+      } catch (e) {
+        this.bioStatus('Não consegui ler "' + file.name + '": ' + (e.message || e), 'bad');
+      }
+    }
+    $('fileCad').value = '';   // permite reenviar o mesmo arquivo
+  },
+
+  carregarImagem(file) {
+    return new Promise((res, rej) => {
+      const img = new Image();
+      img.onload = () => res(img);
+      img.onerror = () => rej(new Error('arquivo de imagem inválido'));
+      img.src = URL.createObjectURL(file);
+    });
   },
 
   async salvarBiometria() {
     const c = this.capturas;
+    if (c.length < 3) { this.bioStatus('Faltam capturas (precisa de 3).', 'warn'); return; }
     const coer = Math.max(
       euclidiana(c[0].descritor, c[1].descritor),
       euclidiana(c[0].descritor, c[2].descritor),
@@ -515,6 +619,7 @@ export const Rh = {
     if (coer > 0.55 && !confirm('As 3 capturas estão pouco parecidas entre si (' + coer.toFixed(3) +
       ').\n\nIsso costuma virar falso negativo depois. Salvar assim mesmo?')) return;
     $('btnSalvarBio').disabled = true;
+    this.bioStatus('Salvando biometria…');
     const p = this.alvoCadastro;
     // Autenticado pelo JWT do RH — sem credencial de aparelho (o RH não tem uma).
     const bio = await ApiRh.biometria(this.token, {
@@ -522,7 +627,7 @@ export const Rh = {
       miniatura: c[0].thumb, coerencia: Number(coer.toFixed(4))
     });
     $('btnSalvarBio').disabled = false;
-    if (!bio.ok) { toast(bio.erro || 'Falha ao gravar biometria', 'bad'); return; }
+    if (!bio.ok) { this.bioStatus('Falha ao gravar: ' + (bio.erro || 'erro'), 'bad'); return; }
     toast('Biometria salva (coerência ' + coer.toFixed(3) + ')', 'ok');
     this.pararCamCad();
     $('areaBio').innerHTML = '';

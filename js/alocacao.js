@@ -29,19 +29,20 @@ function carregarMapLibre() {
   return _mapLibrePromise;
 }
 
-// Estilo raster gratuito (CartoDB Positron) — sem chave de API. Os domínios de
-// tile estão liberados na CSP (vercel.json).
+// Estilo raster do OpenStreetMap — 100% gratuito, sem chave de API. Os domínios
+// de tile (*.tile.openstreetmap.org) estão liberados na CSP (vercel.json).
 const ESTILO = {
   version: 8,
   sources: {
-    carto: {
+    osm: {
       type: 'raster',
-      tiles: ['https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
-              'https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'],
-      tileSize: 256, attribution: '© OpenStreetMap © CARTO'
+      tiles: ['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+              'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+              'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      tileSize: 256, maxzoom: 19, attribution: '© OpenStreetMap'
     }
   },
-  layers: [{ id: 'carto', type: 'raster', source: 'carto' }]
+  layers: [{ id: 'osm', type: 'raster', source: 'osm' }]
 };
 
 /** Círculo GeoJSON aproximado da cerca, para desenhar o raio no mapa. */

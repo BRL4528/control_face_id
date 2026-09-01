@@ -285,5 +285,33 @@ export const Face = {
     return null;
   },
 
+  /**
+   * Captura a partir de uma imagem já carregada (upload), não da câmera. Mesmo
+   * gate de qualidade da captura ao vivo. Recebe um HTMLImageElement pronto.
+   * Devolve { descritor, thumb, qualidade, reprovado } ou null se não achou rosto.
+   */
+  async capturarDeImagem(img) {
+    if (fingido()) return this._capturaFingida();
+    if (!this.pronto) throw new Error('reconhecimento ainda carregando');
+    const cv = document.createElement('canvas');
+    cv.width = img.naturalWidth || img.width;
+    cv.height = img.naturalHeight || img.height;
+    if (!cv.width || !cv.height) return null;
+    cv.getContext('2d').drawImage(img, 0, 0);
+    let det = null;
+    try {
+      det = await faceapi.detectSingleFace(cv, this._opts(Math.max(cfg().inputSize, 512)))
+        .withFaceLandmarks().withFaceDescriptor();
+    } catch (e) { det = null; }
+    if (!det) return null;
+    const q = avaliar(det, cv, det.detection.box);
+    return {
+      descritor: Array.from(det.descriptor),
+      thumb: miniatura(cv, det.detection.box, 128),
+      qualidade: q,
+      reprovado: !q.ok
+    };
+  },
+
   distancia: euclidiana
 };
