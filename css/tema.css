@@ -271,3 +271,15 @@ nav button.on,.nav-item.on{background:var(--azul-bg);color:var(--azul-esc)}
 .codigo-box>div{flex:1;min-width:150px;background:var(--surface-2);border:1px solid var(--linha);border-radius:10px;padding:10px 12px}
 .codigo-box .lb{display:block;margin-bottom:4px}
 .codigo-box .cod{font-size:14px;font-weight:600;color:var(--ink);word-break:break-all}
+
+/* ---------------- barra de localização (busca/colar/GPS) ---------------- */
+.localbar{margin:8px 0 0;position:relative}
+.buscabox{display:flex;gap:6px;align-items:stretch}
+.buscabox input{margin:0;flex:1}
+.resultados{position:absolute;left:0;right:0;top:100%;z-index:20;background:var(--surface);
+  border:1px solid var(--linha);border-radius:10px;margin-top:4px;box-shadow:0 12px 28px rgba(14,23,41,.14);
+  max-height:240px;overflow:auto}
+.resultado{display:block;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--linha-2);
+  padding:10px 12px;font-size:12.5px;color:var(--ink-2);cursor:pointer;line-height:1.4}
+.resultado:last-child{border-bottom:0}
+.resultado:hover{background:var(--surface-2);color:var(--ink)}

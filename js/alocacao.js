@@ -10,6 +10,7 @@
 // MapLibre entra sob demanda (só quando a aba abre), como o Chart.js do painel —
 // o celular do colaborador nunca baixa 800 KB de mapa.
 import { ApiRh } from './api.js';
+import { extrairCoordenadas } from './geo-parse.js';
 import { $, esc, mostrar, toast } from './ui.js';
 
 let _mapLibrePromise = null;
@@ -92,9 +93,18 @@ export const Alocacao = {
               '>' + esc(e.nome) + '</option>').join('') + '</select></div>' +
         '</div>' +
         '<label class="lb">Local (cerca)</label>' +
-        '<select id="alLocal"><option value="">— escolha um local salvo ou toque no mapa —</option>' +
+        '<select id="alLocal"><option value="">— escolha um local salvo ou defina abaixo —</option>' +
           locais.map(l => '<option value="' + l.local_id + '">' + esc(l.nome) + ' · ' + l.raio_m + 'm</option>').join('') +
         '</select>' +
+        // Barra de localização: buscar endereço, colar coord/link do Maps, ou usar o GPS.
+        '<div class="localbar">' +
+          '<div class="buscabox">' +
+            '<input type="text" id="alBusca" placeholder="🔍 Buscar endereço (rua, cidade)… ou colar coordenadas / link do Maps">' +
+            '<button class="act ghost" id="btnBuscar" style="margin:0;width:auto">Buscar</button>' +
+            '<button class="act ghost" id="btnMinhaLoc" title="Usar minha localização atual" style="margin:0;width:auto">📍</button>' +
+          '</div>' +
+          '<div id="alResultados" class="resultados hide"></div>' +
+        '</div>' +
         '<div id="mapa" style="height:300px;border-radius:12px;overflow:hidden;margin:8px 0;background:var(--surface-2)"></div>' +
         '<div class="alrow">' +
           '<div style="flex:2"><label class="lb">Raio: <span id="alRaioVal" class="mono">' + this.raio + '</span> m</label>' +
@@ -112,6 +122,9 @@ export const Alocacao = {
     $('alDia').onchange = e => { this.dia = e.target.value; };
     $('alEquipe').onchange = e => { this.equipeId = e.target.value; this.marcarEquipe(); this.pintarPessoas(); };
     $('alLocal').onchange = e => this.escolherLocal(e.target.value);
+    $('btnBuscar').onclick = () => this.buscar();
+    $('alBusca').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); this.buscar(); } };
+    $('btnMinhaLoc').onclick = () => this.minhaLocalizacao();
     $('alRaio').oninput = e => { this.raio = Number(e.target.value); $('alRaioVal').textContent = this.raio; this.desenharCerca(); };
     $('btnSalvarLocal').onclick = () => this.salvarLocal();
     $('btnAlocar').onclick = () => this.alocar();
@@ -188,6 +201,68 @@ export const Alocacao = {
     this.raio = l.raio_m;
     $('alRaio').value = l.raio_m; $('alRaioVal').textContent = l.raio_m;
     this.definirCentro(l.lat, l.lng, true);
+  },
+
+  /* --------------------------------------------- buscar / colar / GPS */
+
+  /**
+   * O que o RH digitou pode ser: (1) coordenadas coladas, (2) um link do Google
+   * Maps, ou (3) um endereço para buscar. Tenta extrair coordenadas direto
+   * primeiro (instantâneo, offline); se não for, geocodifica o texto como
+   * endereço via Nominatim (comunidade OSM, grátis).
+   */
+  async buscar() {
+    const texto = ($('alBusca').value || '').trim();
+    if (!texto) return;
+    this.esconderResultados();
+
+    const coord = extrairCoordenadas(texto);
+    if (coord && coord.erro) { toast(coord.erro, 'warn'); return; }
+    if (coord) { this.definirCentro(coord.lat, coord.lng, true); toast('Ponto colado', 'ok'); return; }
+
+    // Endereço → geocoding.
+    const btn = $('btnBuscar'); btn.disabled = true; btn.textContent = '…';
+    try {
+      const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=5&addressdetails=0&q=' +
+        encodeURIComponent(texto);
+      const r = await fetch(url, { headers: { 'Accept-Language': 'pt-BR' } });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const lista = await r.json();
+      if (!lista.length) { toast('Endereço não encontrado. Tente ser mais específico ou cole as coordenadas.', 'warn'); return; }
+      this.mostrarResultados(lista);
+    } catch (e) {
+      toast('Busca indisponível agora. Cole as coordenadas (ex.: -20.46, -54.62).', 'bad');
+    } finally { btn.disabled = false; btn.textContent = 'Buscar'; }
+  },
+
+  mostrarResultados(lista) {
+    const box = $('alResultados');
+    box.innerHTML = lista.map((r, i) =>
+      '<button class="resultado" data-i="' + i + '">' + esc(r.display_name) + '</button>').join('');
+    box.classList.remove('hide');
+    box.querySelectorAll('button').forEach(b => {
+      b.onclick = () => {
+        const r = lista[Number(b.dataset.i)];
+        this.definirCentro(parseFloat(r.lat), parseFloat(r.lon), true);
+        this.esconderResultados();
+        $('alBusca').value = r.display_name.split(',').slice(0, 2).join(',');
+      };
+    });
+  },
+
+  esconderResultados() {
+    const box = $('alResultados');
+    if (box) { box.classList.add('hide'); box.innerHTML = ''; }
+  },
+
+  minhaLocalizacao() {
+    if (!navigator.geolocation) { toast('Sem GPS neste dispositivo', 'warn'); return; }
+    const btn = $('btnMinhaLoc'); btn.disabled = true; btn.textContent = '…';
+    navigator.geolocation.getCurrentPosition(
+      p => { btn.disabled = false; btn.textContent = '📍';
+        this.definirCentro(p.coords.latitude, p.coords.longitude, true); toast('No seu local atual', 'ok'); },
+      () => { btn.disabled = false; btn.textContent = '📍'; toast('Não consegui obter sua localização', 'bad'); },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 });
   },
 
   async salvarLocal() {
