@@ -1,6 +1,6 @@
 // Cache dos estáticos. As chamadas de API nunca passam por aqui: resposta de
 // marcação em cache seria mentira sobre o que o servidor recebeu.
-const CACHE = 'efrat-ponto-v7';
+const CACHE = 'efrat-ponto-v8';
 const ASSETS = [
   './',
   './index.html',
@@ -9,6 +9,8 @@ const ASSETS = [
   './css/tema.css',
   './vendor/face-api.js',
   './vendor/chart.umd.min.js',
+  './vendor/maplibre-gl.js',
+  './vendor/maplibre-gl.css',
   './vendor/fontes/plus-jakarta-sans-latin-400-normal.woff2',
   './vendor/fontes/plus-jakarta-sans-latin-500-normal.woff2',
   './vendor/fontes/plus-jakarta-sans-latin-600-normal.woff2',
@@ -21,12 +23,13 @@ const ASSETS = [
   './js/app.js',
   './js/api.js',
   './js/face.js',
+  './js/liveness.js',
   './js/regras.js',
   './js/store.js',
   './js/ui.js',
-  './js/fila.js',
+  './js/ponto.js',
   './js/rh.js',
-  './js/gestor.js',
+  './js/alocacao.js',
   './js/cripto.js',
   './icon-192.png',
   './icon-512.png',

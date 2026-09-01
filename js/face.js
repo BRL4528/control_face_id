@@ -1,6 +1,7 @@
 // Motor de reconhecimento. Isola tudo que depende do face-api e da câmera,
 // para que a orquestração da tela não precise saber nada disso.
 import { euclidiana } from './regras.js';
+import { earDosOlhos } from './liveness.js';
 
 const cfg = () => window.EFRAT_CFG;
 
@@ -67,6 +68,9 @@ function avaliar(det, canvas, boxCheia) {
     okLuz: m.bright >= c.minBright && m.bright <= c.maxBright,
     okPose: g <= c.maxYaw
   };
+  // EAR (abertura dos olhos) exposto para o detector de piscada da liveness.
+  // Só uma leitura — quem decide "piscou" é js/liveness.js, no app de ponto.
+  try { q.ear = earDosOlhos(det.landmarks); } catch (e) { q.ear = null; }
   q.ok = q.okTam && q.okNitidez && q.okLuz && q.okPose;
   q.msg = !q.okTam ? 'Aproxime o rosto'
     : !q.okLuz ? (m.bright < c.minBright ? 'Muito escuro' : 'Muito claro / contraluz')

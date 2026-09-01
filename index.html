@@ -19,32 +19,31 @@
 <!-- ===================== PORTA ===================== -->
 <div id="porta">
   <h1>Ponto Facial</h1>
-  <div class="sub" id="portaSub">Efrat</div>
+  <div class="sub" id="portaSub">Seu ponto, no seu celular</div>
   <button class="act big" id="btnPonto">REGISTRAR PONTO</button>
   <p class="nota" id="portaStatus" style="margin-top:20px"></p>
 </div>
 
-<!-- Acesso do RH (T-E3DBD4): fica FORA do rodízio exclusivo de mostrar()
-     (porta/aguardando/fila/rh/loginRh/painelGestor) de propósito — precisa
-     continuar alcançável com o aparelho pendente, não só aprovado. A
-     autenticação do RH (usuário + chave PBKDF2) sempre foi independente da
-     credencial do aparelho; só o roteamento client-side contrariava isso.
-     js/ui.js decide quando mostrar. -->
+<!-- Acesso do RH: fora do rodízio exclusivo de mostrar(), sempre alcançável. -->
 <button id="btnAcessar" class="hide">Acessar RH</button>
 
-<!-- ===================== AGUARDANDO LIBERAÇÃO (v3, sem token) ===================== -->
-<div id="aguardando" class="hide" style="max-width:380px;margin:0 auto;padding:14vh 22px 40px;text-align:center">
-  <h1 style="font-size:22px;margin:0 0 10px">Aguardando liberação do RH</h1>
-  <p class="nota" id="aguardandoTexto" style="margin:0 0 22px">Mostre este código para o RH liberar o aparelho.</p>
-  <div class="mono" id="aguardandoCodigo" style="font-size:38px;font-weight:600;letter-spacing:.06em"></div>
-  <p class="nota" style="margin-top:26px">A tela atualiza sozinha assim que o RH aprovar.</p>
+<!-- ===================== PAREAMENTO (primeira vez) ===================== -->
+<div id="pareamento" class="hide" style="max-width:380px;margin:0 auto;padding:12vh 22px 40px">
+  <h1 style="font-size:22px;margin:0 0 4px">Ativar meu ponto</h1>
+  <p class="nota" style="margin:0 0 26px">Só na primeira vez. Depois é só olhar para a câmera.</p>
+  <label class="lb">Código da empresa</label>
+  <input type="text" id="pareEmpresa" autocapitalize="off" spellcheck="false" placeholder="fornecido pelo RH">
+  <label class="lb">Sua matrícula</label>
+  <input type="text" id="pareMatricula" autocapitalize="off" spellcheck="false">
+  <button class="act big" id="btnParear">Ativar</button>
+  <button class="act ghost" id="btnVoltarPorta">Voltar</button>
 </div>
 
 <!-- ===================== FILA (câmera de ponto) ===================== -->
 <div id="fila" class="wrap hide">
   <header>
     <button id="btnSairFila">Cancelar</button>
-    <div class="quem">Registrar ponto</div>
+    <div class="quem">Registrar ponto · <span id="quemFila"></span></div>
   </header>
 
   <div class="camwrap">
@@ -59,15 +58,6 @@
   <p class="privacidade">Nenhuma imagem é armazenada, apenas o template biométrico</p>
 
   <div id="cartao"></div>
-</div>
-
-<!-- ===================== PAINEL DO GESTOR (T-8FB792) ===================== -->
-<div id="painelGestor" class="wrap hide">
-  <header>
-    <button id="btnSairGestor">Voltar</button>
-    <div class="quem">Minha equipe</div>
-  </header>
-  <div id="gestorConteudo"></div>
 </div>
 
 <!-- ===================== RH ===================== -->
@@ -91,6 +81,7 @@
 
   <nav>
     <button data-aba="painel" class="on">Painel</button>
+    <button data-aba="alocacao">Alocação</button>
     <button data-aba="pendencias">Pendências</button>
     <button data-aba="pessoas">Colaboradores</button>
     <button data-aba="equipes">Equipes</button>
@@ -98,6 +89,7 @@
   </nav>
 
   <section id="rh-painel"></section>
+  <section id="rh-alocacao" class="hide"></section>
   <section id="rh-pendencias" class="hide"></section>
   <section id="rh-pessoas" class="hide"></section>
   <section id="rh-equipes" class="hide"></section>
@@ -113,7 +105,7 @@
   <label class="lb">Senha</label>
   <input type="password" id="rhSenha" autocomplete="current-password">
   <button class="act big" id="btnEntrarRh">Entrar</button>
-  <button class="act ghost" id="btnVoltarPorta">Voltar</button>
+  <button class="act ghost" id="btnVoltarPortaRh">Voltar</button>
 </div>
 
 <div id="toast" class="toast hide"></div>

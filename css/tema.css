@@ -230,3 +230,15 @@ nav button.on,.nav-item.on{background:var(--azul-bg);color:var(--azul-esc)}
   .cards{grid-template-columns:repeat(4,1fr)}
   .vizrow{grid-template-columns:1fr 1fr}
 }
+
+/* ---------------- alocação (mapa + seleção) ---------------- */
+.alrow{display:flex;gap:10px;align-items:flex-end}
+.alrow>div{flex:1}
+.alrow input[type=range]{margin:0;padding:0}
+.lista-check{max-height:280px;overflow:auto;border:1px solid var(--linha);border-radius:10px;padding:4px}
+.check{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;margin:0}
+.check:hover{background:var(--surface-2)}
+.check input{width:18px;height:18px;margin:0;flex:0 0 auto}
+.check span{font-size:13.5px}
+/* MapLibre respeita o raio do container */
+#mapa .maplibregl-map{border-radius:12px}

@@ -14,8 +14,10 @@ const [, , nomeEmpresa = 'Empresa Demo', usuario = 'rh', senha = 'trocar-123'] =
 
 const ITER = 150000;
 
+// DEVE bater exatamente com js/cripto.js derivar(): PBKDF2-SHA256, 256 bits,
+// saída em HEX. Se divergir (ex.: base64), o login nunca confere.
 function derivarChave(senha, salHex) {
-  return pbkdf2Sync(senha, Buffer.from(salHex, 'hex'), ITER, 32, 'sha256').toString('base64');
+  return pbkdf2Sync(senha, Buffer.from(salHex, 'hex'), ITER, 32, 'sha256').toString('hex');
 }
 
 async function main() {

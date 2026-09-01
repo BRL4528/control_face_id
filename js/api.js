@@ -1,203 +1,118 @@
+// Cliente de API v4. Backend próprio na mesma origem (/api). Duas famílias:
+// dispositivo (credencial pareada no Bearer) e RH (JWT no Bearer). Nunca lança:
+// queda de rede vira { ok:false, status:0, rede:true } para a tela mostrar "sem
+// rede" em vez de quebrar.
 import { Store } from './store.js';
 import { itensParaRemover, calcularDeriva } from './regras.js';
 
 const cfg = () => window.EFRAT_CFG;
 
-// Nunca lanca. Queda de rede vira { ok:false, status:0 } — sem isso, um
-// aparelho sem sinal derruba a tela com excecao nao tratada em vez de mostrar
-// "sem rede". `credencial`, quando presente, vira Authorization: Bearer — é
-// como as rotas v3 do dispositivo autenticam (docs/adr-acesso-v3.md).
-async function post(rota, corpo, { credencial, timeoutMs = 30000, idempotencyKey } = {}) {
+async function req(rota, corpo, { bearer, metodo = 'POST', timeoutMs = 30000 } = {}) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const headers = { 'Content-Type': 'application/json' };
-    if (credencial) headers.Authorization = 'Bearer ' + credencial;
-    if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+    if (bearer) headers.Authorization = 'Bearer ' + bearer;
     const r = await fetch(cfg().apiBase + rota, {
-      method: 'POST', headers, body: JSON.stringify(corpo), signal: ctrl.signal
+      method: metodo, headers,
+      body: metodo === 'GET' ? undefined : JSON.stringify(corpo || {}),
+      signal: ctrl.signal
     });
     const txt = await r.text();
     let json = null;
-    try { json = txt ? JSON.parse(txt) : null; } catch (e) { /* servidor devolveu não-JSON */ }
-    return { ok: r.ok, status: r.status, json, texto: txt };
+    try { json = txt ? JSON.parse(txt) : null; } catch { /* não-JSON */ }
+    return { ok: r.ok, status: r.status, json };
   } catch (e) {
-    return { ok: false, status: 0, json: null, texto: String(e && e.message), rede: true };
-  } finally {
-    clearTimeout(t);
-  }
+    return { ok: false, status: 0, json: null, rede: true };
+  } finally { clearTimeout(t); }
 }
 
-async function postRh(rota, corpo) {
-  const r = await post(rota, corpo);
-  if (!r.ok || !r.json || !r.json.ok) {
-    return { ok: false, status: r.status, erro: (r.json && r.json.erro) || ('HTTP ' + r.status) };
-  }
-  return { ok: true, dados: r.json };
+function msgErro(r, fallback) {
+  return (r.json && r.json.erro && r.json.erro.mensagem) || (r.rede ? 'sem conexão' : fallback);
 }
 
-export const ApiRh = {
-  sal(usuario) { return postRh('/efrat/rh/sal', { usuario }); },
-  dados(cred, dias) { return postRh('/efrat/rh/dados', Object.assign({ dias: dias || 30 }, cred)); },
-  equipe(cred, dados) { return postRh('/efrat/rh/equipe', Object.assign({}, cred, dados)); },
-  colaborador(cred, dados) { return postRh('/efrat/rh/colaborador', Object.assign({}, cred, dados)); },
-  decidir(cred, dados) { return postRh('/efrat/rh/decidir', Object.assign({}, cred, dados)); }
-};
-
-/**
- * Painel do gestor (docs/adr-acesso-v3.md § Sessão facial do gestor). `sessao`
- * é o `sessao_gestor` opaco emitido por /efrat/identificar — nunca um token
- * de aparelho. 401 é sempre SESSAO_EXPIRADA: quem chama trata como sinal para
- * apagar a sessão e voltar pra tela de ponto.
- */
-async function postGestor(rota, sessao, corpo, idempotencyKey) {
-  const r = await post(rota, corpo, { credencial: sessao, idempotencyKey });
-  if (!r.ok || !r.json || !r.json.ok) {
-    return { ok: false, status: r.status,
-             erro: (r.json && r.json.erro) || { mensagem: r.rede ? 'sem conexão' : ('HTTP ' + r.status) } };
-  }
-  return { ok: true, dados: r.json };
-}
-
-export const ApiGestor = {
-  equipeHoje(sessao, dados) { return postGestor('/efrat/gestor/equipe-hoje', sessao, dados); },
-  ajustar(sessao, dados, idempotencyKey) { return postGestor('/efrat/gestor/ajustar', sessao, dados, idempotencyKey); }
-};
+/* ------------------------------------------------- dispositivo (colaborador) */
 
 export const Api = {
-  /**
-   * Primeiro cadastro do aparelho (ou migração de token legado, se
-   * `tokenLegado` vier preenchido). Nunca exige credencial própria aqui — ela
-   * ainda não existe no servidor.
-   */
-  registrarDispositivo(dados, tokenLegado) {
-    return post('/efrat/dispositivo/registrar', dados, { credencial: tokenLegado });
+  /** Pareamento inicial do celular ao colaborador (uma vez na vida do aparelho). */
+  async parear(dados) {
+    const r = await req('/parear', dados);
+    if (!r.ok || !r.json || !r.json.ok) return { ok: false, status: r.status, erro: msgErro(r, 'falha ao parear') };
+    return { ok: true, colaborador: r.json.colaborador };
   },
 
-  /** Estado do cadastro: pendente (com código curto), ativo, negado ou revogado. */
-  estadoDispositivo(dispositivoId, credencial) {
-    return post('/efrat/dispositivo/estado', { dispositivo_id: dispositivoId }, { credencial });
-  },
-
-  /**
-   * Carga da unidade. Sempre pede o conjunto completo — sem "desde_versao":
-   * este cliente ainda não faz merge incremental de pessoas/removidos_ids, e
-   * pedir incremental sem mesclar apagaria a galeria local a cada "sem
-   * mudança". Além dos dados, mede a diferença entre o relógio do aparelho e
-   * o do servidor — sem isso, celular com hora errada gera ponto errado e
-   * ninguém percebe.
-   *
-   * Normaliza `pessoas[].template.{versao,vetores}` (formato v3) para
-   * `pessoas[].{versao,vetores}` (formato flat) porque regras.js — que não
-   * muda nesta rodada — espera `pessoa.vetores` direto.
-   */
-  async carga(dispositivoId, credencial) {
+  /** Carga do dia: template 1:1 do próprio colaborador + alocação/cerca de hoje. */
+  async cargaDia(credencial, dia) {
     const t0 = Date.now();
-    const r = await post('/efrat/carga', { dispositivo_id: dispositivoId }, { credencial });
+    const r = await req('/carga-dia', { dia }, { bearer: credencial });
     const t1 = Date.now();
-    if (!r.ok || !r.json || !r.json.ok) {
-      return { ok: false, status: r.status, rede: r.rede === true,
-               erro: (r.json && r.json.erro) || (r.rede ? 'sem conexao' : 'falha ao carregar') };
-    }
+    if (!r.ok || !r.json || !r.json.ok) return { ok: false, status: r.status, rede: r.rede === true, erro: msgErro(r, 'falha na carga') };
     const c = r.json;
-    const pessoas = (c.pessoas || []).map(p => ({
-      pessoa_id: p.pessoa_id, nome: p.nome, equipe_id: p.equipe_id, papel: p.papel,
-      versao: p.template && p.template.versao, vetores: (p.template && p.template.vetores) || [],
-      miniatura: p.miniatura || ''
-    }));
-    const deriva = calcularDeriva(t0, t1, c.gerado_em);
     return {
       ok: true,
-      carga: { versao: c.versao, gerado_em: c.gerado_em, escopo: c.escopo, pessoas },
-      deriva
+      colaborador: c.colaborador,
+      template: c.template,       // { versao, vetores } ou null
+      alocacao: c.alocacao,       // { equipe_id, equipe_nome, cerca } ou null
+      deriva: calcularDeriva(t0, t1, c.servidor_hora)
     };
   },
 
-  /**
-   * Fallback 1:N on-line para rosto fora da galeria offline do aparelho.
-   * Nunca devolve material biométrico — só identidade e, se for gestor
-   * reconhecido com margem segura, uma sessão de gestor de vida curta.
-   */
-  async identificar(dispositivoId, credencial, descritor, capturadoEm, timeoutMs) {
-    const r = await post('/efrat/identificar',
-      { dispositivo_id: dispositivoId, descritor, capturado_em: capturadoEm }, { credencial, timeoutMs });
-    if (!r.ok || !r.json || !r.json.ok) {
-      return { ok: false, status: r.status, rede: r.rede === true,
-               erro: (r.json && r.json.erro) || (r.rede ? 'sem conexao' : 'falha ao identificar') };
-    }
-    return { ok: true, resultado: r.json };
-  },
-
-  async cadastrar(dispositivoId, credencial, dados) {
-    const r = await post('/efrat/cadastro', Object.assign({ dispositivo_id: dispositivoId }, dados), { credencial });
-    if (!r.ok || !r.json || !r.json.ok) {
-      return { ok: false, erro: (r.json && r.json.erro) || ('HTTP ' + r.status) };
-    }
-    return { ok: true, resultado: r.json };
-  },
-
-  /**
-   * Esvazia a fila local. Três garantias de projeto:
-   *
-   * 1. Envio único em voo. Data Table não tem índice único, então a
-   *    deduplicação depende de nunca haver dois lotes simultâneos do mesmo
-   *    aparelho. Este é o cadeado.
-   * 2. Só sai da fila o que o servidor confirmou (aceito ou duplicado).
-   * 3. Rejeitado fica retido e visível — é problema que precisa de gente.
-   */
+  /* Esvaziamento da fila. Envio único em voo: dedup depende de nunca haver dois
+     lotes simultâneos. O banco tem PK única em id_cliente, mas o cadeado local
+     evita corrida e trabalho duplicado. */
   _emVoo: null,
-
-  // Nao e async de proposito: o cadeado precisa ser fechado no mesmo tique em
-  // que a chamada entra. Se a checagem ficasse antes de um await, tres chamadas
-  // seguidas passariam as tres pelo `if` antes de qualquer uma marcar o voo.
-  // Quem chega no meio recebe a MESMA promessa em vez de abrir um segundo lote.
-  sincronizar(dispositivoId, credencial) {
+  sincronizar(credencial) {
     if (this._emVoo) return this._emVoo;
     if (!navigator.onLine) return Promise.resolve({ ok: false, offline: true });
-    const p = this._enviarLote(dispositivoId, credencial);
+    const p = this._enviarLote(credencial);
     this._emVoo = p;
     p.then(() => { this._emVoo = null; }, () => { this._emVoo = null; });
     return p;
   },
 
-  async _enviarLote(dispositivoId, credencial) {
+  async _enviarLote(credencial) {
     const pendentes = await Store.fila();
     if (!pendentes.length) return { ok: true, nada: true };
+    const lote = pendentes.filter(m => !m._erroPermanente).slice(0, cfg().loteMax).map(m => {
+      const c = Object.assign({}, m); delete c._erro; delete c._tentativas; delete c._erroPermanente; delete c._nome; return c;
+    });
+    if (!lote.length) return { ok: true, nada: true };
 
-    try {
-      const lote = pendentes
-        .filter(m => !m._erroPermanente)
-        .slice(0, cfg().loteMax)
-        .map(m => {
-          const copia = Object.assign({}, m);
-          delete copia._erro; delete copia._tentativas; delete copia._erroPermanente;
-          return copia;
-        });
-      if (!lote.length) return { ok: true, nada: true };
-
-      const r = await post('/efrat/marcacoes', { dispositivo_id: dispositivoId, marcacoes: lote }, { credencial });
-      if (!r.ok || !r.json || !r.json.ok) {
-        await Store.registrar('sync_falhou', { status: r.status, erro: r.texto && r.texto.slice(0, 200) });
-        return { ok: false, erro: (r.json && r.json.erro) || ('HTTP ' + r.status) };
-      }
-
-      const resultados = r.json.resultados || [];
-      const remover = itensParaRemover(resultados);
-      for (const id of remover) {
-        const original = lote.find(x => x.id_cliente === id);
-        if (original) await Store.confirmar(original);
-        await Store.tirarDaFila(id);
-      }
-      for (const res of resultados) {
-        if (res.status === 'rejeitado') {
-          await Store.marcarErro(res.id_cliente, res.motivo || 'rejeitado pelo servidor');
-        }
-      }
-      await Store.registrar('sync', r.json.resumo);
-      return { ok: true, resumo: r.json.resumo, resultados };
-    } catch (e) {
-      await Store.registrar('sync_erro', { msg: String(e && e.message) });
-      return { ok: false, erro: String(e && e.message) };
+    const r = await req('/ponto', { marcacoes: lote }, { bearer: credencial });
+    if (!r.ok || !r.json || !r.json.ok) {
+      await Store.registrar('sync_falhou', { status: r.status });
+      return { ok: false, erro: msgErro(r, 'falha ao enviar') };
     }
+    const resultados = r.json.resultados || [];
+    for (const id of itensParaRemover(resultados)) {
+      const original = lote.find(x => x.id_cliente === id);
+      if (original) await Store.confirmar(original);
+      await Store.tirarDaFila(id);
+    }
+    for (const res of resultados) {
+      if (res.status === 'rejeitado') await Store.marcarErro(res.id_cliente, res.motivo || 'rejeitado');
+    }
+    await Store.registrar('sync', r.json.resumo);
+    return { ok: true, resumo: r.json.resumo, resultados };
   }
+};
+
+/* ----------------------------------------------------------------- RH */
+
+async function reqRh(rota, token, corpo, metodo) {
+  const r = await req(rota, corpo, { bearer: token, metodo });
+  if (!r.ok || !r.json || !r.json.ok) return { ok: false, status: r.status, erro: msgErro(r, 'HTTP ' + r.status) };
+  return { ok: true, dados: r.json };
+}
+
+export const ApiRh = {
+  sal(usuario) { return req('/rh/login?usuario=' + encodeURIComponent(usuario), null, { metodo: 'GET' }); },
+  login(usuario, chave) { return reqRh('/rh/login', null, { usuario, chave }); },
+  dados(token, dias) { return reqRh('/rh/dados', token, { dias: dias || 30 }); },
+  colaborador(token, d) { return reqRh('/rh/colaborador', token, d); },
+  equipe(token, d) { return reqRh('/rh/equipe', token, d); },
+  local(token, d) { return reqRh('/rh/local', token, d); },
+  alocar(token, d) { return reqRh('/rh/alocar', token, d); },
+  biometria(token, d) { return reqRh('/rh/biometria', token, d); },
+  decidir(token, d) { return reqRh('/rh/decidir', token, d); }
 };

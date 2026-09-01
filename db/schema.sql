@@ -109,6 +109,24 @@ CREATE TABLE IF NOT EXISTS dispositivo (
 );
 CREATE INDEX IF NOT EXISTS ix_disp_colab ON dispositivo (colaborador_id);
 
+-- ═══════════════════════════════════════════════════════ locais frequentes
+
+-- O RH aloca gente todo dia; digitar coordenadas toda vez seria inviável. Salva
+-- os pontos recorrentes (Obra Norte, Sede) uma vez e no dia só escolhe da lista
+-- e ajusta o pin. A alocação copia o centro/raio daqui — desacoplada, para
+-- renomear/mover um local não reescrever o histórico de alocações passadas.
+CREATE TABLE IF NOT EXISTS local (
+  id           text PRIMARY KEY,
+  empresa_id   text NOT NULL REFERENCES empresa(id) ON DELETE CASCADE,
+  nome         text NOT NULL,
+  lat          double precision NOT NULL,
+  lng          double precision NOT NULL,
+  raio_m       integer NOT NULL DEFAULT 200,
+  ativo        boolean NOT NULL DEFAULT true,
+  criado_em    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_local_empresa ON local (empresa_id);
+
 -- ═══════════════════════════════════════════════════════ alocação diária + cerca
 
 -- O coração da operação diária do RH. Para um dia e uma equipe, define:

@@ -1,5 +1,6 @@
 // Painel do RH. Tudo que é administração vive aqui e em lugar nenhum mais.
-import { Api, ApiRh } from './api.js';
+import { ApiRh } from './api.js';
+import { Alocacao } from './alocacao.js';
 import { Face } from './face.js';
 import { derivar } from './cripto.js';
 import {
@@ -9,7 +10,7 @@ import {
 import { $, esc, mostrar, toast, hora, data } from './ui.js';
 
 export const Rh = {
-  cred: null,
+  token: null,       // JWT emitido por /rh/login
   dados: null,
   aba: 'painel',
   aoSair: null,
@@ -21,18 +22,19 @@ export const Rh = {
 
   async entrar(usuario, senha) {
     const s = await ApiRh.sal(usuario);
-    if (!s.ok) return { ok: false, erro: s.erro || 'servidor indisponível' };
-    const chave = await derivar(senha, s.dados.sal, s.dados.iteracoes);
-    const cred = { usuario, chave };
-    const d = await ApiRh.dados(cred, this.dias);
-    if (!d.ok) return { ok: false, erro: d.erro || 'usuário ou senha inválidos' };
-    this.cred = cred;
+    if (!s.ok || !s.json) return { ok: false, erro: 'servidor indisponível' };
+    const chave = await derivar(senha, s.json.sal, s.json.iteracoes);
+    const login = await ApiRh.login(usuario, chave);
+    if (!login.ok) return { ok: false, erro: login.erro || 'usuário ou senha inválidos' };
+    this.token = login.dados.token;
+    const d = await ApiRh.dados(this.token, this.dias);
+    if (!d.ok) return { ok: false, erro: d.erro || 'falha ao carregar' };
     this.dados = d.dados;
     return { ok: true };
   },
 
   async recarregar() {
-    const d = await ApiRh.dados(this.cred, this.dias);
+    const d = await ApiRh.dados(this.token, this.dias);
     if (d.ok) this.dados = d.dados;
     this.pintar();
   },
@@ -57,7 +59,7 @@ export const Rh = {
     });
     const atu = $('btnAtualizarRh');
     if (atu) atu.onclick = () => this.recarregar();
-    $('btnSairRh').onclick = () => { this.destruirGraficos(); this.cred = null; this.dados = null; this.aoSair(); };
+    $('btnSairRh').onclick = () => { this.destruirGraficos(); this.token = null; this.dados = null; this.aoSair(); };
     this.pintar();
   },
 
@@ -71,9 +73,10 @@ export const Rh = {
     this.destruirGraficos();   // troca de aba mata os gráficos da anterior
     $('rhPeriodo').textContent = 'últimos ' + (this.dados.periodo_dias || this.dias) + ' dias';
     document.querySelectorAll('#rh nav button').forEach(b => b.classList.toggle('on', b.dataset.aba === this.aba));
-    ['painel', 'pendencias', 'pessoas', 'equipes', 'registros'].forEach(a =>
+    ['painel', 'alocacao', 'pendencias', 'pessoas', 'equipes', 'registros'].forEach(a =>
       $('rh-' + a).classList.toggle('hide', a !== this.aba));
     if (this.aba === 'painel') this.pintarPainel();
+    if (this.aba === 'alocacao') this.pintarAlocacao();
     if (this.aba === 'pendencias') this.pintarPendencias();
     if (this.aba === 'pessoas') this.pintarPessoas();
     if (this.aba === 'equipes') this.pintarEquipes();
@@ -88,6 +91,10 @@ export const Rh = {
     const e = (this.dados.equipes || []).find(x => x.equipe_id === id);
     return e ? e.nome : '—';
   },
+
+  /* ----------------------------------------------------- alocação (mapa) */
+
+  pintarAlocacao() { Alocacao.abrir(this); },
 
   /* --------------------------------------------------------- painel */
 
@@ -388,7 +395,7 @@ export const Rh = {
     el.querySelectorAll('button[data-acao]').forEach(b => {
       b.onclick = async () => {
         b.disabled = true;
-        const r = await ApiRh.decidir(this.cred, {
+        const r = await ApiRh.decidir(this.token, {
           tipo: b.dataset.tipo, id: b.dataset.id, acao: b.dataset.acao, motivo: ''
         });
         if (!r.ok) { toast(r.erro || 'Falha', 'bad'); b.disabled = false; return; }
@@ -428,7 +435,7 @@ export const Rh = {
       '<div id="areaBio"></div>';
 
     $('btnNovaPessoa').onclick = async () => {
-      const r = await ApiRh.colaborador(this.cred, {
+      const r = await ApiRh.colaborador(this.token, {
         nome: $('pNome').value.trim(), matricula: $('pMat').value.trim(),
         equipe_id: $('pEquipe').value, papel: $('pPapel').value
       });
@@ -509,14 +516,9 @@ export const Rh = {
       ').\n\nIsso costuma virar falso negativo depois. Salvar assim mesmo?')) return;
     $('btnSalvarBio').disabled = true;
     const p = this.alvoCadastro;
-    const r = await ApiRh.colaborador(this.cred, {
-      pessoa_id: p.pessoa_id, nome: p.nome, matricula: p.matricula,
-      equipe_id: p.equipe_id, papel: p.papel
-    });
-    if (!r.ok) { toast(r.erro || 'Falha', 'bad'); $('btnSalvarBio').disabled = false; return; }
-    const bio = await Api.cadastrar(this._dispositivo.dispositivo_id, this._dispositivo.credencial, {
-      origem: 'rh', pessoa_id: p.pessoa_id, nome: p.nome, matricula: p.matricula,
-      equipe_id: p.equipe_id, vetores: c.map(x => x.descritor),
+    // Autenticado pelo JWT do RH — sem credencial de aparelho (o RH não tem uma).
+    const bio = await ApiRh.biometria(this.token, {
+      colaborador_id: p.pessoa_id, vetores: c.map(x => x.descritor),
       miniatura: c[0].thumb, coerencia: Number(coer.toFixed(4))
     });
     $('btnSalvarBio').disabled = false;
@@ -547,7 +549,7 @@ export const Rh = {
           : '<p class="nota">Nenhuma equipe.</p>') +
       '</div>';
     $('btnNovaEquipe').onclick = async () => {
-      const r = await ApiRh.equipe(this.cred, {
+      const r = await ApiRh.equipe(this.token, {
         nome: $('eNome').value.trim(), unidade: $('eUnidade').value.trim()
       });
       if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }

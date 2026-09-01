@@ -18,7 +18,7 @@ export default async function handler(req, res) {
   const hoje = new Date().toISOString().slice(0, 10);
   const sql = db();
 
-  const [equipes, pessoas, marcacoes, alocacoesHoje] = await Promise.all([
+  const [equipes, pessoas, marcacoes, alocacoesHoje, locais] = await Promise.all([
     sql`SELECT id AS equipe_id, nome, ativo FROM equipe WHERE empresa_id = ${empresa} ORDER BY nome`,
     sql`SELECT c.id AS pessoa_id, c.nome, c.matricula, c.papel, c.equipe_padrao AS equipe_id, c.ativo,
                EXISTS(SELECT 1 FROM template_facial t WHERE t.colaborador_id = c.id AND t.estado='ativo') AS tem_biometria,
@@ -33,14 +33,16 @@ export default async function handler(req, res) {
         WHERE m.empresa_id = ${empresa} AND m.marcado_dia >= (CURRENT_DATE - ${dias}::int)
         ORDER BY m.marcado_em DESC`,
     sql`SELECT a.colaborador_id, a.equipe_id, a.cerca_lat, a.cerca_lng, a.cerca_raio_m
-        FROM alocacao a WHERE a.empresa_id = ${empresa} AND a.dia = ${hoje}`
+        FROM alocacao a WHERE a.empresa_id = ${empresa} AND a.dia = ${hoje}`,
+    sql`SELECT id AS local_id, nome, lat, lng, raio_m FROM local
+        WHERE empresa_id = ${empresa} AND ativo = true ORDER BY nome`
   ]);
 
   return ok(res, {
     usuario: { nome: rh.nome, usuario: rh.usuario },
     periodo_dias: dias,
     servidor_hora: new Date().toISOString(),
-    equipes, pessoas, marcacoes,
+    equipes, pessoas, marcacoes, locais,
     alocacoes_hoje: alocacoesHoje,
     recadastros: []  // recadastro pendente entra quando o autocadastro do gestor existir
   });
