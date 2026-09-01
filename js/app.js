@@ -43,13 +43,17 @@ function statusPorta(txt, classe) {
 
 async function irParaPorta() {
   mostrar('porta');
+  // Aviso de navegador embutido tem prioridade e persiste — sem câmera, nada
+  // funciona, então essa mensagem não pode ser sobrescrita pelo status normal.
+  if (S.navegadorEmbutido) { avisarNavegadorEmbutido(); $('btnPonto').disabled = false; return; }
   const pareado = !!S.dispositivo;
   $('btnPonto').textContent = pareado ? 'REGISTRAR PONTO' : 'ATIVAR MEU PONTO';
   // O botão NUNCA fica preso: sempre dá pra tocar. Se o reconhecimento ainda
   // não carregou, o próprio fluxo do toque espera/avisa — antes o botão morto
   // deixava a pessoa presa no celular quando o modelo demorava a baixar.
   $('btnPonto').disabled = false;
-  const fila = await Store.fila();
+  let fila = [];
+  try { fila = await Store.fila(); } catch (e) { /* storage bloqueado — segue */ }
   if (!Face.pronto) statusPorta('Preparando o reconhecimento… já pode tocar.');
   else if (!pareado) statusPorta('Primeira vez? Toque para ativar seu ponto.');
   else if (fila.length) statusPorta(fila.length + ' marcação(ões) esperando envio.', 'warnfg');
@@ -184,9 +188,11 @@ async function entrarRh() {
 /* -------------------------------------------------------------- boot */
 
 async function boot() {
-  await Store.fixar();
-  S.dispositivo = await identidadeSalva();
-
+  // ORDEM CRÍTICA: ligar os botões ANTES de qualquer await de storage. No
+  // navegador embutido do WhatsApp/Instagram o IndexedDB pode estar bloqueado e
+  // lançar — se isso acontecesse antes daqui, os botões ficavam sem onclick e a
+  // tela travava (só o botão, sem reação ao toque). Nada de storage bloqueia a
+  // interface agora.
   $('btnPonto').onclick = abrirPonto;
   $('btnAcessar').onclick = abrirLoginRh;
   $('btnAcessar').classList.remove('hide');
@@ -198,13 +204,38 @@ async function boot() {
 
   window.addEventListener('online', () => sincronizarFundo());
   document.addEventListener('visibilitychange', () => { if (!document.hidden) sincronizarFundo(); });
-  setInterval(() => sincronizarFundo(), cfg().syncIntervalMs);
 
+  // Storage é best-effort: se falhar, o app segue (não pareado) em vez de travar.
+  try { await Store.fixar(); } catch (e) { /* persist bloqueado — segue */ }
+  try { S.dispositivo = await identidadeSalva(); } catch (e) { S.dispositivo = null; }
+
+  try { setInterval(() => sincronizarFundo(), cfg().syncIntervalMs); } catch (e) { /* ok */ }
+
+  avisarNavegadorEmbutido();   // define S.navegadorEmbutido antes de pintar a porta
   await irParaPorta();
-  carregarFaceComRetry();   // não bloqueia o boot; o botão já está clicável
+  if (!S.navegadorEmbutido) carregarFaceComRetry();   // sem câmera não adianta baixar modelo
 
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
 }
+
+// O navegador embutido do WhatsApp/Instagram/Facebook bloqueia a câmera e o
+// storage. Detecta e orienta a abrir no navegador de verdade (Safari/Chrome),
+// porque sem câmera o ponto facial simplesmente não funciona.
+function avisarNavegadorEmbutido() {
+  const ua = navigator.userAgent || '';
+  const embutido = /(FBAN|FBAV|Instagram|Line|WhatsApp|GSA)/i.test(ua) || /\bwv\b/.test(ua);
+  S.navegadorEmbutido = embutido;
+  if (embutido) {
+    statusPorta('⚠ Abra no navegador (Safari/Chrome) para a câmera funcionar. Toque no botão de compartilhar/⋯ e escolha "Abrir no navegador".', 'badfg');
+  }
+}
+
+// Rede de segurança final: se QUALQUER coisa no boot lançar, os botões básicos
+// ainda respondem. Sem isso, um erro inesperado deixa a tela morta.
+window.addEventListener('error', () => {
+  const b = document.getElementById('btnPonto');
+  if (b && !b.onclick) b.onclick = abrirPonto;
+});
 
 // Carrega o reconhecimento em segundo plano, com algumas tentativas. Uma falha
 // (rede ruim no celular) não é permanente: tenta de novo, e o toque no botão
