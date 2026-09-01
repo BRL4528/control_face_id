@@ -96,6 +96,7 @@ function fingido() { return window.__EFRAT_FAKE_FACE || null; }
 
 export const Face = {
   pronto: false,
+  falhou: false,
   backend: null,
   _ctl: null,
   _bom: { canvas: null, em: 0 },
@@ -106,13 +107,20 @@ export const Face = {
 
   async carregar(base) {
     if (fingido()) { this.pronto = true; this.backend = 'fake'; return; }
+    if (typeof faceapi === 'undefined') { this.falhou = true; throw new Error('face-api não carregou'); }
+    this.falhou = false;
     const t0 = performance.now();
     try { await faceapi.tf.setBackend('webgl'); await faceapi.tf.ready(); }
-    catch (e) { await faceapi.tf.setBackend('cpu'); await faceapi.tf.ready(); }
+    catch (e) {
+      try { await faceapi.tf.setBackend('cpu'); await faceapi.tf.ready(); }
+      catch (e2) { this.falhou = true; throw e2; }
+    }
     const raiz = base || './models';
-    await faceapi.nets.tinyFaceDetector.loadFromUri(raiz);
-    await faceapi.nets.faceLandmark68Net.loadFromUri(raiz);
-    await faceapi.nets.faceRecognitionNet.loadFromUri(raiz);
+    try {
+      await faceapi.nets.tinyFaceDetector.loadFromUri(raiz);
+      await faceapi.nets.faceLandmark68Net.loadFromUri(raiz);
+      await faceapi.nets.faceRecognitionNet.loadFromUri(raiz);
+    } catch (e) { this.falhou = true; throw e; }
     this.pronto = true;
     this.backend = faceapi.tf.getBackend();
     this.msCarga = Math.round(performance.now() - t0);

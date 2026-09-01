@@ -283,3 +283,10 @@ nav button.on,.nav-item.on{background:var(--azul-bg);color:var(--azul-esc)}
   padding:10px 12px;font-size:12.5px;color:var(--ink-2);cursor:pointer;line-height:1.4}
 .resultado:last-child{border-bottom:0}
 .resultado:hover{background:var(--surface-2);color:var(--ink)}
+
+/* ---------------- código de ativação: cada campo com copiar ---------------- */
+.cod-linha{display:flex;align-items:center;gap:10px;background:var(--surface-2);
+  border:1px solid var(--linha);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+.cod-info{flex:1;min-width:0}
+.cod-info .cod{font-size:14px;font-weight:600;color:var(--ink);word-break:break-all;margin-top:2px}
+.cod-linha .mini{flex:0 0 auto}

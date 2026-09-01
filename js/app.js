@@ -45,9 +45,12 @@ async function irParaPorta() {
   mostrar('porta');
   const pareado = !!S.dispositivo;
   $('btnPonto').textContent = pareado ? 'REGISTRAR PONTO' : 'ATIVAR MEU PONTO';
-  $('btnPonto').disabled = !Face.pronto;
+  // O botão NUNCA fica preso: sempre dá pra tocar. Se o reconhecimento ainda
+  // não carregou, o próprio fluxo do toque espera/avisa — antes o botão morto
+  // deixava a pessoa presa no celular quando o modelo demorava a baixar.
+  $('btnPonto').disabled = false;
   const fila = await Store.fila();
-  if (!Face.pronto) statusPorta('Carregando o reconhecimento…');
+  if (!Face.pronto) statusPorta('Preparando o reconhecimento… já pode tocar.');
   else if (!pareado) statusPorta('Primeira vez? Toque para ativar seu ponto.');
   else if (fila.length) statusPorta(fila.length + ' marcação(ões) esperando envio.', 'warnfg');
   else statusPorta('Olá, ' + S.dispositivo.colaborador.nome.split(' ')[0] + '.');
@@ -96,10 +99,32 @@ async function executarPareamento() {
 
 /* ------------------------------------------------- registrar ponto */
 
+// Espera o reconhecimento ficar pronto, com teto de tempo. No celular o modelo
+// (6 MB) pode demorar; em vez de um botão morto, mostramos progresso e só
+// desistimos após o timeout, com mensagem clara.
+async function esperarFace(timeoutMs) {
+  if (Face.pronto) return true;
+  const ate = Date.now() + (timeoutMs || 25000);
+  while (!Face.pronto && Date.now() < ate) {
+    if (Face.falhou) return false;
+    await new Promise(r => setTimeout(r, 300));
+  }
+  return Face.pronto;
+}
+
 async function abrirPonto() {
   if (!S.dispositivo) return abrirPareamento();
   $('btnPonto').disabled = true;
   try {
+    if (!Face.pronto) {
+      statusPorta('Carregando o reconhecimento facial (pode levar alguns segundos no celular)…');
+      const ok = await esperarFace(25000);
+      if (!ok) {
+        statusPorta('Não consegui carregar o reconhecimento. Verifique a conexão e toque de novo.', 'badfg');
+        return;
+      }
+      statusPorta('');
+    }
     let template = await Store.get('template');
     let alocacao = await Store.get('alocacao');
     let deriva = (await Store.get('deriva')) || 0;
@@ -176,10 +201,20 @@ async function boot() {
   setInterval(() => sincronizarFundo(), cfg().syncIntervalMs);
 
   await irParaPorta();
-  try { await Face.carregar('./models'); } catch (e) { statusPorta('Falha ao carregar o reconhecimento.', 'badfg'); }
-  await irParaPorta();
+  carregarFaceComRetry();   // não bloqueia o boot; o botão já está clicável
 
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
+
+// Carrega o reconhecimento em segundo plano, com algumas tentativas. Uma falha
+// (rede ruim no celular) não é permanente: tenta de novo, e o toque no botão
+// espera via esperarFace(). Não derruba a tela.
+async function carregarFaceComRetry() {
+  for (let tentativa = 0; tentativa < 3 && !Face.pronto; tentativa++) {
+    try { await Face.carregar('./models'); }
+    catch (e) { Face.falhou = false; await new Promise(r => setTimeout(r, 1500 * (tentativa + 1))); }
+  }
+  await irParaPorta();
 }
 
 // Superfície de teste.

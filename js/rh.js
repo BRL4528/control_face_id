@@ -464,26 +464,40 @@ export const Rh = {
   mostrarCodigoAtivacao(nome, matricula) {
     const empresa = this.dados.empresa_id || '';
     const primeiro = String(nome || '').split(' ')[0];
-    const texto = 'Olá ' + primeiro + '! Ative seu ponto facial:\n' +
-      '1. Abra ' + location.origin + '\n' +
-      '2. Toque em ATIVAR MEU PONTO\n' +
-      '3. Código da empresa: ' + empresa + '\n' +
-      '4. Sua matrícula: ' + matricula + '\n' +
+    const link = location.origin;
+    // Mensagem com cada dado em sua PRÓPRIA linha e prefixado — assim, mesmo no
+    // WhatsApp, o funcionário consegue tocar-e-segurar pra copiar só o código.
+    const texto = 'Olá ' + primeiro + '! Ative seu ponto facial:\n\n' +
+      '1) Abra: ' + link + '\n' +
+      '2) Toque em ATIVAR MEU PONTO\n\n' +
+      'Código da empresa:\n' + empresa + '\n\n' +
+      'Sua matrícula:\n' + matricula + '\n\n' +
       'Depois é só olhar para a câmera e piscar.';
+    // cada campo com botão de copiar SÓ aquele valor
+    const campo = (rotulo, valor, id) =>
+      '<div class="cod-linha"><div class="cod-info"><span class="lb">' + rotulo + '</span>' +
+        '<div class="mono cod">' + esc(valor) + '</div></div>' +
+        '<button class="act ghost mini" data-copiar="' + esc(valor) + '" id="' + id + '">Copiar</button></div>';
     $('areaBio').innerHTML =
       '<div class="card"><h2>Código de ativação de ' + esc(nome) + '</h2>' +
-        '<p class="nota" style="margin:-4px 0 12px">Envie estes dados ao funcionário. Ele usa uma vez para ativar o ponto no próprio celular.</p>' +
-        '<div class="codigo-box">' +
-          '<div><span class="lb">Código da empresa</span><div class="mono cod">' + esc(empresa) + '</div></div>' +
-          '<div><span class="lb">Matrícula</span><div class="mono cod">' + esc(matricula) + '</div></div>' +
-        '</div>' +
-        '<button class="act" id="btnCopiarConvite">Copiar mensagem para WhatsApp</button>' +
+        '<p class="nota" style="margin:-4px 0 12px">Envie ao funcionário. Ele usa uma vez para ativar o ponto no próprio celular. Copie cada dado separadamente ou a mensagem inteira.</p>' +
+        campo('Código da empresa', empresa, 'cpEmp') +
+        campo('Matrícula', matricula, 'cpMat') +
+        campo('Link do app', link, 'cpLink') +
+        '<button class="act" id="btnAbrirWa">📲 Enviar pelo WhatsApp</button>' +
+        '<button class="act ghost" id="btnCopiarConvite">Copiar mensagem inteira</button>' +
         '<button class="act ghost" id="btnFecharCodigo">Fechar</button>' +
       '</div>';
-    $('btnCopiarConvite').onclick = async () => {
-      try { await navigator.clipboard.writeText(texto); toast('Mensagem copiada', 'ok'); }
-      catch (e) { toast('Copie manualmente os dados acima', 'warn'); }
+    const copiar = async (valor, ok) => {
+      try { await navigator.clipboard.writeText(valor); toast(ok, 'ok'); }
+      catch (e) { toast('Não consegui copiar — selecione manualmente', 'warn'); }
     };
+    $('areaBio').querySelectorAll('button[data-copiar]').forEach(b => {
+      b.onclick = () => copiar(b.dataset.copiar, 'Copiado');
+    });
+    $('btnCopiarConvite').onclick = () => copiar(texto, 'Mensagem copiada');
+    // Abre o WhatsApp com a mensagem pronta — o RH só escolhe o contato.
+    $('btnAbrirWa').onclick = () => window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank');
     $('btnFecharCodigo').onclick = () => { $('areaBio').innerHTML = ''; };
     $('areaBio').scrollIntoView({ behavior: 'smooth', block: 'start' });
   },
