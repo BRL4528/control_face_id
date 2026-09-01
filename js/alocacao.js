@@ -29,20 +29,22 @@ function carregarMapLibre() {
   return _mapLibrePromise;
 }
 
-// Estilo raster do OpenStreetMap — 100% gratuito, sem chave de API. Os domínios
-// de tile (*.tile.openstreetmap.org) estão liberados na CSP (vercel.json).
+// Estilo raster CARTO Voyager — gratuito, sem chave de API e, ao contrário dos
+// tiles oficiais do openstreetmap.org, NÃO exige cabeçalho Referer (que nossa
+// Referrer-Policy 'same-origin' omite em requisições cross-origin, causando 403
+// "Access blocked"). Domínios liberados na CSP (vercel.json / _headers).
 const ESTILO = {
   version: 8,
   sources: {
-    osm: {
+    base: {
       type: 'raster',
-      tiles: ['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
-              'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
-              'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'],
-      tileSize: 256, maxzoom: 19, attribution: '© OpenStreetMap'
+      tiles: ['https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+              'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+              'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png'],
+      tileSize: 256, maxzoom: 20, attribution: '© OpenStreetMap © CARTO'
     }
   },
-  layers: [{ id: 'osm', type: 'raster', source: 'osm' }]
+  layers: [{ id: 'base', type: 'raster', source: 'base' }]
 };
 
 /** Círculo GeoJSON aproximado da cerca, para desenhar o raio no mapa. */
