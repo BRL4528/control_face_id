@@ -29,19 +29,19 @@ function carregarMapLibre() {
   return _mapLibrePromise;
 }
 
-// Estilo raster CARTO Voyager — gratuito, sem chave de API e, ao contrário dos
-// tiles oficiais do openstreetmap.org, NÃO exige cabeçalho Referer (que nossa
-// Referrer-Policy 'same-origin' omite em requisições cross-origin, causando 403
-// "Access blocked"). Domínios liberados na CSP (vercel.json / _headers).
+// Estilo raster do OpenStreetMap oficial — mapa mantido pela comunidade, livre,
+// sem chave e sem marca d'água. Exige o cabeçalho Referer; por isso a
+// Referrer-Policy do app é 'strict-origin-when-cross-origin' (envia só a origem
+// para sites externos), não 'same-origin' — ver _headers/vercel.json.
 const ESTILO = {
   version: 8,
   sources: {
     base: {
       type: 'raster',
-      tiles: ['https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-              'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-              'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png'],
-      tileSize: 256, maxzoom: 20, attribution: '© OpenStreetMap © CARTO'
+      tiles: ['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+              'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+              'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      tileSize: 256, maxzoom: 19, attribution: '© OpenStreetMap contributors'
     }
   },
   layers: [{ id: 'base', type: 'raster', source: 'base' }]
