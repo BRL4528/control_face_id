@@ -118,5 +118,6 @@ export const ApiRh = {
   lancarPonto(token, d) { return reqRh('/rh/lancar-ponto', token, d); },
   jornada(token, d) { return reqRh('/rh/jornada', token, d); },
   config(token, d) { return reqRh('/rh/config', token, d); },
-  usuario(token, d) { return reqRh('/rh/usuario', token, d); }
+  usuario(token, d) { return reqRh('/rh/usuario', token, d); },
+  plano(token, d) { return reqRh('/rh/plano', token, d); }
 };

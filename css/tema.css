@@ -381,6 +381,13 @@ button.linha-item{border:0;background:none;font:inherit;color:inherit;cursor:poi
 #rh .senha-box{background:#f0f9f4;border:1px solid #b7e4cd;border-radius:10px;padding:12px 14px;margin-top:10px;font-size:13px}
 #rh .senha-box .mono{font-size:16px;font-weight:700;color:var(--v2-ink)}
 
+/* ---- seletor de dias da semana (editor de plano) ---- */
+#rh .dias-semana{display:flex;gap:6px;flex-wrap:wrap}
+#rh .dia-btn{height:34px;min-width:44px;padding:0 10px;border:1px solid var(--v2-linha);border-radius:9px;
+  background:#fff;color:var(--v2-sub);font-size:13px;font-weight:500;cursor:pointer}
+#rh .dia-btn:hover{border-color:#cfd6e0}
+#rh .dia-btn.on{background:var(--v2-azul);border-color:var(--v2-azul);color:#fff}
+
 /* ---- reset: elementos antigos do RH reaproveitados dentro do #rh ---- */
 #rh .card{background:var(--v2-surf);border:1px solid var(--v2-linha);border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:var(--v2-sombra)}
 #rh .card h2{font-size:15px;margin:0 0 12px;font-weight:600;color:var(--v2-ink)}

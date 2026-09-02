@@ -6,7 +6,8 @@ import {
   indicadores, espelho, gestorDeveMarcar,
   presencaPorEquipe, statusPresenca, serieDiaria, pendenciasPorMotivo, LIMIAR_PRESENCA
 , pontosDoDia, exceptionsDoDia, TIPOS_EXCECAO,
-  jornadaDaEquipe, horaEntradaDaEquipe, horasEntradaPorEquipe, csvDe } from '../../js/regras.js';
+  jornadaDaEquipe, horaEntradaDaEquipe, horasEntradaPorEquipe, csvDe,
+  materializarDias, alertasDePlanejamento } from '../../js/regras.js';
 
 const CFG = { limiarAceite: 0.45, limiarCinza: 0.58 };
 
@@ -485,4 +486,102 @@ test('csvDe escapa separador, aspas e quebra de linha', () => {
   assert.equal(linhas[0], 'Nome;Obs');
   assert.equal(linhas[1], '"Ana; Souza";"diz ""oi"""');
   assert.equal(linhas[2], '"linha\nquebrada";ok');
+});
+
+
+/* --------------------------------------- planejamento recorrente (v3) */
+
+// 2026-09-09 é uma quarta-feira. Semana: seg 07, ter 08, qua 09, qui 10, sex 11, sáb 12, dom 13.
+const PHOJE = '2026-09-09';
+
+test('materializarDias inclui só dias úteis dentro da vigência', () => {
+  const plano = { dias_semana: [1, 2, 3, 4, 5], vigencia_inicio: '2026-09-07', vigencia_fim: '2026-09-13' };
+  const dias = materializarDias(plano, PHOJE, 90);
+  // de hoje (qua 09) até dom 13, úteis = qua/qui/sex; sáb e dom ficam de fora
+  assert.deepEqual(dias, ['2026-09-09', '2026-09-10', '2026-09-11']);
+});
+
+test('materializarDias nunca gera dias no passado', () => {
+  const plano = { dias_semana: [1, 2, 3, 4, 5], vigencia_inicio: '2026-09-01', vigencia_fim: '2026-09-11' };
+  const dias = materializarDias(plano, PHOJE, 90);
+  assert.equal(dias[0], '2026-09-09');       // começa em hoje, não no início da vigência (07)
+  assert.ok(dias.every(d => d >= PHOJE));
+});
+
+test('materializarDias com vigência sem fim respeita o horizonte', () => {
+  const plano = { dias_semana: [1, 2, 3, 4, 5], vigencia_inicio: '2026-09-09', vigencia_fim: null };
+  const dias = materializarDias(plano, PHOJE, 7);   // 7 dias de horizonte: qua..qua seguinte
+  // úteis em [09..16]: qua09, qui10, sex11, seg14, ter15, qua16
+  assert.deepEqual(dias, ['2026-09-09', '2026-09-10', '2026-09-11', '2026-09-14', '2026-09-15', '2026-09-16']);
+});
+
+test('materializarDias com vigência já vencida devolve vazio', () => {
+  const plano = { dias_semana: [1, 2, 3, 4, 5], vigencia_inicio: '2026-08-01', vigencia_fim: '2026-08-31' };
+  assert.deepEqual(materializarDias(plano, PHOJE, 90), []);
+});
+
+test('materializarDias respeita dias_semana custom (inclui sábado)', () => {
+  const plano = { dias_semana: [6], vigencia_inicio: '2026-09-09', vigencia_fim: '2026-09-20' };
+  const dias = materializarDias(plano, PHOJE, 90);
+  // sábados em [09..20]: 12 e 19
+  assert.deepEqual(dias, ['2026-09-12', '2026-09-19']);
+});
+
+const ALPESSOAS = [
+  { pessoa_id: 'a', nome: 'Ana', equipe_id: 'e1', ativo: true },
+  { pessoa_id: 'b', nome: 'Bruno', equipe_id: 'e1', ativo: true },
+  { pessoa_id: 'c', nome: 'Carla', equipe_id: 'e2', ativo: true },
+  { pessoa_id: 'd', nome: 'Dario', equipe_id: 'e2', ativo: false }
+];
+const ALEQUIPES = [{ equipe_id: 'e1', nome: 'Um' }, { equipe_id: 'e2', nome: 'Dois' }];
+
+test('alertasDePlanejamento: pessoa em 2 equipes no mesmo dia é crítico', () => {
+  const alocs = [
+    { dia: PHOJE, colaborador_id: 'a', equipe_id: 'e1' },
+    { dia: PHOJE, colaborador_id: 'a', equipe_id: 'e2' },   // conflito!
+    { dia: PHOJE, colaborador_id: 'b', equipe_id: 'e1' }
+  ];
+  const al = alertasDePlanejamento([], alocs, ALPESSOAS, ALEQUIPES, PHOJE, 14, 3);
+  const conf = al.find(x => x.tipo === 'pessoa_em_2_equipes');
+  assert.ok(conf);
+  assert.equal(conf.severidade, 'critico');
+  assert.equal(conf.pessoa_id, 'a');
+});
+
+test('alertasDePlanejamento: cerca sem gente', () => {
+  const planos = [{ plano_id: 'p1', equipe_id: 'e1', colaboradores: [], ativo: true, vigencia_fim: null }];
+  const al = alertasDePlanejamento(planos, [], ALPESSOAS, ALEQUIPES, PHOJE, 14, 3);
+  assert.ok(al.some(x => x.tipo === 'cerca_sem_gente' && x.equipe_id === 'e1'));
+});
+
+test('alertasDePlanejamento: plano só com gente inativa também conta como sem gente', () => {
+  const planos = [{ plano_id: 'p1', equipe_id: 'e2', colaboradores: ['d'], ativo: true, vigencia_fim: null }];
+  const al = alertasDePlanejamento(planos, [], ALPESSOAS, ALEQUIPES, PHOJE, 14, 3);
+  assert.ok(al.some(x => x.tipo === 'cerca_sem_gente'));
+});
+
+test('alertasDePlanejamento: colaborador ativo sem nenhuma alocação futura', () => {
+  const alocs = [{ dia: PHOJE, colaborador_id: 'a', equipe_id: 'e1' }];   // só Ana tem plano
+  const al = alertasDePlanejamento([], alocs, ALPESSOAS, ALEQUIPES, PHOJE, 14, 3);
+  const semPlano = al.filter(x => x.tipo === 'ativo_sem_plano').map(x => x.pessoa_id).sort();
+  assert.deepEqual(semPlano, ['b', 'c']);      // Dario é inativo, não conta; Ana tem plano
+});
+
+test('alertasDePlanejamento: plano vencendo dentro da janela; fora não alerta', () => {
+  const planos = [
+    { plano_id: 'p1', equipe_id: 'e1', colaboradores: ['a'], ativo: true, vigencia_fim: '2026-09-11' }, // +2 dias
+    { plano_id: 'p2', equipe_id: 'e2', colaboradores: ['c'], ativo: true, vigencia_fim: '2026-10-30' }  // longe
+  ];
+  const al = alertasDePlanejamento(planos, [], ALPESSOAS, ALEQUIPES, PHOJE, 14, 3);
+  const venc = al.filter(x => x.tipo === 'plano_vencendo').map(x => x.alvo.id);
+  assert.deepEqual(venc, ['p1']);
+});
+
+test('alertasDePlanejamento: itens têm o mesmo shape das exceções (id, tipo, severidade, alvo)', () => {
+  const al = alertasDePlanejamento(
+    [{ plano_id: 'p1', equipe_id: 'e1', colaboradores: [], ativo: true, vigencia_fim: null }],
+    [], ALPESSOAS, ALEQUIPES, PHOJE, 14, 3);
+  const x = al[0];
+  assert.ok(x.id && x.tipo && x.severidade && x.alvo && 'pessoa_id' in x && 'equipe_id' in x);
+  assert.equal(x.hora, '');
 });

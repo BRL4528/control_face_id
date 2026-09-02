@@ -45,13 +45,17 @@ export default async function handler(req, res) {
     const eq = (typeof it === 'object' && it.equipe_id) || equipeId;
     if (cerca.lat == null || cerca.lng == null || !eq) continue;
 
+    // origem='manual': é ajuste pontual do RH. A re-materialização de um plano
+    // NÃO sobrescreve linhas manuais (ver api/rh/plano.js), então este dia fica
+    // "cravado" mesmo que um plano cubra a mesma data.
     await sql`
-      INSERT INTO alocacao (id, empresa_id, dia, colaborador_id, equipe_id, cerca_lat, cerca_lng, cerca_raio_m)
+      INSERT INTO alocacao (id, empresa_id, dia, colaborador_id, equipe_id, cerca_lat, cerca_lng, cerca_raio_m, origem, plano_id)
       VALUES (${novoId()}, ${rh.empresa_id}, ${dia}, ${colaboradorId}, ${eq},
-              ${cerca.lat}, ${cerca.lng}, ${Number(cerca.raio_m) || 200})
+              ${cerca.lat}, ${cerca.lng}, ${Number(cerca.raio_m) || 200}, 'manual', ${null})
       ON CONFLICT (empresa_id, dia, colaborador_id) DO UPDATE SET
         equipe_id = EXCLUDED.equipe_id, cerca_lat = EXCLUDED.cerca_lat,
-        cerca_lng = EXCLUDED.cerca_lng, cerca_raio_m = EXCLUDED.cerca_raio_m`;
+        cerca_lng = EXCLUDED.cerca_lng, cerca_raio_m = EXCLUDED.cerca_raio_m,
+        origem = 'manual', plano_id = NULL`;
     gravadas++;
   }
   return ok(res, { dia, gravadas });

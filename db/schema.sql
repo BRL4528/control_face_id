@@ -248,3 +248,33 @@ ALTER TABLE empresa ADD COLUMN IF NOT EXISTS fuso text NOT NULL DEFAULT 'America
 
 -- Senha temporária: usuário criado pelo RH nasce obrigado a trocar no 1º acesso.
 ALTER TABLE usuario_rh ADD COLUMN IF NOT EXISTS trocar_senha boolean NOT NULL DEFAULT false;
+
+-- ═══════════════════════════════════════════════════════ planejamento recorrente
+
+-- Alocar cada equipe TODO dia à mão é inviável. O RH cria um PLANO recorrente
+-- (equipe → local/cerca, dias da semana, vigência) e o sistema MATERIALIZA esse
+-- plano em linhas `alocacao` reais para os dias úteis. Assim o app do colaborador
+-- (que lê `alocacao` por dia ao bater ponto) não muda em nada.
+CREATE TABLE IF NOT EXISTS plano_alocacao (
+  id             text PRIMARY KEY,
+  empresa_id     text NOT NULL REFERENCES empresa(id) ON DELETE CASCADE,
+  equipe_id      text NOT NULL REFERENCES equipe(id),
+  colaboradores  text[] NOT NULL DEFAULT '{}',           -- ids dos colaboradores do plano
+  cerca_lat      double precision NOT NULL,
+  cerca_lng      double precision NOT NULL,
+  cerca_raio_m   integer NOT NULL DEFAULT 200,
+  dias_semana    int[] NOT NULL DEFAULT '{1,2,3,4,5}',    -- ISO: 1=seg … 7=dom
+  vigencia_inicio date NOT NULL,
+  vigencia_fim    date,                                    -- NULL = indefinido (materializa até o horizonte)
+  ativo          boolean NOT NULL DEFAULT true,
+  criado_em      timestamptz NOT NULL DEFAULT now(),
+  atualizado_em  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_plano_empresa ON plano_alocacao (empresa_id, ativo);
+
+-- origem: 'plano' = linha gerada pela materialização (pode ser recriada);
+--         'manual' = ajuste pontual do RH (SAGRADO — a re-materialização não sobrescreve).
+-- plano_id aponta o plano que gerou a linha (NULL em alocações puramente manuais).
+ALTER TABLE alocacao ADD COLUMN IF NOT EXISTS origem text NOT NULL DEFAULT 'manual';
+ALTER TABLE alocacao ADD COLUMN IF NOT EXISTS plano_id text;
+CREATE INDEX IF NOT EXISTS ix_aloc_plano ON alocacao (plano_id) WHERE plano_id IS NOT NULL;

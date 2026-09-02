@@ -2,24 +2,26 @@
 import { ApiRh } from './api.js';
 import { Alocacao } from './alocacao.js';
 import { MapaOp } from './mapa.js';
+import { PlanoEditor } from './plano.js';
 import { Face } from './face.js';
 import { derivar } from './cripto.js';
 import {
   indicadores, espelho, euclidiana,
   presencaPorEquipe, serieDiaria, pendenciasPorMotivo,
   exceptionsDoDia, TIPOS_EXCECAO,
-  jornadaDaEquipe, horasEntradaPorEquipe, csvDe
+  jornadaDaEquipe, horasEntradaPorEquipe, csvDe,
+  alertasDePlanejamento
 } from './regras.js';
 import { $, esc, mostrar, toast, hora, data } from './ui.js';
 
 // Rótulo da aba na trilha do topo (breadcrumb) e no título de página.
 const TITULOS = {
-  painel: 'Central operacional', alocacao: 'Alocações', mapa: 'Mapa',
+  painel: 'Central operacional', alocacao: 'Alocações', planos: 'Planos recorrentes', mapa: 'Mapa',
   pendencias: 'Pendências', registros: 'Espelho de ponto', jornadas: 'Jornadas',
   pessoas: 'Colaboradores', equipes: 'Equipes',
   relatorios: 'Relatórios', auditoria: 'Auditoria', config: 'Configurações'
 };
-const ABAS = ['painel', 'alocacao', 'mapa', 'pendencias', 'pessoas', 'equipes',
+const ABAS = ['painel', 'alocacao', 'planos', 'mapa', 'pendencias', 'pessoas', 'equipes',
   'registros', 'jornadas', 'relatorios', 'auditoria', 'config', 'stub'];
 
 export const Rh = {
@@ -124,8 +126,8 @@ export const Rh = {
       b.classList.toggle('on', on);
     });
 
-    // badge de pendências abertas na sidebar
-    const nExc = this.exceptions().length;
+    // badge da sidebar = exceções do dia + alertas de planejamento
+    const nExc = this.exceptions().length + this.alertas().length;
     const badge = $('navBadgePend');
     if (badge) { badge.textContent = nExc; badge.classList.toggle('hide', nExc === 0); }
 
@@ -144,6 +146,7 @@ export const Rh = {
     if (this.aba === 'relatorios') this.pintarRelatorios();
     if (this.aba === 'auditoria') this.pintarAuditoria();
     if (this.aba === 'config') this.pintarConfig();
+    if (this.aba === 'planos') this.pintarPlanos();
     if (this.aba === 'stub') this.pintarStub();
   },
 
@@ -155,6 +158,12 @@ export const Rh = {
       d.marcacoes, d.pessoas, d.alocacoes_hoje, this.hojeServidor(),
       d.servidor_hora, cfg.horaEntrada || '08:00',
       horasEntradaPorEquipe(d.equipes, d.jornadas));   // hora-limite por jornada da equipe
+  },
+
+  /** Alertas de planejamento (gestão da escala), pura. */
+  alertas() {
+    const d = this.dados || {};
+    return alertasDePlanejamento(d.planos, d.alocacoes, d.pessoas, d.equipes, this.hojeServidor(), 14, 3);
   },
 
   jornadaDe(equipeId) {
@@ -188,9 +197,10 @@ export const Rh = {
     for (const a of linhas) {
       const g = porEquipe[a.equipe_id] || (porEquipe[a.equipe_id] = {
         equipe_id: a.equipe_id, cerca_lat: a.cerca_lat, cerca_lng: a.cerca_lng,
-        cerca_raio_m: a.cerca_raio_m, colaboradores: []
+        cerca_raio_m: a.cerca_raio_m, colaboradores: [], temPlano: false, temManual: false
       });
       g.colaboradores.push(a.colaborador_id);
+      if (a.origem === 'manual') g.temManual = true; else g.temPlano = true;
     }
     return Object.values(porEquipe);
   },
@@ -222,9 +232,14 @@ export const Rh = {
     const card = g => {
       const nome = this.nomeEquipe(g.equipe_id);
       const total = (this.dados.pessoas || []).filter(p => p.ativo && p.equipe_id === g.equipe_id).length;
+      // De onde veio a alocação deste dia: só do plano, só manual, ou misto.
+      const origemPill = g.temManual && g.temPlano
+        ? '<span class="pill warn" style="padding:0 7px">plano + ajuste</span>'
+        : g.temManual ? '<span class="pill mut" style="padding:0 7px">ajuste manual</span>'
+        : '<span class="pill ok" style="padding:0 7px">do plano</span>';
       return '<div class="v2card aloc-card">' +
         '<div class="aloc-card-head"><span class="team-nome">' + esc(nome) + '</span>' +
-          '<span class="pill ok"><span class="dot"></span>Ativa</span>' +
+          origemPill +
           '<span class="team-cnt">' + g.colaboradores.length + ' colaboradores</span></div>' +
         '<div class="aloc-card-map">' + this.svgMiniMapa('bom') +
           '<span class="cerca-tag">Cerca ' + g.cerca_raio_m + ' m</span></div>' +
@@ -319,6 +334,83 @@ export const Rh = {
     return new Date(iso + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
   },
 
+  /* ------------------------------------------------- planos recorrentes */
+
+  pintarPlanos() {
+    const planos = this.dados.planos || [];
+    const hoje = this.hojeServidor();
+    const limiteVenc = new Date(Date.parse(hoje + 'T00:00:00Z') + 3 * 86400000).toISOString().slice(0, 10);
+    const ROT = { 1: 'Seg', 2: 'Ter', 3: 'Qua', 4: 'Qui', 5: 'Sex', 6: 'Sáb', 7: 'Dom' };
+
+    const enderecoDe = pl => {
+      const l = (this.dados.locais || []).find(x =>
+        Math.abs(x.lat - pl.cerca_lat) < 1e-4 && Math.abs(x.lng - pl.cerca_lng) < 1e-4);
+      return l ? l.nome : (Number(pl.cerca_lat).toFixed(4) + ', ' + Number(pl.cerca_lng).toFixed(4));
+    };
+
+    const card = pl => {
+      const nColab = (pl.colaboradores || []).filter(id => this.pessoaDe(id)).length;
+      const dias = (pl.dias_semana || []).slice().sort((a, b) => a - b).map(n => ROT[n]).join(' ');
+      const vencendo = pl.vigencia_fim && pl.vigencia_fim >= hoje && pl.vigencia_fim <= limiteVenc;
+      const vig = 'De ' + this.dataLonga(pl.vigencia_inicio) + (pl.vigencia_fim ? ' até ' + this.dataLonga(pl.vigencia_fim) : ' (sem prazo)');
+      return '<div class="v2card aloc-card">' +
+        '<div class="aloc-card-head"><span class="team-nome">' + esc(this.nomeEquipe(pl.equipe_id)) + '</span>' +
+          (vencendo ? '<span class="pill warn"><span class="dot"></span>vencendo</span>' : '<span class="pill ok"><span class="dot"></span>ativo</span>') +
+          '<span class="team-cnt">' + nColab + ' colaboradores</span></div>' +
+        '<div class="aloc-card-map">' + this.svgMiniMapa('bom') +
+          '<span class="cerca-tag">Cerca ' + pl.cerca_raio_m + ' m</span></div>' +
+        '<div class="aloc-card-grid">' +
+          '<div><div class="k">Local</div><div class="v">' + esc(enderecoDe(pl)) + '</div></div>' +
+          '<div><div class="k">Dias</div><div class="v">' + esc(dias || '—') + '</div></div>' +
+          '<div style="grid-column:1/-1"><div class="k">Vigência</div><div class="v">' + esc(vig) + '</div></div>' +
+        '</div>' +
+        '<div class="aloc-card-acoes">' +
+          '<button class="v2btn ghost mini" data-pled="' + esc(pl.plano_id) + '">Editar</button>' +
+          '<button class="v2btn danger mini" data-plrm="' + esc(pl.plano_id) + '" style="margin-left:auto">Remover</button>' +
+        '</div></div>';
+    };
+
+    $('rh-planos').innerHTML =
+      '<div class="pg-head"><div><h1 class="tit">Planos recorrentes</h1>' +
+        '<p class="sub">Defina uma vez e o sistema aplica sozinho todo dia útil. Ajustes pontuais na aba Alocações não são sobrescritos.</p></div>' +
+        '<div class="acoes"><button class="v2btn" id="btnNovoPlano">+ Novo plano</button></div></div>' +
+      '<div class="aloc-grid">' +
+        planos.map(card).join('') +
+        '<button class="aloc-novo" id="btnNovoPlano2"><span style="font-size:22px">+</span>' +
+          '<span style="font-weight:500">Criar um plano recorrente</span>' +
+          '<span style="font-size:12.5px;color:#94a3b8">Equipe, local, dias e vigência</span></button>' +
+      '</div>' +
+      '<div id="planoModal" class="modal-back hide"><div class="modal"><div class="modal-head">' +
+        '<h2 id="planoModalTit">Novo plano</h2><button class="modal-x" id="planoModalX">✕</button></div>' +
+        '<div id="planoEditor" class="modal-body"></div></div></div>';
+
+    $('btnNovoPlano').onclick = () => this.abrirEditorPlano(null);
+    $('btnNovoPlano2').onclick = () => this.abrirEditorPlano(null);
+    $('rh-planos').querySelectorAll('[data-pled]').forEach(b => {
+      b.onclick = () => this.abrirEditorPlano(planos.find(p => p.plano_id === b.dataset.pled));
+    });
+    $('rh-planos').querySelectorAll('[data-plrm]').forEach(b => {
+      b.onclick = async () => {
+        if (!confirm('Remover este plano? As alocações futuras geradas por ele saem; ajustes manuais permanecem.')) return;
+        const r = await ApiRh.plano(this.token, { acao: 'remover', plano_id: b.dataset.plrm });
+        if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+        toast('Plano removido', 'ok');
+        await this.recarregar();
+      };
+    });
+    $('planoModalX').onclick = () => $('planoModal').classList.add('hide');
+    $('planoModal').onclick = (e) => { if (e.target.id === 'planoModal') $('planoModal').classList.add('hide'); };
+  },
+
+  abrirEditorPlano(pl) {
+    $('planoModalTit').textContent = pl ? ('Editar plano — ' + this.nomeEquipe(pl.equipe_id)) : 'Novo plano recorrente';
+    $('planoModal').classList.remove('hide');
+    PlanoEditor.abrir(this, Object.assign({
+      alvo: 'planoEditor',
+      aoSalvar: (cancelado) => { $('planoModal').classList.add('hide'); if (!cancelado) this.recarregar(); }
+    }, pl || {}));
+  },
+
   /* --------------------------------------------------------- painel */
 
   // "Hoje" segundo o relógio do servidor, não o do PC do RH — é ele que carimba
@@ -350,6 +442,7 @@ export const Rh = {
     const serie = serieDiaria(d.marcacoes, d.periodo_dias || this.dias, hoje);
     const motivos = pendenciasPorMotivo(d.marcacoes, d.recadastros, d.pessoas);
     const exc = this.exceptions();
+    const alerts = this.alertas();
     const cercaPorEquipe = this.cercaPorEquipe();
 
     const esp = cards.reduce((s, c) => s + c.esperados, 0);
@@ -404,6 +497,16 @@ export const Rh = {
         '<button class="v2btn ghost mini" data-exc="' + esc(x.id) + '" style="margin-top:9px">Analisar</button></div>';
     }).join('') || '<div class="aten"><div class="aten-sub">Nada requer atenção agora. 🎉</div></div>';
 
+    // Bloco "Planejamento": alertas de gestão da escala (conflitos, lacunas, vencendo).
+    const planHtml = alerts.slice(0, 5).map(x => {
+      const p = x.pessoa_id ? this.pessoaDe(x.pessoa_id) : null;
+      const contexto = p ? p.nome : (x.equipe_id ? this.nomeEquipe(x.equipe_id) : '—');
+      return '<div class="aten"><div class="aten-top">' + sevPill(x.severidade) +
+        '<span class="aten-tit">' + esc(x.rotulo) + '</span></div>' +
+        '<div class="aten-sub">' + esc(contexto) + '</div>' +
+        '<button class="v2btn ghost mini" data-plan="' + esc(x.tipo) + '" style="margin-top:9px">Resolver</button></div>';
+    }).join('') || '<div class="aten"><div class="aten-sub">Planejamento em dia. ✓</div></div>';
+
     const ativ = (d.marcacoes || []).slice(0, 6).map(m => {
       const p = this.pessoaDe(m.pessoa_id);
       const tone = m.origem === 'manual' ? '#d97706' : '#16a34a';
@@ -444,6 +547,13 @@ export const Rh = {
             atenHtml +
           '</section>' +
           '<section class="side-sec">' +
+            '<div class="side-sec-head">' +
+              '<span class="sev ' + (alerts.length ? 'warn' : '') + '">' + alerts.length + '</span>' +
+              '<h2>Planejamento</h2>' +
+              '<button class="link" id="abrirPlanos" style="margin-left:auto">Ver planos</button></div>' +
+            planHtml +
+          '</section>' +
+          '<section class="side-sec">' +
             '<div class="side-sec-head"><h2>Atividade recente</h2></div>' +
             ativ +
           '</section>' +
@@ -465,6 +575,10 @@ export const Rh = {
 
     $('verPlanejamento').onclick = () => { this.aba = 'alocacao'; this.pintar(); };
     $('abrirFila').onclick = () => { this.aba = 'pendencias'; this.pintar(); };
+    $('abrirPlanos').onclick = () => { this.aba = 'planos'; this.pintar(); };
+    $('rh-painel').querySelectorAll('button[data-plan]').forEach(b => {
+      b.onclick = () => { this.aba = 'planos'; this.pintar(); };
+    });
     $('rh-painel').querySelectorAll('button[data-exc]').forEach(b => {
       b.onclick = () => { this.aba = 'pendencias'; this.pendSel = b.dataset.exc; this.pintar(); };
     });

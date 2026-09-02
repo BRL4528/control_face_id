@@ -18,7 +18,7 @@ export default async function handler(req, res) {
   const hoje = new Date().toISOString().slice(0, 10);
   const sql = db();
 
-  const [equipes, pessoas, marcacoes, alocacoes, locais, jornadas, empresaRow, configRow, usuariosRh, correcoes] = await Promise.all([
+  const [equipes, pessoas, marcacoes, alocacoes, locais, jornadas, empresaRow, configRow, usuariosRh, correcoes, planos] = await Promise.all([
     sql`SELECT id AS equipe_id, nome, ativo, jornada_id, supervisor_id FROM equipe WHERE empresa_id = ${empresa} ORDER BY nome`,
     sql`SELECT c.id AS pessoa_id, c.nome, c.matricula, c.papel, c.equipe_padrao AS equipe_id, c.ativo,
                EXISTS(SELECT 1 FROM template_facial t WHERE t.colaborador_id = c.id AND t.estado='ativo') AS tem_biometria,
@@ -32,10 +32,12 @@ export default async function handler(req, res) {
         FROM marcacao m
         WHERE m.empresa_id = ${empresa} AND m.marcado_dia >= (CURRENT_DATE - ${dias}::int)
         ORDER BY m.marcado_em DESC`,
-    // Alocações de uma janela em torno de hoje (ontem..+7): cobre as tabs Hoje/Amanhã/Semana.
-    sql`SELECT a.dia, a.colaborador_id, a.equipe_id, a.cerca_lat, a.cerca_lng, a.cerca_raio_m
+    // Alocações de uma janela em torno de hoje (ontem..+30): cobre as tabs de dia
+    // e os alertas de planejamento (pessoa em 2 equipes, sem plano futuro).
+    sql`SELECT a.dia, a.colaborador_id, a.equipe_id, a.cerca_lat, a.cerca_lng, a.cerca_raio_m,
+               a.origem, a.plano_id
         FROM alocacao a
-        WHERE a.empresa_id = ${empresa} AND a.dia BETWEEN (CURRENT_DATE - 1) AND (CURRENT_DATE + 7)`,
+        WHERE a.empresa_id = ${empresa} AND a.dia BETWEEN (CURRENT_DATE - 1) AND (CURRENT_DATE + 30)`,
     sql`SELECT id AS local_id, nome, lat, lng, raio_m FROM local
         WHERE empresa_id = ${empresa} AND ativo = true ORDER BY nome`,
     sql`SELECT id AS jornada_id, nome, to_char(entrada,'HH24:MI') AS entrada, to_char(saida,'HH24:MI') AS saida,
@@ -54,7 +56,12 @@ export default async function handler(req, res) {
         LEFT JOIN marcacao m ON (co.alvo_tipo='marcacao' AND m.id_cliente = co.alvo_id)
         LEFT JOIN colaborador c ON c.id = m.colaborador_id
         WHERE co.empresa_id = ${empresa}
-        ORDER BY co.criada_em DESC LIMIT 500`
+        ORDER BY co.criada_em DESC LIMIT 500`,
+    // Planos de alocação recorrente ativos (para a aba Planos e os alertas).
+    sql`SELECT id AS plano_id, equipe_id, colaboradores, cerca_lat, cerca_lng, cerca_raio_m,
+               dias_semana, to_char(vigencia_inicio,'YYYY-MM-DD') AS vigencia_inicio,
+               to_char(vigencia_fim,'YYYY-MM-DD') AS vigencia_fim, ativo
+        FROM plano_alocacao WHERE empresa_id = ${empresa} AND ativo = true ORDER BY criado_em DESC`
   ]);
 
   const alocacoesHoje = alocacoes.filter(a => String(a.dia).slice(0, 10) === hoje);
@@ -66,9 +73,9 @@ export default async function handler(req, res) {
     config: (configRow[0] && configRow[0].dados) || {},
     periodo_dias: dias,
     servidor_hora: new Date().toISOString(),
-    equipes, pessoas, marcacoes, locais, jornadas,
+    equipes, pessoas, marcacoes, locais, jornadas, planos,
     usuarios_rh: usuariosRh, correcoes,
-    alocacoes,                 // janela ontem..+7 (para as tabs de dia)
+    alocacoes,                 // janela ontem..+30 (tabs de dia + alertas de planejamento)
     alocacoes_hoje: alocacoesHoje,
     recadastros: []  // recadastro pendente entra quando o autocadastro do gestor existir
   });

@@ -301,7 +301,12 @@ export const TIPOS_EXCECAO = {
   fora_da_cerca:   { rotulo: 'Registro fora da área', severidade: 'critico' },
   sem_entrada:     { rotulo: 'Entrada não registrada', severidade: 'atencao' },
   registro_manual: { rotulo: 'Registro manual sem biometria', severidade: 'atencao' },
-  zona_cinzenta:   { rotulo: 'Similaridade na zona cinzenta', severidade: 'atencao' }
+  zona_cinzenta:   { rotulo: 'Similaridade na zona cinzenta', severidade: 'atencao' },
+  // Alertas de PLANEJAMENTO (não são do dia; são de gestão da escala).
+  pessoa_em_2_equipes: { rotulo: 'Alocada em duas equipes no mesmo dia', severidade: 'critico' },
+  cerca_sem_gente:     { rotulo: 'Equipe com cerca e sem colaboradores', severidade: 'atencao' },
+  ativo_sem_plano:     { rotulo: 'Colaborador ativo sem planejamento', severidade: 'atencao' },
+  plano_vencendo:      { rotulo: 'Plano vencendo', severidade: 'atencao' }
 };
 
 // Hora-limite padrão da entrada. Só usada para decidir quando cobrar "sem
@@ -412,4 +417,105 @@ export function csvDe(cabecalho, linhas) {
   };
   const todas = [cabecalho].concat(linhas || []);
   return todas.map(l => l.map(escape).join(';')).join('\r\n');
+}
+
+/* --------------------------------------- planejamento recorrente (v3) */
+
+const UM_DIA_MS = 86400000;
+function isoDia(ms) { return new Date(ms).toISOString().slice(0, 10); }
+// ISO weekday: 1=segunda … 7=domingo. Usa UTC (meio-dia) para não escorregar de fuso.
+function isoWeekday(diaISO) {
+  const d = new Date(diaISO + 'T12:00:00Z').getUTCDay();   // 0=dom … 6=sáb
+  return d === 0 ? 7 : d;
+}
+
+/**
+ * Dias (YYYY-MM-DD) que um plano recorrente deve materializar a partir de HOJE.
+ * Nunca gera passado (início = max(vigência_inicio, hoje)). Fim = min(vigência_fim
+ * ?? hoje+horizonte, hoje+horizonte); horizonte-teto evita materializar plano
+ * indefinido pra sempre. Só inclui dias cujo weekday ISO está em dias_semana.
+ * Pura: `hoje` e `horizonteDias` entram como parâmetro.
+ */
+export function materializarDias(plano, hoje, horizonteDias) {
+  const dias = new Set((plano.dias_semana && plano.dias_semana.length ? plano.dias_semana : [1, 2, 3, 4, 5]).map(Number));
+  const hojeMs = Date.parse(hoje + 'T00:00:00Z');
+  const horizonteMs = hojeMs + (Math.max(1, horizonteDias || 90)) * UM_DIA_MS;
+  const inicioMs = Math.max(hojeMs, Date.parse(plano.vigencia_inicio + 'T00:00:00Z'));
+  const fimMs = Math.min(
+    horizonteMs,
+    plano.vigencia_fim ? Date.parse(plano.vigencia_fim + 'T00:00:00Z') : horizonteMs);
+  const out = [];
+  for (let ms = inicioMs; ms <= fimMs; ms += UM_DIA_MS) {
+    const d = isoDia(ms);
+    if (dias.has(isoWeekday(d))) out.push(d);
+  }
+  return out;
+}
+
+/**
+ * Alertas de PLANEJAMENTO (gestão da escala, não operação do dia). Mesmo shape de
+ * exceptionsDoDia para reusar a fila/detalhe do RH. Pura:
+ *   - planos: linhas de plano_alocacao ativas ({plano_id, equipe_id, colaboradores[], vigencia_fim, ...})
+ *   - alocacoes: janela de alocações materializadas ({dia, colaborador_id, equipe_id, ...})
+ *   - pessoas, equipes: para nome e filtro de ativos
+ *   - hoje 'YYYY-MM-DD', horizonteDias (janela útil de "sem plano"), diasVencendo (ex.: 3)
+ */
+export function alertasDePlanejamento(planos, alocacoes, pessoas, equipes, hoje, horizonteDias, diasVencendo) {
+  const ativos = {};
+  for (const p of (pessoas || [])) if (p && p.ativo) ativos[p.pessoa_id] = p;
+  const itens = [];
+
+  // 1) Pessoa em 2+ equipes no MESMO dia (conflito de escala). Um alerta por (pessoa, dia).
+  const porPessoaDia = {};   // "dia|pessoa" -> Set(equipe_id)
+  for (const a of (alocacoes || [])) {
+    const dia = String(a.dia).slice(0, 10);
+    if (dia < hoje) continue;                      // só futuro/hoje
+    if (!ativos[a.colaborador_id]) continue;
+    const k = dia + '|' + a.colaborador_id;
+    (porPessoaDia[k] = porPessoaDia[k] || new Set()).add(a.equipe_id);
+  }
+  for (const k of Object.keys(porPessoaDia)) {
+    if (porPessoaDia[k].size <= 1) continue;
+    const [dia, pessoaId] = k.split('|');
+    itens.push(alerta('pessoa_em_2_equipes', 'c2:' + k, pessoaId, [...porPessoaDia[k]][0],
+      { tipo: 'colaborador', id: pessoaId, dia }));
+  }
+
+  // 2) Plano ativo com cerca mas sem nenhum colaborador ativo.
+  for (const pl of (planos || [])) {
+    if (pl.ativo === false) continue;
+    const temGente = (pl.colaboradores || []).some(id => ativos[id]);
+    if (!temGente) itens.push(alerta('cerca_sem_gente', 'cs:' + pl.plano_id, null, pl.equipe_id,
+      { tipo: 'plano', id: pl.plano_id }));
+  }
+
+  // 3) Colaborador ativo sem NENHUMA alocação de hoje em diante (sem planejamento).
+  const temFuturo = new Set();
+  for (const a of (alocacoes || [])) if (String(a.dia).slice(0, 10) >= hoje) temFuturo.add(a.colaborador_id);
+  for (const id of Object.keys(ativos)) {
+    if (!temFuturo.has(id)) itens.push(alerta('ativo_sem_plano', 'sp:' + id, id, ativos[id].equipe_id || null,
+      { tipo: 'colaborador', id }));
+  }
+
+  // 4) Plano vencendo: vigência_fim entre hoje e hoje+diasVencendo.
+  const limite = isoDia(Date.parse(hoje + 'T00:00:00Z') + (Math.max(0, diasVencendo || 3)) * UM_DIA_MS);
+  for (const pl of (planos || [])) {
+    if (pl.ativo === false || !pl.vigencia_fim) continue;
+    const fim = String(pl.vigencia_fim).slice(0, 10);
+    if (fim >= hoje && fim <= limite) itens.push(alerta('plano_vencendo', 'pv:' + pl.plano_id, null, pl.equipe_id,
+      { tipo: 'plano', id: pl.plano_id, vigencia_fim: fim }));
+  }
+
+  const peso = { critico: 0, atencao: 1 };
+  return itens.sort((x, y) =>
+    (peso[x.severidade] - peso[y.severidade]) || String(x.rotulo).localeCompare(String(y.rotulo)));
+}
+
+function alerta(tipo, id, pessoaId, equipeId, alvo) {
+  const t = TIPOS_EXCECAO[tipo] || { rotulo: tipo, severidade: 'atencao' };
+  return {
+    id, tipo, severidade: t.severidade, rotulo: t.rotulo,
+    pessoa_id: pessoaId, equipe_id: equipeId, hora: '',
+    marcacao: null, alocacao: null, alvo, planejamento: true
+  };
 }
