@@ -18,32 +18,57 @@ export default async function handler(req, res) {
   const hoje = new Date().toISOString().slice(0, 10);
   const sql = db();
 
-  const [equipes, pessoas, marcacoes, alocacoesHoje, locais] = await Promise.all([
-    sql`SELECT id AS equipe_id, nome, ativo FROM equipe WHERE empresa_id = ${empresa} ORDER BY nome`,
+  const [equipes, pessoas, marcacoes, alocacoes, locais, jornadas, empresaRow, configRow, usuariosRh, correcoes] = await Promise.all([
+    sql`SELECT id AS equipe_id, nome, ativo, jornada_id, supervisor_id FROM equipe WHERE empresa_id = ${empresa} ORDER BY nome`,
     sql`SELECT c.id AS pessoa_id, c.nome, c.matricula, c.papel, c.equipe_padrao AS equipe_id, c.ativo,
                EXISTS(SELECT 1 FROM template_facial t WHERE t.colaborador_id = c.id AND t.estado='ativo') AS tem_biometria,
                (SELECT miniatura_url FROM template_facial t WHERE t.colaborador_id=c.id AND t.estado='ativo' ORDER BY versao DESC LIMIT 1) AS miniatura
         FROM colaborador c WHERE c.empresa_id = ${empresa} ORDER BY c.nome`,
     sql`SELECT m.id_cliente, m.colaborador_id AS pessoa_id, m.equipe_id, m.tipo, m.origem, m.veredito,
                m.marcado_em, m.marcado_dia, m.deriva_ms AS deriva_relogio_ms, m.dentro_cerca,
-               m.distancia_cerca_m, m.foto_url AS foto_auditoria, m.requer_revisao,
+               m.distancia_cerca_m, m.lat, m.lng, m.foto_url AS foto_auditoria, m.requer_revisao, m.score,
                (m.requer_revisao AND NOT EXISTS(
                   SELECT 1 FROM correcao co WHERE co.alvo_tipo='marcacao' AND co.alvo_id=m.id_cliente)) AS pendente
         FROM marcacao m
         WHERE m.empresa_id = ${empresa} AND m.marcado_dia >= (CURRENT_DATE - ${dias}::int)
         ORDER BY m.marcado_em DESC`,
-    sql`SELECT a.colaborador_id, a.equipe_id, a.cerca_lat, a.cerca_lng, a.cerca_raio_m
-        FROM alocacao a WHERE a.empresa_id = ${empresa} AND a.dia = ${hoje}`,
+    // Alocações de uma janela em torno de hoje (ontem..+7): cobre as tabs Hoje/Amanhã/Semana.
+    sql`SELECT a.dia, a.colaborador_id, a.equipe_id, a.cerca_lat, a.cerca_lng, a.cerca_raio_m
+        FROM alocacao a
+        WHERE a.empresa_id = ${empresa} AND a.dia BETWEEN (CURRENT_DATE - 1) AND (CURRENT_DATE + 7)`,
     sql`SELECT id AS local_id, nome, lat, lng, raio_m FROM local
-        WHERE empresa_id = ${empresa} AND ativo = true ORDER BY nome`
+        WHERE empresa_id = ${empresa} AND ativo = true ORDER BY nome`,
+    sql`SELECT id AS jornada_id, nome, to_char(entrada,'HH24:MI') AS entrada, to_char(saida,'HH24:MI') AS saida,
+               tolerancia_min, ativa FROM jornada WHERE empresa_id = ${empresa} ORDER BY nome`,
+    sql`SELECT nome, fuso FROM empresa WHERE id = ${empresa} LIMIT 1`,
+    sql`SELECT dados FROM config_empresa WHERE empresa_id = ${empresa} LIMIT 1`,
+    sql`SELECT id AS usuario_id, usuario, nome, ativo, trocar_senha,
+               to_char(criado_em,'YYYY-MM-DD') AS criado_em FROM usuario_rh
+        WHERE empresa_id = ${empresa} ORDER BY usuario`,
+    // Trilha de auditoria: decisões do RH, com nome de quem decidiu e da pessoa alvo.
+    sql`SELECT co.id, co.alvo_tipo, co.alvo_id, co.acao, co.motivo, co.criada_em,
+               u.nome AS usuario_rh_nome, u.usuario AS usuario_rh_login,
+               c.nome AS pessoa_nome
+        FROM correcao co
+        LEFT JOIN usuario_rh u ON u.id = co.usuario_rh_id
+        LEFT JOIN marcacao m ON (co.alvo_tipo='marcacao' AND m.id_cliente = co.alvo_id)
+        LEFT JOIN colaborador c ON c.id = m.colaborador_id
+        WHERE co.empresa_id = ${empresa}
+        ORDER BY co.criada_em DESC LIMIT 500`
   ]);
+
+  const alocacoesHoje = alocacoes.filter(a => String(a.dia).slice(0, 10) === hoje);
 
   return ok(res, {
     usuario: { nome: rh.nome, usuario: rh.usuario },
     empresa_id: empresa,   // o app do colaborador usa como "código da empresa" no pareamento
+    empresa: empresaRow[0] || { nome: '', fuso: 'America/Campo_Grande' },
+    config: (configRow[0] && configRow[0].dados) || {},
     periodo_dias: dias,
     servidor_hora: new Date().toISOString(),
-    equipes, pessoas, marcacoes, locais,
+    equipes, pessoas, marcacoes, locais, jornadas,
+    usuarios_rh: usuariosRh, correcoes,
+    alocacoes,                 // janela ontem..+7 (para as tabs de dia)
     alocacoes_hoje: alocacoesHoje,
     recadastros: []  // recadastro pendente entra quando o autocadastro do gestor existir
   });

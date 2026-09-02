@@ -203,9 +203,48 @@ CREATE TABLE IF NOT EXISTS correcao (
   empresa_id     text NOT NULL REFERENCES empresa(id) ON DELETE CASCADE,
   alvo_tipo      text NOT NULL,          -- marcacao | template
   alvo_id        text NOT NULL,          -- id_cliente da marcação ou id do template
-  acao           text NOT NULL,          -- aprovar | rejeitar
+  acao           text NOT NULL,          -- aprovar | rejeitar | lancar
   motivo         text,
   usuario_rh_id  text REFERENCES usuario_rh(id),
   criada_em      timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS ix_correcao_alvo ON correcao (alvo_tipo, alvo_id);
+CREATE INDEX IF NOT EXISTS ix_correcao_empresa ON correcao (empresa_id, criada_em DESC);
+
+-- ═══════════════════════════════════════════════════════ jornadas (turnos)
+
+-- Turno de trabalho: entrada, saída e tolerância. A equipe aponta para uma
+-- jornada (equipe.jornada_id); sem jornada, cai no default da empresa (config).
+-- A hora de entrada da jornada é o que a exceção "sem entrada" usa como limite.
+CREATE TABLE IF NOT EXISTS jornada (
+  id             text PRIMARY KEY,
+  empresa_id     text NOT NULL REFERENCES empresa(id) ON DELETE CASCADE,
+  nome           text NOT NULL,
+  entrada        time NOT NULL DEFAULT '07:00',
+  saida          time NOT NULL DEFAULT '17:00',
+  tolerancia_min integer NOT NULL DEFAULT 10,
+  ativa          boolean NOT NULL DEFAULT true,
+  criada_em      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_jornada_empresa ON jornada (empresa_id);
+
+-- A equipe ganha jornada e supervisor (ambos opcionais). Colunas aditivas para
+-- não reescrever o histórico; equipe antiga continua válida com NULL.
+ALTER TABLE equipe ADD COLUMN IF NOT EXISTS jornada_id text REFERENCES jornada(id);
+ALTER TABLE equipe ADD COLUMN IF NOT EXISTS supervisor_id text REFERENCES colaborador(id);
+
+-- ═══════════════════════════════════════════════════════ configurações + auth
+
+-- Parâmetros por empresa (anti-fraude, alarme manual, jornada padrão). Uma linha
+-- por empresa; o cliente mescla sobre os defaults de js/config.js (EFRAT_CFG).
+CREATE TABLE IF NOT EXISTS config_empresa (
+  empresa_id     text PRIMARY KEY REFERENCES empresa(id) ON DELETE CASCADE,
+  dados          jsonb NOT NULL DEFAULT '{}',
+  atualizada_em  timestamptz NOT NULL DEFAULT now()
+);
+
+-- Fuso da empresa (afeta "hoje" e o carimbo). Default no fuso do piloto.
+ALTER TABLE empresa ADD COLUMN IF NOT EXISTS fuso text NOT NULL DEFAULT 'America/Campo_Grande';
+
+-- Senha temporária: usuário criado pelo RH nasce obrigado a trocar no 1º acesso.
+ALTER TABLE usuario_rh ADD COLUMN IF NOT EXISTS trocar_senha boolean NOT NULL DEFAULT false;

@@ -331,6 +331,55 @@ button.linha-item{border:0;background:none;font:inherit;color:inherit;cursor:poi
 
 /* ---- cards de alocação (grid) ---- */
 #rh .aloc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px}
+#rh .aloc-barra{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+#rh .aloc-dianav{display:inline-flex;align-items:center;gap:2px;background:#fff;border:1px solid var(--v2-linha);border-radius:9px;padding:3px;box-shadow:var(--v2-sombra)}
+#rh .aloc-dianav button{width:28px;height:28px;border:0;background:none;border-radius:7px;cursor:pointer;color:var(--v2-sub);font-size:15px}
+#rh .aloc-dianav button:hover{background:#f1f5f9}
+#rh .aloc-dianav span{padding:0 10px;font-size:13px;font-weight:500}
+#rh .aloc-resumo{font-size:13px;color:var(--v2-mut)}
+#rh .aloc-card{overflow:hidden}
+#rh .aloc-card-head{display:flex;align-items:center;gap:9px;padding:13px 14px 11px}
+#rh .aloc-card-map{position:relative;height:150px;border-top:1px solid var(--v2-linha2);border-bottom:1px solid var(--v2-linha2);background:#eef2f6}
+#rh .aloc-card-map svg{width:100%;height:150px;object-fit:cover}
+#rh .aloc-card-map .cerca-tag{position:absolute;left:10px;bottom:10px;font-size:11px;font-weight:500;background:rgba(255,255,255,.94);border:1px solid var(--v2-linha);border-radius:7px;padding:3px 8px;color:#334155}
+#rh .aloc-card-grid{padding:13px 14px;display:grid;grid-template-columns:1fr 1fr;gap:13px 14px}
+#rh .aloc-card-grid .k{font-size:11.5px;color:var(--v2-mut2);font-weight:500}
+#rh .aloc-card-grid .v{font-size:13.5px;margin-top:2px;font-weight:500}
+#rh .aloc-card-acoes{display:flex;align-items:center;gap:8px;padding:11px 14px;border-top:1px solid var(--v2-linha2);background:var(--v2-surf2)}
+#rh .aloc-novo{border:1.5px dashed #d7dde6;background:var(--v2-surf2);border-radius:12px;min-height:230px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;cursor:pointer;color:var(--v2-mut)}
+#rh .aloc-novo:hover{border-color:var(--v2-azul);color:var(--v2-azul);background:#f7f9ff}
+
+/* ---- modal (editor de alocação e afins) ---- */
+#rh .modal-back{position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:60;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto}
+#rh .modal{background:#fff;border-radius:14px;width:min(680px,100%);box-shadow:0 20px 60px rgba(16,24,40,.28)}
+#rh .modal-head{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid var(--v2-linha2);position:sticky;top:0;background:#fff;border-radius:14px 14px 0 0}
+#rh .modal-head h2{margin:0;font-size:16px;font-weight:600}
+#rh .modal-x{margin-left:auto;width:30px;height:30px;border:1px solid transparent;background:none;border-radius:8px;cursor:pointer;color:var(--v2-mut);font-size:14px}
+#rh .modal-x:hover{border-color:var(--v2-linha);background:var(--v2-surf2)}
+#rh .modal-body{padding:16px 18px 20px}
+
+/* ---- mapa operacional (tela cheia) ---- */
+#rh .mapa-full{height:calc(100vh - 120px);border-radius:12px;overflow:hidden;border:1px solid var(--v2-linha);background:var(--v2-surf2)}
+#rh .mapa-legenda{display:flex;gap:16px;margin:12px 0 0;font-size:12.5px;color:var(--v2-sub)}
+#rh .mapa-legenda span{display:inline-flex;align-items:center;gap:6px}
+#rh .mapa-legenda i{width:9px;height:9px;border-radius:999px;display:inline-block}
+
+/* ---- tabelas de admin (jornadas, auditoria, usuários) ---- */
+#rh .adtable{width:100%;border-collapse:collapse;font-size:13.5px}
+#rh .adtable thead th{background:var(--v2-surf2);text-align:left;padding:9px 12px;font-size:11.5px;font-weight:600;color:var(--v2-mut);border-bottom:1px solid var(--v2-linha2);white-space:nowrap}
+#rh .adtable td{padding:9px 12px;border-bottom:1px solid #f1f4f8;color:#334155}
+#rh .adtable tr:hover td{background:var(--v2-surf2)}
+#rh .lb2{display:block;font-size:11.5px;color:var(--v2-mut2);font-weight:500;margin:10px 0 4px}
+#rh .inp{width:100%;height:36px;padding:0 12px;border:1px solid var(--v2-linha);border-radius:9px;background:var(--v2-surf2);font-size:13.5px;outline:none;margin:0}
+#rh .inp:focus{border-color:var(--v2-azul);background:#fff}
+#rh .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px 14px}
+
+/* ---- configurações (seções) ---- */
+#rh .cfg-sec{background:var(--v2-surf);border:1px solid var(--v2-linha);border-radius:12px;box-shadow:var(--v2-sombra);padding:16px 18px;margin-bottom:16px}
+#rh .cfg-sec h2{margin:0 0 4px;font-size:15px;font-weight:600}
+#rh .cfg-sec .cap{font-size:12.5px;color:var(--v2-mut);margin:0 0 14px}
+#rh .senha-box{background:#f0f9f4;border:1px solid #b7e4cd;border-radius:10px;padding:12px 14px;margin-top:10px;font-size:13px}
+#rh .senha-box .mono{font-size:16px;font-weight:700;color:var(--v2-ink)}
 
 /* ---- reset: elementos antigos do RH reaproveitados dentro do #rh ---- */
 #rh .card{background:var(--v2-surf);border:1px solid var(--v2-linha);border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:var(--v2-sombra)}

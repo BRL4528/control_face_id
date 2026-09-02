@@ -22,10 +22,20 @@ export default async function handler(req, res) {
   const dia = String(b.dia || new Date().toISOString().slice(0, 10)).slice(0, 10);
   const equipeId = b.equipe_id;
   const cercaBase = b.cerca || {};
+  const sql = db();
+
+  // Remover a alocação de uma equipe num dia (o card "Remover alocação").
+  if (b.acao === 'remover') {
+    if (!equipeId) return erro(res, 400, 'CORPO_INVALIDO', 'equipe_id obrigatório');
+    const del = await sql`
+      DELETE FROM alocacao
+      WHERE empresa_id=${rh.empresa_id} AND dia=${dia} AND equipe_id=${equipeId}
+      RETURNING id`;
+    return ok(res, { dia, removidas: del.length });
+  }
+
   const itens = Array.isArray(b.colaboradores) ? b.colaboradores : [];
   if (!itens.length) return erro(res, 400, 'CORPO_INVALIDO', 'nenhum colaborador para alocar');
-
-  const sql = db();
   let gravadas = 0;
   for (const it of itens) {
     // Cada item pode ser só o id (usa a cerca base) ou um objeto com cerca própria.

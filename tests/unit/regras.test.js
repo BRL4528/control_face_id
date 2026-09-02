@@ -5,7 +5,8 @@ import {
   itensParaRemover, agoraCorrigido, calcularDeriva, cargaValida, euclidiana, dia,
   indicadores, espelho, gestorDeveMarcar,
   presencaPorEquipe, statusPresenca, serieDiaria, pendenciasPorMotivo, LIMIAR_PRESENCA
-, pontosDoDia, exceptionsDoDia, TIPOS_EXCECAO } from '../../js/regras.js';
+, pontosDoDia, exceptionsDoDia, TIPOS_EXCECAO,
+  jornadaDaEquipe, horaEntradaDaEquipe, horasEntradaPorEquipe, csvDe } from '../../js/regras.js';
 
 const CFG = { limiarAceite: 0.45, limiarCinza: 0.58 };
 
@@ -443,4 +444,45 @@ test('exceptionsDoDia: marcação não-pendente não vira exceção', () => {
   const x = exceptionsDoDia(marcs, XPESSOAS, [XALOC[0]], XHOJE, AGORA, '08:00');
   // Ana marcou e está ok → nem exceção de marcação, nem sem_entrada
   assert.equal(x.some(i => i.pessoa_id === 'a'), false);
+});
+
+test('exceptionsDoDia: hora-limite por equipe (jornada) atrasa a cobrança', () => {
+  // Carla é da e1; se a jornada da e1 começa 09:30, às 09:00 ainda não cobra ausência.
+  const porEq = { e1: '09:30' };
+  const x = exceptionsDoDia([], XPESSOAS, [XALOC[2]], XHOJE, AGORA, '08:00', porEq);
+  assert.equal(x.some(i => i.tipo === 'sem_entrada'), false);
+  // já às 10:00 passa a cobrar
+  const x2 = exceptionsDoDia([], XPESSOAS, [XALOC[2]], XHOJE, XHOJE + 'T10:00:00Z', '08:00', porEq);
+  assert.equal(x2.some(i => i.pessoa_id === 'c' && i.tipo === 'sem_entrada'), true);
+});
+
+
+/* --------------------------------------- jornada + CSV (v2.1) */
+
+const JEQUIPES = [
+  { equipe_id: 'e1', nome: 'Um', jornada_id: 'j1' },
+  { equipe_id: 'e2', nome: 'Dois', jornada_id: null }
+];
+const JORNADAS = [{ jornada_id: 'j1', nome: 'Comercial', entrada: '08:00', saida: '18:00' }];
+
+test('jornadaDaEquipe usa a jornada associada', () => {
+  assert.equal(jornadaDaEquipe('e1', JEQUIPES, JORNADAS, '07:00–17:00'), '08:00–18:00');
+});
+test('jornadaDaEquipe cai no default quando a equipe não tem jornada', () => {
+  assert.equal(jornadaDaEquipe('e2', JEQUIPES, JORNADAS, '07:00–17:00'), '07:00–17:00');
+});
+test('horaEntradaDaEquipe devolve a entrada da jornada ou o padrão', () => {
+  assert.equal(horaEntradaDaEquipe('e1', JEQUIPES, JORNADAS, '08:00'), '08:00');
+  assert.equal(horaEntradaDaEquipe('e2', JEQUIPES, JORNADAS, '06:30'), '06:30');
+});
+test('horasEntradaPorEquipe mapeia só equipes com jornada', () => {
+  const m = horasEntradaPorEquipe(JEQUIPES, JORNADAS);
+  assert.deepEqual(m, { e1: '08:00' });
+});
+test('csvDe escapa separador, aspas e quebra de linha', () => {
+  const csv = csvDe(['Nome', 'Obs'], [['Ana; Souza', 'diz "oi"'], ['linha\nquebrada', 'ok']]);
+  const linhas = csv.split('\r\n');
+  assert.equal(linhas[0], 'Nome;Obs');
+  assert.equal(linhas[1], '"Ana; Souza";"diz ""oi"""');
+  assert.equal(linhas[2], '"linha\nquebrada";ok');
 });

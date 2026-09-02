@@ -14,7 +14,7 @@ import { extrairCoordenadas } from './geo-parse.js';
 import { $, esc, mostrar, toast } from './ui.js';
 
 let _mapLibrePromise = null;
-function carregarMapLibre() {
+export function carregarMapLibre() {
   if (window.maplibregl) return Promise.resolve(window.maplibregl);
   if (_mapLibrePromise) return _mapLibrePromise;
   _mapLibrePromise = new Promise((res, rej) => {
@@ -34,7 +34,7 @@ function carregarMapLibre() {
 // sem chave e sem marca d'água. Exige o cabeçalho Referer; por isso a
 // Referrer-Policy do app é 'strict-origin-when-cross-origin' (envia só a origem
 // para sites externos), não 'same-origin' — ver _headers/vercel.json.
-const ESTILO = {
+export const ESTILO = {
   version: 8,
   sources: {
     base: {
@@ -49,7 +49,7 @@ const ESTILO = {
 };
 
 /** Círculo GeoJSON aproximado da cerca, para desenhar o raio no mapa. */
-function circuloGeoJSON(lat, lng, raioM, pontos = 64) {
+export function circuloGeoJSON(lat, lng, raioM, pontos = 64) {
   const coords = [];
   const dLat = raioM / 111320;
   const dLng = raioM / (111320 * Math.cos(lat * Math.PI / 180));
@@ -69,13 +69,27 @@ export const Alocacao = {
   dia: null,
   equipeId: null,
   selecionados: new Set(),
+  alvo: 'rh-alocacao', // elemento onde o editor é renderizado (modal ou seção)
+  aoSalvar: null,      // callback após alocar/salvar (fecha modal, repinta cards)
 
-  abrir(rh) {
+  /**
+   * Abre o EDITOR de alocação. Por padrão renderiza na seção da aba; o painel v2
+   * passa `opts.alvo` (o corpo de um modal) e `opts.aoSalvar` (fechar+repintar).
+   * `opts` pode pré-preencher dia/equipe/centro/raio/pessoas ao editar um card.
+   */
+  abrir(rh, opts) {
+    opts = opts || {};
     this.rh = rh;
-    this.dia = new Date().toISOString().slice(0, 10);
+    this.alvo = opts.alvo || 'rh-alocacao';
+    this.aoSalvar = opts.aoSalvar || null;
+    this.dia = opts.dia || new Date().toISOString().slice(0, 10);
     const eqs = rh.dados.equipes || [];
-    this.equipeId = eqs[0] && eqs[0].equipe_id;
-    this.centro = null; this.raio = 200; this.selecionados = new Set();
+    this.equipeId = opts.equipeId || (eqs[0] && eqs[0].equipe_id);
+    this.centro = opts.centro || null;
+    this.raio = opts.raio || 200;
+    this.selecionados = opts.pessoas ? new Set(opts.pessoas) : new Set();
+    this._preSelecao = !!opts.pessoas;   // não sobrescrever seleção vinda de edição
+    this.map = null; this.marcador = null;
     this.pintar();
   },
 
@@ -83,10 +97,8 @@ export const Alocacao = {
     const d = this.rh.dados;
     const eqs = d.equipes || [];
     const locais = d.locais || [];
-    $('rh-alocacao').innerHTML =
-      '<div class="pg-head"><div><h1 class="tit">Alocações</h1>' +
-        '<p class="sub">Defina onde cada equipe trabalha hoje e a cerca virtual do ponto.</p></div></div>' +
-      '<div class="card">' +
+    $(this.alvo).innerHTML =
+      '<div class="card" style="margin:0;box-shadow:none;border:0">' +
         '<h2>Alocação do dia</h2>' +
         '<div class="alrow">' +
           '<div><label class="lb">Dia</label><input type="date" id="alDia" value="' + this.dia + '"></div>' +
@@ -131,7 +143,8 @@ export const Alocacao = {
     $('btnSalvarLocal').onclick = () => this.salvarLocal();
     $('btnAlocar').onclick = () => this.alocar();
 
-    this.marcarEquipe();
+    // Na abertura de edição, a seleção veio do card; não sobrescrever com o padrão.
+    if (this._preSelecao) this._preSelecao = false; else this.marcarEquipe();
     this.pintarPessoas();
     this.iniciarMapa();
   },
@@ -158,10 +171,11 @@ export const Alocacao = {
     const box = $('mapa');
     try {
       const maplibregl = await carregarMapLibre();
-      if (this.rh.aba !== 'alocacao') return;  // trocou de aba enquanto carregava
-      // Centro inicial: primeiro local salvo, ou um default (Campo Grande/MS).
+      if (!$(this.alvo) || !$('mapa')) return;  // editor fechou enquanto carregava
+      // Centro inicial: o que veio da edição, senão o primeiro local salvo, senão default.
       const l0 = (this.rh.dados.locais || [])[0];
-      const centro = l0 ? [l0.lng, l0.lat] : [-54.6, -20.47];
+      const ini = this.centro || (l0 ? { lat: l0.lat, lng: l0.lng } : null);
+      const centro = ini ? [ini.lng, ini.lat] : [-54.6, -20.47];
       this.map = new maplibregl.Map({ container: 'mapa', style: ESTILO, center: centro, zoom: 14 });
       this.map.addControl(new maplibregl.NavigationControl(), 'top-right');
       this.map.on('load', () => {
@@ -170,7 +184,7 @@ export const Alocacao = {
           paint: { 'fill-color': '#2d6cdf', 'fill-opacity': 0.15 } });
         this.map.addLayer({ id: 'cerca-linha', type: 'line', source: 'cerca',
           paint: { 'line-color': '#2d6cdf', 'line-width': 2 } });
-        if (l0) this.definirCentro(l0.lat, l0.lng, false);
+        if (ini) this.definirCentro(ini.lat, ini.lng, false);
       });
       this.map.on('click', e => this.definirCentro(e.lngLat.lat, e.lngLat.lng, true));
     } catch (e) {
@@ -274,8 +288,16 @@ export const Alocacao = {
     const r = await ApiRh.local(this.rh.token, { nome, lat: this.centro.lat, lng: this.centro.lng, raio_m: this.raio });
     if (!r.ok) { toast(r.erro || 'Falha ao salvar local', 'bad'); return; }
     toast('Local salvo', 'ok');
-    await this.rh.recarregar();
-    this.rh.aba = 'alocacao'; this.rh.pintar();  // repinta com o novo local na lista
+    // Recarrega os dados (novo local na lista) mas NÃO troca de aba — o editor
+    // pode estar num modal. Só reinsere o novo local no select, se ele existe.
+    const d = await ApiRh.dados(this.rh.token, this.rh.dias);
+    if (d.ok) this.rh.dados = d.dados;
+    const sel = $('alLocal');
+    if (sel) {
+      const locais = (this.rh.dados.locais || []);
+      sel.innerHTML = '<option value="">— escolha um local salvo ou defina abaixo —</option>' +
+        locais.map(l => '<option value="' + l.local_id + '">' + esc(l.nome) + ' · ' + l.raio_m + 'm</option>').join('');
+    }
   },
 
   async alocar() {
@@ -291,5 +313,6 @@ export const Alocacao = {
     btn.disabled = false; btn.textContent = 'Alocar no mapa';
     if (!r.ok) { toast(r.erro || 'Falha ao alocar', 'bad'); return; }
     toast(r.dados.gravadas + ' colaborador(es) alocado(s) para ' + this.dia, 'ok');
+    if (this.aoSalvar) this.aoSalvar();   // fecha o modal e repinta os cards
   }
 };

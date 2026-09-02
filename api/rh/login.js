@@ -38,14 +38,17 @@ export default async function handler(req, res) {
   if (!usuario || !chave) return erro(res, 400, 'CORPO_INVALIDO', 'usuario e chave obrigatórios');
 
   const us = await sql`
-    SELECT id, empresa_id, usuario, nome, chave_hash FROM usuario_rh
+    SELECT id, empresa_id, usuario, nome, chave_hash, trocar_senha FROM usuario_rh
     WHERE usuario = ${usuario} AND ativo = true LIMIT 1`;
   const u = us[0];
   const confere = u ? await bcrypt.compare(chave, u.chave_hash) : false;
   if (!confere) return erro(res, 401, 'CREDENCIAL_INVALIDA', 'usuário ou senha inválidos');
 
+  // Emite a sessão mesmo com senha temporária: o cliente usa o token só para
+  // chamar /rh/usuario (trocar_senha) antes de liberar o resto do painel.
   return ok(res, {
     token: emitirTokenRh(u),
+    trocar_senha: !!u.trocar_senha,
     usuario: { id: u.id, nome: u.nome, usuario: u.usuario, empresa_id: u.empresa_id }
   });
 }

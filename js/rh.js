@@ -1,20 +1,26 @@
 // Painel do RH. Tudo que é administração vive aqui e em lugar nenhum mais.
 import { ApiRh } from './api.js';
 import { Alocacao } from './alocacao.js';
+import { MapaOp } from './mapa.js';
 import { Face } from './face.js';
 import { derivar } from './cripto.js';
 import {
   indicadores, espelho, euclidiana,
   presencaPorEquipe, serieDiaria, pendenciasPorMotivo,
-  exceptionsDoDia, TIPOS_EXCECAO
+  exceptionsDoDia, TIPOS_EXCECAO,
+  jornadaDaEquipe, horasEntradaPorEquipe, csvDe
 } from './regras.js';
 import { $, esc, mostrar, toast, hora, data } from './ui.js';
 
 // Rótulo da aba na trilha do topo (breadcrumb) e no título de página.
 const TITULOS = {
-  painel: 'Central operacional', alocacao: 'Alocações', pendencias: 'Pendências',
-  pessoas: 'Colaboradores', equipes: 'Equipes', registros: 'Espelho de ponto'
+  painel: 'Central operacional', alocacao: 'Alocações', mapa: 'Mapa',
+  pendencias: 'Pendências', registros: 'Espelho de ponto', jornadas: 'Jornadas',
+  pessoas: 'Colaboradores', equipes: 'Equipes',
+  relatorios: 'Relatórios', auditoria: 'Auditoria', config: 'Configurações'
 };
+const ABAS = ['painel', 'alocacao', 'mapa', 'pendencias', 'pessoas', 'equipes',
+  'registros', 'jornadas', 'relatorios', 'auditoria', 'config', 'stub'];
 
 export const Rh = {
   token: null,       // JWT emitido por /rh/login
@@ -31,6 +37,9 @@ export const Rh = {
   _charts: [],       // instâncias Chart.js vivas, destruídas ao repintar
   _Chart: null,      // biblioteca carregada sob demanda
 
+  usuarioLogin: null,   // guardado para o fluxo de troca de senha temporária
+  precisaTrocarSenha: false,
+
   async entrar(usuario, senha) {
     const s = await ApiRh.sal(usuario);
     if (!s.ok || !s.json) return { ok: false, erro: 'servidor indisponível' };
@@ -38,21 +47,32 @@ export const Rh = {
     const login = await ApiRh.login(usuario, chave);
     if (!login.ok) return { ok: false, erro: login.erro || 'usuário ou senha inválidos' };
     this.token = login.dados.token;
+    this.usuarioLogin = usuario;
+    this.precisaTrocarSenha = !!login.dados.trocar_senha;
     const d = await ApiRh.dados(this.token, this.dias);
     if (!d.ok) return { ok: false, erro: d.erro || 'falha ao carregar' };
     this.dados = d.dados;
+    this.aplicarConfig();
     return { ok: true };
+  },
+
+  /** Mescla a config da empresa (banco) sobre os defaults de EFRAT_CFG. */
+  aplicarConfig() {
+    const c = (this.dados && this.dados.config) || {};
+    window.EFRAT_CFG = Object.assign(window.EFRAT_CFG || {}, c);
   },
 
   async recarregar() {
     const d = await ApiRh.dados(this.token, this.dias);
-    if (d.ok) this.dados = d.dados;
+    if (d.ok) { this.dados = d.dados; this.aplicarConfig(); }
     this.pintar();
   },
 
   abrir(aoSair) {
     this.aoSair = aoSair;
     mostrar('rh');
+    // Senha temporária: obriga a troca antes de liberar o painel.
+    if (this.precisaTrocarSenha) { this.telaTrocarSenha(); return; }
     const nome = this.dados.usuario.nome || 'RH';
     $('rhNome').textContent = nome;
     $('rhIniciais').textContent = this.iniciais(nome);
@@ -112,28 +132,35 @@ export const Rh = {
     // trilha do topo
     $('rhCrumb').textContent = this.aba === 'stub' ? this.stub : (TITULOS[this.aba] || '');
 
-    ['painel', 'alocacao', 'pendencias', 'pessoas', 'equipes', 'registros', 'stub'].forEach(a =>
-      $('rh-' + a).classList.toggle('hide', a !== this.aba));
+    ABAS.forEach(a => { const el = $('rh-' + a); if (el) el.classList.toggle('hide', a !== this.aba); });
     if (this.aba === 'painel') this.pintarPainel();
     if (this.aba === 'alocacao') this.pintarAlocacao();
+    if (this.aba === 'mapa') this.pintarMapaOp();
     if (this.aba === 'pendencias') this.pintarPendencias();
     if (this.aba === 'pessoas') this.pintarPessoas();
     if (this.aba === 'equipes') this.pintarEquipes();
     if (this.aba === 'registros') this.pintarRegistros();
+    if (this.aba === 'jornadas') this.pintarJornadas();
+    if (this.aba === 'relatorios') this.pintarRelatorios();
+    if (this.aba === 'auditoria') this.pintarAuditoria();
+    if (this.aba === 'config') this.pintarConfig();
     if (this.aba === 'stub') this.pintarStub();
   },
 
   /** A fila de exceções de hoje, calculada da regra pura. Cache por pintura. */
   exceptions() {
     const d = this.dados || {};
+    const cfg = window.EFRAT_CFG || {};
     return exceptionsDoDia(
       d.marcacoes, d.pessoas, d.alocacoes_hoje, this.hojeServidor(),
-      d.servidor_hora, (window.EFRAT_CFG && window.EFRAT_CFG.horaEntrada) || '08:00');
+      d.servidor_hora, cfg.horaEntrada || '08:00',
+      horasEntradaPorEquipe(d.equipes, d.jornadas));   // hora-limite por jornada da equipe
   },
 
   jornadaDe(equipeId) {
-    // Jornada padrão da equipe. Sem cadastro de jornada ainda: valor operacional.
-    return (window.EFRAT_CFG && window.EFRAT_CFG.jornadaPadrao) || '07:00–17:00';
+    // Jornada real da equipe (jornada associada) — senão o default da empresa.
+    const cfg = window.EFRAT_CFG || {};
+    return jornadaDaEquipe(equipeId, this.dados.equipes, this.dados.jornadas, cfg.jornadaPadrao);
   },
 
   nomeDe(id) {
@@ -145,9 +172,152 @@ export const Rh = {
     return e ? e.nome : '—';
   },
 
-  /* ----------------------------------------------------- alocação (mapa) */
+  /* ----------------------------------------------------- alocação (cards) */
 
-  pintarAlocacao() { Alocacao.abrir(this); },
+  alocDia: null,   // dia selecionado nas tabs (YYYY-MM-DD); default hoje
+
+  diasRelativos(base, n) {   // soma n dias a 'YYYY-MM-DD'
+    const d = new Date(base + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  },
+
+  /** Alocações do dia agrupadas por equipe (uma cerca representa o grupo). */
+  alocacoesDoDia(dia) {
+    const linhas = (this.dados.alocacoes || []).filter(a => String(a.dia).slice(0, 10) === dia);
+    const porEquipe = {};
+    for (const a of linhas) {
+      const g = porEquipe[a.equipe_id] || (porEquipe[a.equipe_id] = {
+        equipe_id: a.equipe_id, cerca_lat: a.cerca_lat, cerca_lng: a.cerca_lng,
+        cerca_raio_m: a.cerca_raio_m, colaboradores: []
+      });
+      g.colaboradores.push(a.colaborador_id);
+    }
+    return Object.values(porEquipe);
+  },
+
+  pintarAlocacao() {
+    const hoje = this.hojeServidor();
+    if (!this.alocDia) this.alocDia = hoje;
+    const dia = this.alocDia;
+    const grupos = this.alocacoesDoDia(dia);
+    const totalPessoas = grupos.reduce((s, g) => s + g.colaboradores.length, 0);
+    const supervisorDe = eqId => {
+      const eq = (this.dados.equipes || []).find(e => e.equipe_id === eqId);
+      const sup = eq && eq.supervisor_id ? this.pessoaDe(eq.supervisor_id) : null;
+      return sup ? sup.nome : '—';
+    };
+    const enderecoDe = g => {
+      // Se a cerca coincide com um local salvo, mostra o nome.
+      const l = (this.dados.locais || []).find(x =>
+        Math.abs(x.lat - g.cerca_lat) < 1e-4 && Math.abs(x.lng - g.cerca_lng) < 1e-4);
+      return l ? l.nome : (Number(g.cerca_lat).toFixed(4) + ', ' + Number(g.cerca_lng).toFixed(4));
+    };
+
+    const tab = (chave, rot) => {
+      const alvo = chave === 'hoje' ? hoje : chave === 'amanha' ? this.diasRelativos(hoje, 1) : dia;
+      const on = chave === 'semana' ? false : dia === alvo;
+      return '<button class="' + (on ? 'on' : '') + '" data-diatab="' + chave + '">' + rot + '</button>';
+    };
+
+    const card = g => {
+      const nome = this.nomeEquipe(g.equipe_id);
+      const total = (this.dados.pessoas || []).filter(p => p.ativo && p.equipe_id === g.equipe_id).length;
+      return '<div class="v2card aloc-card">' +
+        '<div class="aloc-card-head"><span class="team-nome">' + esc(nome) + '</span>' +
+          '<span class="pill ok"><span class="dot"></span>Ativa</span>' +
+          '<span class="team-cnt">' + g.colaboradores.length + ' colaboradores</span></div>' +
+        '<div class="aloc-card-map">' + this.svgMiniMapa('bom') +
+          '<span class="cerca-tag">Cerca ' + g.cerca_raio_m + ' m</span></div>' +
+        '<div class="aloc-card-grid">' +
+          '<div><div class="k">Local</div><div class="v">' + esc(enderecoDe(g)) + '</div></div>' +
+          '<div><div class="k">Jornada</div><div class="v">' + esc(this.jornadaDe(g.equipe_id)) + '</div></div>' +
+          '<div><div class="k">Supervisor</div><div class="v">' + esc(supervisorDe(g.equipe_id)) + '</div></div>' +
+          '<div><div class="k">Cobertura</div><div class="v">' + g.colaboradores.length + ' de ' + total + ' alocados</div></div>' +
+        '</div>' +
+        '<div class="aloc-card-acoes">' +
+          '<button class="v2btn ghost mini" data-editar="' + esc(g.equipe_id) + '">Editar</button>' +
+          '<button class="v2btn ghost mini" data-duplicar="' + esc(g.equipe_id) + '">Duplicar p/ amanhã</button>' +
+          '<button class="v2btn danger mini" data-remover="' + esc(g.equipe_id) + '" style="margin-left:auto">Remover</button>' +
+        '</div></div>';
+    };
+
+    $('rh-alocacao').innerHTML =
+      '<div class="pg-head"><div><h1 class="tit">Planejamento de equipes</h1>' +
+        '<p class="sub">Defina onde cada equipe trabalha, em que jornada e com qual cerca. É a referência que a operação compara durante o dia.</p></div>' +
+        '<div class="acoes"><button class="v2btn" id="btnNovaAloc">+ Nova alocação</button></div></div>' +
+      '<div class="aloc-barra">' +
+        '<div class="segtabs" style="width:auto">' + tab('hoje', 'Hoje') + tab('amanha', 'Amanhã') + '</div>' +
+        '<div class="aloc-dianav"><button id="diaPrev">‹</button><span class="mono">' + this.dataLonga(dia) + '</span><button id="diaNext">›</button></div>' +
+        '<span class="aloc-resumo">' + grupos.length + ' equipe(s) · ' + totalPessoas + ' colaborador(es)</span>' +
+      '</div>' +
+      '<div class="aloc-grid">' +
+        grupos.map(card).join('') +
+        '<button class="aloc-novo" id="btnNovaAloc2"><span style="font-size:22px">+</span>' +
+          '<span style="font-weight:500">Alocar uma equipe neste dia</span>' +
+          '<span style="font-size:12.5px;color:#94a3b8">Escolha local, jornada e cerca</span></button>' +
+      '</div>' +
+      '<div id="alocModal" class="modal-back hide"><div class="modal"><div class="modal-head">' +
+        '<h2 id="alocModalTit">Nova alocação</h2>' +
+        '<button class="modal-x" id="alocModalX">✕</button></div>' +
+        '<div id="alocEditor" class="modal-body"></div></div></div>';
+
+    $('diaPrev').onclick = () => { this.alocDia = this.diasRelativos(dia, -1); this.pintarAlocacao(); };
+    $('diaNext').onclick = () => { this.alocDia = this.diasRelativos(dia, 1); this.pintarAlocacao(); };
+    $('rh-alocacao').querySelectorAll('[data-diatab]').forEach(b => {
+      b.onclick = () => {
+        this.alocDia = b.dataset.diatab === 'amanha' ? this.diasRelativos(hoje, 1) : hoje;
+        this.pintarAlocacao();
+      };
+    });
+    const abrirEditor = (opts) => this.abrirEditorAlocacao(opts);
+    $('btnNovaAloc').onclick = () => abrirEditor({ dia });
+    $('btnNovaAloc2').onclick = () => abrirEditor({ dia });
+    $('rh-alocacao').querySelectorAll('[data-editar]').forEach(b => {
+      b.onclick = () => {
+        const g = grupos.find(x => x.equipe_id === b.dataset.editar);
+        abrirEditor({ dia, equipeId: g.equipe_id, centro: { lat: g.cerca_lat, lng: g.cerca_lng },
+          raio: g.cerca_raio_m, pessoas: g.colaboradores });
+      };
+    });
+    $('rh-alocacao').querySelectorAll('[data-duplicar]').forEach(b => {
+      b.onclick = async () => {
+        const g = grupos.find(x => x.equipe_id === b.dataset.duplicar);
+        const amanha = this.diasRelativos(dia, 1);
+        const r = await ApiRh.alocar(this.token, {
+          dia: amanha, equipe_id: g.equipe_id,
+          cerca: { lat: g.cerca_lat, lng: g.cerca_lng, raio_m: g.cerca_raio_m },
+          colaboradores: g.colaboradores
+        });
+        if (!r.ok) { toast(r.erro || 'Falha ao duplicar', 'bad'); return; }
+        toast('Alocação de ' + this.nomeEquipe(g.equipe_id) + ' duplicada para ' + this.dataLonga(amanha), 'ok');
+        await this.recarregar();
+      };
+    });
+    $('rh-alocacao').querySelectorAll('[data-remover]').forEach(b => {
+      b.onclick = async () => {
+        if (!confirm('Remover a alocação de ' + this.nomeEquipe(b.dataset.remover) + ' em ' + this.dataLonga(dia) + '?')) return;
+        const r = await ApiRh.alocar(this.token, { acao: 'remover', dia, equipe_id: b.dataset.remover });
+        if (!r.ok) { toast(r.erro || 'Falha ao remover', 'bad'); return; }
+        toast('Alocação removida', 'ok');
+        await this.recarregar();
+      };
+    });
+    $('alocModalX').onclick = () => $('alocModal').classList.add('hide');
+    $('alocModal').onclick = (e) => { if (e.target.id === 'alocModal') $('alocModal').classList.add('hide'); };
+  },
+
+  abrirEditorAlocacao(opts) {
+    $('alocModalTit').textContent = opts.equipeId ? ('Editar — ' + this.nomeEquipe(opts.equipeId)) : 'Nova alocação';
+    $('alocModal').classList.remove('hide');
+    Alocacao.abrir(this, Object.assign({
+      alvo: 'alocEditor',
+      aoSalvar: () => { $('alocModal').classList.add('hide'); this.recarregar(); }
+    }, opts));
+  },
+
+  dataLonga(iso) {
+    return new Date(iso + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
+  },
 
   /* --------------------------------------------------------- painel */
 
@@ -1039,5 +1209,357 @@ export const Rh = {
     };
     $('regPessoa').onchange = desenhar;
     if (pessoas.length) desenhar();
+  },
+
+  /* --------------------------------------------------------- mapa operacional */
+
+  pintarMapaOp() {
+    $('rh-mapa').innerHTML =
+      '<div class="pg-head"><div><h1 class="tit">Mapa</h1>' +
+        '<p class="sub">Cercas ativas hoje e onde cada ponto foi registrado.</p></div></div>' +
+      '<div id="mapaOp" class="mapa-full"></div>' +
+      '<div class="mapa-legenda">' +
+        '<span><i style="background:#1d4ed8"></i> cerca da equipe</span>' +
+        '<span><i style="background:#12805c"></i> ponto dentro da cerca</span>' +
+        '<span><i style="background:#b42318"></i> ponto fora da cerca</span></div>';
+    MapaOp.abrir(this);
+  },
+
+  /* --------------------------------------------------------- jornadas */
+
+  pintarJornadas() {
+    const js = (this.dados.jornadas || []).slice().sort((a, b) => a.nome.localeCompare(b.nome));
+    const eqs = (this.dados.equipes || []).slice().sort((a, b) => a.nome.localeCompare(b.nome));
+    const pessoas = (this.dados.pessoas || []).filter(p => p.ativo);
+
+    const linhaJornada = j =>
+      '<tr><td><b>' + esc(j.nome) + '</b></td>' +
+      '<td class="mono">' + esc(j.entrada) + ' → ' + esc(j.saida) + '</td>' +
+      '<td>' + j.tolerancia_min + ' min</td>' +
+      '<td><span class="pill ' + (j.ativa ? 'ok' : 'mut') + '"><span class="dot"></span>' + (j.ativa ? 'Ativa' : 'Inativa') + '</span></td>' +
+      '<td style="text-align:right"><button class="v2btn ghost mini" data-jed="' + esc(j.jornada_id) + '">Editar</button></td></tr>';
+
+    const linhaEquipe = e => {
+      const opts = '<option value="">— sem jornada (usa padrão) —</option>' +
+        js.map(j => '<option value="' + j.jornada_id + '"' + (e.jornada_id === j.jornada_id ? ' selected' : '') + '>' + esc(j.nome) + '</option>').join('');
+      const sopts = '<option value="">— sem supervisor —</option>' +
+        pessoas.map(p => '<option value="' + p.pessoa_id + '"' + (e.supervisor_id === p.pessoa_id ? ' selected' : '') + '>' + esc(p.nome) + '</option>').join('');
+      return '<tr><td><b>' + esc(e.nome) + '</b></td>' +
+        '<td><select class="inp" data-assoc-eq="' + esc(e.equipe_id) + '" data-assoc="jornada">' + opts + '</select></td>' +
+        '<td><select class="inp" data-assoc-eq="' + esc(e.equipe_id) + '" data-assoc="supervisor">' + sopts + '</select></td></tr>';
+    };
+
+    $('rh-jornadas').innerHTML =
+      '<div class="pg-head"><div><h1 class="tit">Jornadas</h1>' +
+        '<p class="sub">Turnos de trabalho. A hora de entrada define quando a ausência vira pendência.</p></div>' +
+        '<div class="acoes"><button class="v2btn" id="btnNovaJornada">+ Nova jornada</button></div></div>' +
+      '<div id="areaJornada"></div>' +
+      '<div class="tbl-wrap" style="margin-bottom:16px"><table class="adtable"><thead><tr>' +
+        '<th>Jornada</th><th>Horário</th><th>Tolerância</th><th>Status</th><th></th></tr></thead><tbody>' +
+        (js.length ? js.map(linhaJornada).join('') : '<tr><td colspan="5" style="padding:30px;text-align:center;color:#64748b">Nenhuma jornada. Crie a primeira.</td></tr>') +
+      '</tbody></table></div>' +
+      '<h2 style="font-size:16px;margin:0 0 12px">Jornada e supervisor por equipe</h2>' +
+      '<div class="tbl-wrap"><table class="adtable"><thead><tr>' +
+        '<th>Equipe</th><th>Jornada</th><th>Supervisor</th></tr></thead><tbody>' +
+        (eqs.length ? eqs.map(linhaEquipe).join('') : '<tr><td colspan="3" style="padding:30px;text-align:center;color:#64748b">Nenhuma equipe.</td></tr>') +
+      '</tbody></table></div>';
+
+    $('btnNovaJornada').onclick = () => this.formJornada(null);
+    $('rh-jornadas').querySelectorAll('[data-jed]').forEach(b => {
+      b.onclick = () => this.formJornada(js.find(j => j.jornada_id === b.dataset.jed));
+    });
+    // Associação equipe→jornada/supervisor: grava no change.
+    $('rh-jornadas').querySelectorAll('[data-assoc]').forEach(sel => {
+      sel.onchange = async () => {
+        const eqId = sel.dataset.assocEq;
+        const jSel = $('rh-jornadas').querySelector('[data-assoc-eq="' + eqId + '"][data-assoc="jornada"]');
+        const sSel = $('rh-jornadas').querySelector('[data-assoc-eq="' + eqId + '"][data-assoc="supervisor"]');
+        const r = await ApiRh.jornada(this.token, {
+          equipe_id: eqId, jornada_id: jSel.value || null, supervisor_id: sSel.value || null
+        });
+        if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+        toast('Equipe atualizada', 'ok');
+        await this.recarregar();
+      };
+    });
+  },
+
+  formJornada(j) {
+    j = j || {};
+    $('areaJornada').innerHTML =
+      '<div class="card"><h2>' + (j.jornada_id ? 'Editar jornada' : 'Nova jornada') + '</h2>' +
+        '<div class="form-grid">' +
+          '<div><label class="lb2">Nome</label><input class="inp" id="jNome" value="' + esc(j.nome || '') + '" placeholder="Ex.: Comercial"></div>' +
+          '<div><label class="lb2">Entrada</label><input class="inp" id="jEntrada" type="time" value="' + esc(j.entrada || '07:00') + '"></div>' +
+          '<div><label class="lb2">Saída</label><input class="inp" id="jSaida" type="time" value="' + esc(j.saida || '17:00') + '"></div>' +
+          '<div><label class="lb2">Tolerância (min)</label><input class="inp" id="jTol" type="number" min="0" max="120" value="' + (j.tolerancia_min != null ? j.tolerancia_min : 10) + '"></div>' +
+        '</div>' +
+        '<div class="row2" style="margin-top:14px">' +
+          '<button class="act" id="btnSalvarJornada">Salvar</button>' +
+          '<button class="act ghost" id="btnCancelarJornada">Cancelar</button></div>' +
+      '</div>';
+    $('btnCancelarJornada').onclick = () => { $('areaJornada').innerHTML = ''; };
+    $('btnSalvarJornada').onclick = async () => {
+      const nome = $('jNome').value.trim();
+      if (!nome) { toast('Informe o nome', 'warn'); return; }
+      const r = await ApiRh.jornada(this.token, {
+        jornada_id: j.jornada_id, nome, entrada: $('jEntrada').value, saida: $('jSaida').value,
+        tolerancia_min: Number($('jTol').value) || 10
+      });
+      if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+      toast('Jornada salva', 'ok');
+      $('areaJornada').innerHTML = '';
+      await this.recarregar();
+    };
+    $('areaJornada').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
+
+  /* --------------------------------------------------------- relatórios */
+
+  pintarRelatorios() {
+    const d = this.dados;
+    const hoje = this.hojeServidor();
+    const cfg = window.EFRAT_CFG || {};
+    const ind = indicadores(d.marcacoes, d.pessoas, d.equipes);
+    const serie = serieDiaria(d.marcacoes, d.periodo_dias || this.dias, hoje);
+    const motivos = pendenciasPorMotivo(d.marcacoes, d.recadastros, d.pessoas);
+
+    $('rh-relatorios').innerHTML =
+      '<div class="pg-head"><div><h1 class="tit">Relatórios</h1>' +
+        '<p class="sub">Marcações, presença e registro manual no período de ' + (d.periodo_dias || this.dias) + ' dias.</p></div>' +
+        '<div class="acoes"><button class="v2btn ghost" id="btnCsvMarc">Exportar marcações (CSV)</button>' +
+          '<button class="v2btn ghost" id="btnCsvEquipe">Exportar por equipe (CSV)</button></div></div>' +
+      '<div class="vizrow">' +
+        '<div class="v2card" style="padding:15px">' +
+          '<h2 style="margin:0 0 4px;font-size:14px;font-weight:600">Marcações por dia</h2>' +
+          '<p style="font-size:12px;color:#64748b;margin:0 0 10px">biometria e manual</p>' +
+          '<div class="cv" id="boxLinha" style="position:relative;height:240px"></div></div>' +
+        '<div class="v2card" style="padding:15px">' +
+          '<h2 style="margin:0 0 4px;font-size:14px;font-weight:600">Taxa de registro manual por equipe</h2>' +
+          '<p style="font-size:12px;color:#64748b;margin:0 0 10px">alarme em ' + (cfg.alarmeManual || 20) + '%</p>' +
+          '<div class="cv" id="boxManual" style="position:relative;height:240px"></div></div>' +
+      '</div>' +
+      '<div class="vizrow">' +
+        '<div class="v2card" style="padding:15px">' +
+          '<h2 style="margin:0 0 4px;font-size:14px;font-weight:600">Pendências por motivo</h2>' +
+          '<p style="font-size:12px;color:#64748b;margin:0 0 10px">o que está segurando a fila</p>' +
+          '<div class="cv" id="boxMotivo" style="position:relative;height:240px"></div></div>' +
+        '<div class="v2card" style="padding:15px"><h2 style="margin:0 0 10px;font-size:14px;font-weight:600">Resumo</h2>' +
+          '<table class="adtable"><tbody>' +
+            '<tr><td>Total de marcações</td><td style="text-align:right"><b>' + ind.total + '</b></td></tr>' +
+            '<tr><td>Registro manual</td><td style="text-align:right"><b>' + ind.taxaManual + '%</b></td></tr>' +
+            '<tr><td>Pendências abertas</td><td style="text-align:right"><b>' + ind.pendentes + '</b></td></tr>' +
+            '<tr><td>Ativos sem biometria</td><td style="text-align:right"><b>' + ind.semBiometria + '</b></td></tr>' +
+          '</tbody></table></div>' +
+      '</div>';
+
+    $('btnCsvMarc').onclick = () => {
+      const linhas = (d.marcacoes || []).map(m => [
+        m.marcado_dia, String(m.marcado_em).slice(11, 16), this.nomeDe(m.pessoa_id),
+        this.nomeEquipe(m.equipe_id), m.tipo, m.origem, m.veredito,
+        m.dentro_cerca === false ? 'fora' : (m.dentro_cerca ? 'dentro' : '')
+      ]);
+      this.baixarCsv('marcacoes-' + hoje + '.csv',
+        ['Dia', 'Hora', 'Colaborador', 'Equipe', 'Tipo', 'Origem', 'Veredito', 'Cerca'], linhas);
+    };
+    $('btnCsvEquipe').onclick = () => {
+      const linhas = ind.equipes.map(e => [e.nome, e.pessoas, e.marcacoes, e.manuais, e.taxa_manual + '%', e.pendentes]);
+      this.baixarCsv('equipes-' + hoje + '.csv',
+        ['Equipe', 'Pessoas', 'Marcações', 'Manuais', 'Taxa manual', 'Pendentes'], linhas);
+    };
+
+    this.carregarGraficos({ serie, equipes: ind.equipes, motivos, alarme: cfg.alarmeManual || 20 });
+  },
+
+  baixarCsv(nome, cabecalho, linhas) {
+    const csv = '﻿' + csvDe(cabecalho, linhas);   // BOM p/ acento no Excel
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = nome; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast('CSV gerado', 'ok');
+  },
+
+  /* --------------------------------------------------------- auditoria */
+
+  pintarAuditoria() {
+    const cs = this.dados.correcoes || [];
+    const rotAcao = a => a === 'aprovar' ? 'Aprovou' : a === 'rejeitar' ? 'Rejeitou' : a === 'lancar' ? 'Lançou' : esc(a);
+    const pillAcao = a => a === 'rejeitar' ? 'bad' : a === 'aprovar' ? 'ok' : 'mut';
+
+    const linha = c =>
+      '<tr><td class="mono" style="white-space:nowrap">' + esc(String(c.criada_em).slice(0, 16).replace('T', ' ')) + '</td>' +
+      '<td>' + esc(c.usuario_rh_nome || c.usuario_rh_login || 'RH') + '</td>' +
+      '<td><span class="pill ' + pillAcao(c.acao) + '"><span class="dot"></span>' + rotAcao(c.acao) + '</span></td>' +
+      '<td>' + esc(c.pessoa_nome || (c.alvo_tipo === 'template' ? 'recadastro' : '—')) + '</td>' +
+      '<td style="color:#64748b">' + esc(c.motivo || '—') + '</td></tr>';
+
+    $('rh-auditoria').innerHTML =
+      '<div class="pg-head"><div><h1 class="tit">Auditoria</h1>' +
+        '<p class="sub">Trilha imutável de todas as decisões do RH sobre o ponto.</p></div>' +
+        '<div class="acoes"><button class="v2btn ghost" id="btnCsvAud">Exportar (CSV)</button></div></div>' +
+      '<div class="tbl-wrap"><div class="tbl-bar">' +
+        '<div class="tbl-busca">🔍<input id="audBusca" placeholder="Buscar por pessoa, RH ou motivo…"></div>' +
+        '<span style="margin-left:auto;font-size:12.5px;color:#94a3b8">' + cs.length + ' registro(s)</span></div>' +
+        '<div style="overflow:auto"><table class="adtable"><thead><tr>' +
+          '<th>Quando</th><th>Quem</th><th>Ação</th><th>Colaborador</th><th>Motivo</th></tr></thead>' +
+          '<tbody id="audBody">' +
+          (cs.length ? cs.map(linha).join('') : '<tr><td colspan="5" style="padding:40px;text-align:center;color:#64748b">Nenhuma decisão registrada ainda.</td></tr>') +
+        '</tbody></table></div></div>';
+
+    const busca = $('audBusca');
+    busca.oninput = () => {
+      const q = busca.value.toLowerCase();
+      const filtradas = cs.filter(c =>
+        ((c.pessoa_nome || '') + ' ' + (c.usuario_rh_nome || '') + ' ' + (c.motivo || '')).toLowerCase().includes(q));
+      $('audBody').innerHTML = filtradas.length ? filtradas.map(linha).join('')
+        : '<tr><td colspan="5" style="padding:30px;text-align:center;color:#64748b">Nada encontrado.</td></tr>';
+    };
+    $('btnCsvAud').onclick = () => {
+      const linhas = cs.map(c => [String(c.criada_em).slice(0, 16).replace('T', ' '),
+        c.usuario_rh_nome || c.usuario_rh_login || 'RH', rotAcao(c.acao), c.pessoa_nome || '', c.motivo || '']);
+      this.baixarCsv('auditoria.csv', ['Quando', 'Quem', 'Ação', 'Colaborador', 'Motivo'], linhas);
+    };
+  },
+
+  /* --------------------------------------------------------- configurações */
+
+  pintarConfig() {
+    const cfg = window.EFRAT_CFG || {};
+    const emp = this.dados.empresa || {};
+    const usuarios = this.dados.usuarios_rh || [];
+
+    const linhaUsuario = u =>
+      '<tr><td><b>' + esc(u.nome) + '</b> <span style="color:#94a3b8">@' + esc(u.usuario) + '</span>' +
+        (u.trocar_senha ? ' <span class="pill warn" style="padding:0 6px">senha temporária</span>' : '') + '</td>' +
+      '<td>' + esc(u.criado_em || '') + '</td>' +
+      '<td><span class="pill ' + (u.ativo ? 'ok' : 'mut') + '"><span class="dot"></span>' + (u.ativo ? 'Ativo' : 'Inativo') + '</span></td>' +
+      '<td style="text-align:right">' + (u.usuario_id === this.dados.usuario.id ? '<span style="color:#94a3b8;font-size:12px">você</span>' :
+        '<button class="v2btn ghost mini" data-uativar="' + esc(u.usuario_id) + '" data-estado="' + (u.ativo ? 'desativar' : 'ativar') + '">' + (u.ativo ? 'Desativar' : 'Reativar') + '</button>') + '</td></tr>';
+
+    $('rh-config').innerHTML =
+      '<div class="pg-head"><div><h1 class="tit">Configurações</h1>' +
+        '<p class="sub">Parâmetros da operação, dados da empresa e acesso do RH.</p></div></div>' +
+
+      '<div class="cfg-sec"><h2>Anti-fraude e operação</h2>' +
+        '<p class="cap">Estes valores valem para o app do colaborador e para a detecção de exceções.</p>' +
+        '<div class="form-grid">' +
+          '<div><label class="lb2">Limiar facial (aceite)</label><input class="inp" id="cfLimiar" type="number" step="0.01" min="0.2" max="0.9" value="' + (cfg.limiarAceite ?? 0.45) + '"></div>' +
+          '<div><label class="lb2">Raio de cerca padrão (m)</label><input class="inp" id="cfRaio" type="number" min="30" max="5000" value="' + (cfg.raioPadraoM ?? 200) + '"></div>' +
+          '<div><label class="lb2">Tolerância GPS (m)</label><input class="inp" id="cfGps" type="number" min="0" max="500" value="' + (cfg.toleranciaGpsM ?? 100) + '"></div>' +
+          '<div><label class="lb2">Hora-limite de entrada</label><input class="inp" id="cfHora" type="time" value="' + (cfg.horaEntrada || '08:00') + '"></div>' +
+          '<div><label class="lb2">Alarme de registro manual (%)</label><input class="inp" id="cfAlarme" type="number" min="1" max="100" value="' + (cfg.alarmeManual ?? 20) + '"></div>' +
+        '</div>' +
+        '<button class="act" id="btnSalvarCfg" style="margin-top:14px;width:auto;padding:10px 18px">Salvar parâmetros</button></div>' +
+
+      '<div class="cfg-sec"><h2>Empresa</h2>' +
+        '<p class="cap">Nome exibido no painel e no pareamento do colaborador.</p>' +
+        '<div class="form-grid">' +
+          '<div><label class="lb2">Nome da empresa</label><input class="inp" id="cfNome" value="' + esc(emp.nome || '') + '"></div>' +
+          '<div><label class="lb2">Fuso horário</label><input class="inp" id="cfFuso" value="' + esc(emp.fuso || 'America/Campo_Grande') + '"></div>' +
+        '</div>' +
+        '<button class="act" id="btnSalvarEmp" style="margin-top:14px;width:auto;padding:10px 18px">Salvar empresa</button></div>' +
+
+      '<div class="cfg-sec"><h2>Usuários do RH</h2>' +
+        '<p class="cap">Crie acessos para a equipe de RH. A senha temporária aparece uma vez — repasse com segurança.</p>' +
+        '<div class="tbl-wrap" style="margin-bottom:12px"><table class="adtable"><thead><tr>' +
+          '<th>Usuário</th><th>Criado</th><th>Status</th><th></th></tr></thead><tbody>' +
+          usuarios.map(linhaUsuario).join('') + '</tbody></table></div>' +
+        '<div id="areaNovoUsuario"></div>' +
+        '<button class="v2btn" id="btnNovoUsuario">+ Novo usuário RH</button></div>';
+
+    $('btnSalvarCfg').onclick = async () => {
+      const dados = {
+        limiarAceite: Number($('cfLimiar').value), raioPadraoM: Number($('cfRaio').value),
+        toleranciaGpsM: Number($('cfGps').value), horaEntrada: $('cfHora').value,
+        alarmeManual: Number($('cfAlarme').value)
+      };
+      const r = await ApiRh.config(this.token, { dados });
+      if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+      toast('Parâmetros salvos', 'ok');
+      await this.recarregar();
+    };
+    $('btnSalvarEmp').onclick = async () => {
+      const r = await ApiRh.config(this.token, { empresa_nome: $('cfNome').value.trim(), fuso: $('cfFuso').value.trim() });
+      if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+      toast('Empresa atualizada', 'ok');
+      await this.recarregar();
+    };
+    $('btnNovoUsuario').onclick = () => this.formNovoUsuario();
+    $('rh-config').querySelectorAll('[data-uativar]').forEach(b => {
+      b.onclick = async () => {
+        const r = await ApiRh.usuario(this.token, { acao: b.dataset.estado, usuario_id: b.dataset.uativar });
+        if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+        toast('Usuário atualizado', 'ok');
+        await this.recarregar();
+      };
+    });
+  },
+
+  formNovoUsuario() {
+    $('areaNovoUsuario').innerHTML =
+      '<div class="card"><h2>Novo usuário RH</h2>' +
+        '<div class="form-grid">' +
+          '<div><label class="lb2">Nome</label><input class="inp" id="nuNome"></div>' +
+          '<div><label class="lb2">Usuário (login)</label><input class="inp" id="nuUsuario" autocapitalize="off" placeholder="ex.: maria.rh"></div>' +
+        '</div>' +
+        '<div class="row2" style="margin-top:14px">' +
+          '<button class="act" id="btnCriarUsuario">Criar</button>' +
+          '<button class="act ghost" id="btnCancelarUsuario">Cancelar</button></div>' +
+        '<div id="nuResultado"></div>' +
+      '</div>';
+    $('btnCancelarUsuario').onclick = () => { $('areaNovoUsuario').innerHTML = ''; };
+    $('btnCriarUsuario').onclick = async () => {
+      const nome = $('nuNome').value.trim(), usuario = $('nuUsuario').value.trim();
+      if (!nome || !usuario) { toast('Informe nome e usuário', 'warn'); return; }
+      const btn = $('btnCriarUsuario'); btn.disabled = true; btn.textContent = 'Criando…';
+      const r = await ApiRh.usuario(this.token, { acao: 'criar', nome, usuario });
+      btn.disabled = false; btn.textContent = 'Criar';
+      if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+      // Atualiza a lista em segundo plano SEM repintar a aba (não perder a senha).
+      const d = await ApiRh.dados(this.token, this.dias);
+      if (d.ok) { this.dados = d.dados; this.aplicarConfig(); }
+      // A senha temporária aparece UMA vez — mostra destacada para repassar.
+      $('nuResultado').innerHTML =
+        '<div class="senha-box">Usuário <b>@' + esc(r.dados.usuario) + '</b> criado. Senha temporária (repasse com ' +
+        'segurança; ele troca no 1º acesso):<div class="mono" style="margin-top:6px">' + esc(r.dados.senha_temporaria) + '</div>' +
+        '<button class="v2btn ghost mini" id="btnFecharSenha" style="margin-top:10px">Concluir</button></div>';
+      $('nuNome').value = ''; $('nuUsuario').value = '';
+      $('btnFecharSenha').onclick = () => { this.pintarConfig(); };
+    };
+    $('areaNovoUsuario').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
+
+  /* ------------------------------------------------- troca de senha temporária */
+
+  telaTrocarSenha() {
+    $('rh-painel').classList.remove('hide');
+    ['alocacao', 'mapa', 'pendencias', 'pessoas', 'equipes', 'registros', 'jornadas', 'relatorios', 'auditoria', 'config', 'stub']
+      .forEach(a => { const el = $('rh-' + a); if (el) el.classList.add('hide'); });
+    $('rhCrumb').textContent = 'Trocar senha';
+    $('rhNome').textContent = this.dados.usuario.nome || 'RH';
+    $('rhIniciais').textContent = this.iniciais(this.dados.usuario.nome || 'RH');
+    $('rh-painel').innerHTML =
+      '<div class="cfg-sec" style="max-width:460px;margin:40px auto">' +
+        '<h2>Defina uma nova senha</h2>' +
+        '<p class="cap">Seu acesso usa uma senha temporária. Escolha uma senha só sua para continuar.</p>' +
+        '<label class="lb2">Nova senha</label><input class="inp" id="tsNova" type="password">' +
+        '<label class="lb2">Confirmar</label><input class="inp" id="tsConf" type="password">' +
+        '<button class="act" id="btnTrocarSenha" style="margin-top:16px">Salvar e entrar</button>' +
+      '</div>';
+    $('btnTrocarSenha').onclick = async () => {
+      const nova = $('tsNova').value, conf = $('tsConf').value;
+      if (nova.length < 8) { toast('A senha precisa de ao menos 8 caracteres', 'warn'); return; }
+      if (nova !== conf) { toast('As senhas não conferem', 'warn'); return; }
+      // Deriva no navegador com um sal novo (mesma mecânica do login).
+      const salNovo = [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
+      const chaveNova = await derivar(nova, salNovo, 150000);
+      const r = await ApiRh.usuario(this.token, { acao: 'trocar_senha', chave_nova: chaveNova, sal_novo: salNovo });
+      if (!r.ok) { toast(r.erro || 'Falha ao trocar senha', 'bad'); return; }
+      toast('Senha atualizada', 'ok');
+      this.precisaTrocarSenha = false;
+      this.abrir(this.aoSair);   // agora entra normalmente
+    };
   }
 };

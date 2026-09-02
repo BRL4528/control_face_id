@@ -323,9 +323,10 @@ export const HORA_ENTRADA_PADRAO = '08:00';
  * vez de ler o relógio. `hoje` é 'YYYY-MM-DD'. Retorna ordenado por severidade
  * (crítico primeiro) e, dentro disso, por horário.
  */
-export function exceptionsDoDia(marcacoes, pessoas, alocacoesHoje, hoje, agoraISO, horaEntrada) {
+export function exceptionsDoDia(marcacoes, pessoas, alocacoesHoje, hoje, agoraISO, horaEntrada, horaPorEquipe) {
   const ativos = {};
   for (const p of (pessoas || [])) ativos[p.pessoa_id] = p;
+  const porEquipe = horaPorEquipe || {};   // equipe_id -> 'HH:MM' (jornada real); senão cai no default
   const itens = [];
 
   // 1) Exceções ancoradas numa marcação pendente de hoje.
@@ -348,26 +349,67 @@ export function exceptionsDoDia(marcacoes, pessoas, alocacoesHoje, hoje, agoraIS
     });
   }
 
-  // 2) "Sem entrada" — derivada da alocação, só depois da hora-limite.
-  const limite = (hoje + 'T' + (horaEntrada || HORA_ENTRADA_PADRAO) + ':00');
-  const jaPassou = String(agoraISO || '').slice(0, 16) >= limite.slice(0, 16);
-  if (jaPassou) {
-    for (const a of (alocacoesHoje || [])) {
-      const p = ativos[a.colaborador_id];
-      if (!p || !p.ativo) continue;
-      if (marcadasHoje[a.colaborador_id]) continue;   // apareceu: não é exceção
-      itens.push({
-        id: 's:' + a.colaborador_id,
-        tipo: 'sem_entrada', severidade: TIPOS_EXCECAO.sem_entrada.severidade,
-        rotulo: TIPOS_EXCECAO.sem_entrada.rotulo,
-        pessoa_id: a.colaborador_id, equipe_id: a.equipe_id,
-        hora: horaEntrada || HORA_ENTRADA_PADRAO,
-        marcacao: null, alocacao: a, alvo: { tipo: 'sem_entrada', id: a.colaborador_id }
-      });
-    }
+  // 2) "Sem entrada" — derivada da alocação, só depois da hora-limite. A hora
+  //    limite é a da jornada da equipe (se houver); senão o default da empresa.
+  const agora16 = String(agoraISO || '').slice(0, 16);
+  for (const a of (alocacoesHoje || [])) {
+    const p = ativos[a.colaborador_id];
+    if (!p || !p.ativo) continue;
+    if (marcadasHoje[a.colaborador_id]) continue;   // apareceu: não é exceção
+    const limiteHora = porEquipe[a.equipe_id] || horaEntrada || HORA_ENTRADA_PADRAO;
+    if (agora16 < (hoje + 'T' + limiteHora)) continue;   // ainda não passou da hora dessa equipe
+    itens.push({
+      id: 's:' + a.colaborador_id,
+      tipo: 'sem_entrada', severidade: TIPOS_EXCECAO.sem_entrada.severidade,
+      rotulo: TIPOS_EXCECAO.sem_entrada.rotulo,
+      pessoa_id: a.colaborador_id, equipe_id: a.equipe_id,
+      hora: limiteHora,
+      marcacao: null, alocacao: a, alvo: { tipo: 'sem_entrada', id: a.colaborador_id }
+    });
   }
 
   const peso = { critico: 0, atencao: 1 };
   return itens.sort((x, y) =>
     (peso[x.severidade] - peso[y.severidade]) || String(x.hora).localeCompare(String(y.hora)));
+}
+
+/* ------------------------------------------------ jornada + relatórios */
+
+/**
+ * Jornada de uma equipe como texto "HH:MM–HH:MM". Resolve pela jornada associada
+ * (equipe.jornada_id → jornadas), senão pelo default da empresa (config.jornadaPadrao),
+ * senão o padrão fixo. Pura: recebe as listas, não lê estado global.
+ */
+export function jornadaDaEquipe(equipeId, equipes, jornadas, jornadaPadrao) {
+  const eq = (equipes || []).find(e => e.equipe_id === equipeId);
+  const j = eq && eq.jornada_id ? (jornadas || []).find(x => x.jornada_id === eq.jornada_id) : null;
+  if (j) return j.entrada + '–' + j.saida;
+  return jornadaPadrao || '07:00–17:00';
+}
+
+/** Hora de entrada (HH:MM) da jornada da equipe, p/ a exceção "sem entrada". */
+export function horaEntradaDaEquipe(equipeId, equipes, jornadas, horaPadrao) {
+  const eq = (equipes || []).find(e => e.equipe_id === equipeId);
+  const j = eq && eq.jornada_id ? (jornadas || []).find(x => x.jornada_id === eq.jornada_id) : null;
+  return (j && j.entrada) || horaPadrao || HORA_ENTRADA_PADRAO;
+}
+
+/** Mapa equipe_id → hora de entrada, para alimentar exceptionsDoDia. */
+export function horasEntradaPorEquipe(equipes, jornadas) {
+  const m = {};
+  for (const e of (equipes || [])) {
+    const j = e.jornada_id ? (jornadas || []).find(x => x.jornada_id === e.jornada_id) : null;
+    if (j && j.entrada) m[e.equipe_id] = j.entrada;
+  }
+  return m;
+}
+
+/** Serializa linhas (array de arrays) em CSV com aspas seguras. */
+export function csvDe(cabecalho, linhas) {
+  const escape = v => {
+    const s = v == null ? '' : String(v);
+    return /[",\n;]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const todas = [cabecalho].concat(linhas || []);
+  return todas.map(l => l.map(escape).join(';')).join('\r\n');
 }

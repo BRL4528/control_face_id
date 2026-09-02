@@ -115,5 +115,8 @@ export const ApiRh = {
   alocar(token, d) { return reqRh('/rh/alocar', token, d); },
   biometria(token, d) { return reqRh('/rh/biometria', token, d); },
   decidir(token, d) { return reqRh('/rh/decidir', token, d); },
-  lancarPonto(token, d) { return reqRh('/rh/lancar-ponto', token, d); }
+  lancarPonto(token, d) { return reqRh('/rh/lancar-ponto', token, d); },
+  jornada(token, d) { return reqRh('/rh/jornada', token, d); },
+  config(token, d) { return reqRh('/rh/config', token, d); },
+  usuario(token, d) { return reqRh('/rh/usuario', token, d); }
 };
