@@ -856,9 +856,21 @@ export const Rh = {
     else if (alocadoHoje) status = { cls: 'bad', txt: 'Sem entrada' };
     const ultimo = ultima
       ? (ultima.marcado_dia === hoje ? '' : (data(ultima.marcado_dia) + ' ')) +
-        (ultima.tipo === 'entrada' ? 'E ' : 'S ') + hora(ultima.marcado_em)
+        (ultima.tipo === 'entrada' ? 'E ' : 'S ') + this.horaSegura(ultima.marcado_em)
       : '— sem registro';
     return { status, ultimo };
+  },
+
+  /** Formata HH:MM de um timestamp, tolerando o formato do Postgres (sem 'T'). */
+  horaSegura(iso) {
+    if (!iso) return '';
+    let d = new Date(iso);
+    if (isNaN(d)) d = new Date(String(iso).replace(' ', 'T'));   // "2026-09-01 23:00:00" → ISO
+    if (isNaN(d)) {
+      const m = String(iso).match(/(\d{2}):(\d{2})/);   // último recurso: pega HH:MM do texto
+      return m ? m[1] + ':' + m[2] : '';
+    }
+    return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   },
 
   pintarPessoas() {
@@ -885,6 +897,7 @@ export const Rh = {
         '<td><span class="pill ' + r.status.cls + '"><span class="dot"></span>' + r.status.txt + '</span></td>' +
         '<td style="font-variant-numeric:tabular-nums">' + esc(r.ultimo) + '</td>' +
         '<td style="white-space:nowrap;text-align:right">' +
+          '<button class="v2btn ghost mini" data-editar="' + p.pessoa_id + '">Editar</button> ' +
           '<button class="v2btn ghost mini" data-codigo="' + esc(p.matricula) + '" data-nome="' + esc(p.nome) + '">Código</button> ' +
           '<button class="v2btn ghost mini" data-bio="' + p.pessoa_id + '">' + (p.tem_biometria ? 'Refazer' : 'Biometria') + '</button>' +
         '</td></tr>';
@@ -919,7 +932,7 @@ export const Rh = {
       this.pintarPessoas();
       const nb = $('pBusca'); if (nb) { nb.focus(); nb.setSelectionRange(caret, caret); }
     };
-    $('btnAbrirNovo').onclick = () => this.abrirNovoColaborador(eqs);
+    $('btnAbrirNovo').onclick = () => this.formColaborador(null);
 
     $('rh-pessoas').querySelectorAll('button[data-bio]').forEach(b => {
       b.onclick = () => this.abrirBiometria(b.dataset.bio);
@@ -927,19 +940,35 @@ export const Rh = {
     $('rh-pessoas').querySelectorAll('button[data-codigo]').forEach(b => {
       b.onclick = () => this.mostrarCodigoAtivacao(b.dataset.nome, b.dataset.codigo);
     });
+    $('rh-pessoas').querySelectorAll('button[data-editar]').forEach(b => {
+      b.onclick = () => this.formColaborador(this.pessoaDe(b.dataset.editar));
+    });
   },
 
-  /** Formulário "novo colaborador" — agora um painel que abre sob o cabeçalho. */
-  abrirNovoColaborador(eqs) {
+  /**
+   * Formulário de colaborador — cria (pessoa null) ou edita (pessoa existente).
+   * O endpoint /rh/colaborador faz upsert por (empresa, matrícula): editar é
+   * reenviar a mesma matrícula com os novos dados.
+   */
+  formColaborador(pessoa) {
+    const eqs = this.dados.equipes || [];
+    const p = pessoa || {};
+    const editando = !!pessoa;
+    const opt = (val, txt, sel) => '<option value="' + val + '"' + (sel ? ' selected' : '') + '>' + esc(txt) + '</option>';
     $('areaNovo').innerHTML =
-      '<div class="card"><h2>Novo colaborador</h2>' +
-        '<label class="lb">Nome</label><input type="text" id="pNome">' +
-        '<label class="lb">Matrícula</label><input type="text" id="pMat">' +
-        '<label class="lb">Equipe</label><select id="pEquipe">' +
-          (eqs || []).map(e => '<option value="' + e.equipe_id + '">' + esc(e.nome) + '</option>').join('') + '</select>' +
-        '<label class="lb">Papel</label><select id="pPapel">' +
-          '<option value="colaborador">Colaborador</option><option value="gestor">Gestor</option></select>' +
-        '<div class="row2" style="margin-top:12px">' +
+      '<div class="card"><h2>' + (editando ? 'Editar colaborador' : 'Novo colaborador') + '</h2>' +
+        '<div class="form-grid">' +
+          '<div><label class="lb2">Nome</label><input class="inp" id="pNome" value="' + esc(p.nome || '') + '"></div>' +
+          '<div><label class="lb2">Matrícula</label><input class="inp" id="pMat" value="' + esc(p.matricula || '') + '"' +
+            (editando ? ' readonly title="A matrícula identifica o colaborador e não muda"' : '') + '></div>' +
+          '<div><label class="lb2">Equipe</label><select class="inp" id="pEquipe">' +
+            eqs.map(e => opt(e.equipe_id, e.nome, p.equipe_id === e.equipe_id)).join('') + '</select></div>' +
+          '<div><label class="lb2">Papel</label><select class="inp" id="pPapel">' +
+            opt('colaborador', 'Colaborador', p.papel !== 'gestor') + opt('gestor', 'Gestor', p.papel === 'gestor') + '</select></div>' +
+          (editando ? '<div><label class="lb2">Status</label><select class="inp" id="pAtivo">' +
+            opt('true', 'Ativo', p.ativo !== false) + opt('false', 'Inativo', p.ativo === false) + '</select></div>' : '') +
+        '</div>' +
+        '<div class="row2" style="margin-top:14px">' +
           '<button class="act" id="btnNovaPessoa">Salvar</button>' +
           '<button class="act ghost" id="btnCancelarNovo">Cancelar</button></div>' +
       '</div>';
@@ -949,16 +978,17 @@ export const Rh = {
     $('btnNovaPessoa').onclick = async () => {
       const nome = $('pNome').value.trim(), matricula = $('pMat').value.trim();
       if (!nome || !matricula) { toast('Informe nome e matrícula', 'warn'); return; }
-      const r = await ApiRh.colaborador(this.token, {
-        nome, matricula, equipe_id: $('pEquipe').value, papel: $('pPapel').value
-      });
+      const corpo = { nome, matricula, equipe_id: $('pEquipe').value, papel: $('pPapel').value };
+      if (editando && $('pAtivo')) corpo.ativo = $('pAtivo').value === 'true';
+      const btn = $('btnNovaPessoa'); btn.disabled = true; btn.textContent = 'Salvando…';
+      const r = await ApiRh.colaborador(this.token, corpo);
+      btn.disabled = false; btn.textContent = 'Salvar';
       if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
-      toast('Colaborador salvo', 'ok');
+      toast(editando ? 'Colaborador atualizado' : 'Colaborador salvo', 'ok');
       await this.recarregar();
       $('areaNovo').innerHTML = '';
-      // Mostra o código de ativação logo após salvar — é o que o RH envia ao
-      // funcionário para ele ativar o ponto no próprio celular.
-      this.mostrarCodigoAtivacao(nome, matricula);
+      // No cadastro novo, mostra o código de ativação para enviar ao funcionário.
+      if (!editando) this.mostrarCodigoAtivacao(nome, matricula);
     };
   },
 
