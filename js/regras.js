@@ -8,6 +8,34 @@ export function tipoDaVez(marcacoesDoDiaDaPessoa) {
   return validas.length % 2 === 0 ? 'entrada' : 'saida';
 }
 
+/**
+ * Os 4 pontos padrão do dia: manhã (entrada/saída) e tarde (entrada/saída).
+ * A sequência é automática — a 1ª marcação do dia é a entrada da manhã, a 2ª a
+ * saída da manhã, e assim por diante. Recebe as marcações do dia (qualquer
+ * ordem) e devolve os 4 slots preenchidos na ordem cronológica, mais o índice
+ * do próximo a bater (0..3) ou null se o dia está completo.
+ */
+export const SLOTS_DIA = [
+  { chave: 'entrada_manha', rotulo: 'Entrada manhã', tipo: 'entrada', periodo: 'manha' },
+  { chave: 'saida_manha',   rotulo: 'Saída manhã',   tipo: 'saida',   periodo: 'manha' },
+  { chave: 'entrada_tarde', rotulo: 'Entrada tarde', tipo: 'entrada', periodo: 'tarde' },
+  { chave: 'saida_tarde',   rotulo: 'Saída tarde',   tipo: 'saida',   periodo: 'tarde' }
+];
+
+export function pontosDoDia(marcacoesDoDia) {
+  const ordenadas = (marcacoesDoDia || [])
+    .filter(m => m && m.marcado_em)
+    .slice()
+    .sort((a, b) => String(a.marcado_em).localeCompare(String(b.marcado_em)));
+  const slots = SLOTS_DIA.map((s, i) => ({
+    ...s,
+    marcacao: ordenadas[i] || null,
+    batido: !!ordenadas[i]
+  }));
+  const proximo = ordenadas.length < 4 ? ordenadas.length : null;
+  return { slots, proximo, completo: proximo === null, extras: ordenadas.slice(4) };
+}
+
 /** Veredito a partir da distância e dos limiares configurados. */
 export function vereditoPorDistancia(dist, cfg) {
   if (dist == null || !isFinite(dist)) return 'revisar';

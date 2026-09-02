@@ -71,13 +71,19 @@ label.lb{display:block;font-size:10.5px;color:var(--muted);margin-bottom:5px;
 #fila header button{background:var(--surface);border:1px solid var(--linha);color:var(--muted);
   border-radius:20px;padding:9px 15px;font-size:11px;cursor:pointer;width:auto}
 
-.camwrap{position:relative;width:100%;aspect-ratio:3/4;background:var(--escuro-2);border-radius:18px;
-  overflow:hidden;margin-bottom:10px}
+/* Câmera num quadro proporcional e centralizado. aspect-ratio 3/4 e largura com
+   teto: em telas grandes não estica, fica centrado e num tamanho confortável. */
+.camwrap{position:relative;width:100%;max-width:340px;aspect-ratio:3/4;margin:0 auto 10px;
+  background:var(--escuro-2);border-radius:18px;overflow:hidden}
 video,canvas.ov{position:absolute;inset:0;width:100%;height:100%}
 video{object-fit:cover;transform:scaleX(-1)}
 canvas.ov{transform:scaleX(-1);pointer-events:none}
-.guia-oval{position:absolute;inset:8% 18%;pointer-events:none}
-.guia-oval ellipse{fill:none;stroke:var(--azul);stroke-width:2.5;stroke-dasharray:20 14}
+/* Oval-guia como CSS puro — proporcional (não deforma como o SVG antigo com
+   preserveAspectRatio=none, que ficava "torto"). Centralizado, tamanho que
+   pede o rosto perto, não afastado. */
+.guia-oval{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:62%;height:78%;border:3px dashed rgba(45,108,223,.85);
+  border-radius:50%;pointer-events:none;box-shadow:0 0 0 2000px rgba(11,18,32,.28)}
 .dica{position:absolute;left:0;right:0;bottom:0;padding:9px 12px;
   background:linear-gradient(transparent,rgba(11,18,32,.82));color:#fff;font-size:12px}
 .camoff{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
@@ -290,3 +296,24 @@ nav button.on,.nav-item.on{background:var(--azul-bg);color:var(--azul-esc)}
 .cod-info{flex:1;min-width:0}
 .cod-info .cod{font-size:14px;font-weight:600;color:var(--ink);word-break:break-all;margin-top:2px}
 .cod-linha .mini{flex:0 0 auto}
+
+/* ---------------- painel do dia (4 pontos padrão) ---------------- */
+.diacard{max-width:420px;margin:0 auto}
+.dia-topo{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.dia-prog{font-size:20px;font-weight:700;color:var(--azul)}
+.slots-dia{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
+.slot{display:flex;align-items:center;gap:12px;padding:14px;border-radius:12px;border:1px solid var(--linha);background:var(--surface-2)}
+.slot-ic{width:34px;height:34px;flex:0 0 auto;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:16px;font-weight:700;background:var(--linha);color:var(--muted)}
+.slot-tx{flex:1;min-width:0}
+.slot-rot{font-size:14px;font-weight:600;color:var(--ink)}
+.slot-sub{font-size:11.5px;color:var(--muted);margin-top:1px}
+.slot-h{font-size:15px;font-weight:700;color:var(--verde-ink)}
+.slot.batido{background:var(--verde-bg);border-color:var(--verde)}
+.slot.batido .slot-ic{background:var(--verde);color:#fff}
+.slot.ativo{border-color:var(--azul);border-width:2px;background:var(--azul-bg)}
+.slot.ativo .slot-ic{background:var(--azul);color:#fff}
+.slot.pendente{opacity:.62}
+.aloc-nota{text-align:center;margin:0 0 12px}
+.dia-ok{text-align:center;padding:16px;border-radius:12px;background:var(--verde-bg);
+  color:var(--verde-ink);font-weight:700;border:1px solid var(--verde)}

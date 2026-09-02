@@ -39,23 +39,28 @@
   <button class="act ghost" id="btnVoltarPorta">Voltar</button>
 </div>
 
-<!-- ===================== FILA (câmera de ponto) ===================== -->
+<!-- ===================== PONTO (painel do dia + câmera) ===================== -->
 <div id="fila" class="wrap hide">
   <header>
-    <button id="btnSairFila">Cancelar</button>
-    <div class="quem">Registrar ponto · <span id="quemFila"></span></div>
+    <button id="btnSairFila">Voltar</button>
+    <div class="quem">Meu dia · <span id="quemFila"></span></div>
   </header>
 
-  <div class="camwrap">
-    <video id="video" playsinline muted autoplay></video>
-    <canvas class="ov" id="overlay"></canvas>
-    <svg class="guia-oval" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-      <ellipse cx="50" cy="46" rx="34" ry="40"></ellipse>
-    </svg>
-    <div class="camoff hide" id="camOff">Câmera desligada</div>
-    <div class="dica" id="dica"></div>
+  <!-- Painel do dia: os 4 pontos padrão. É o que aparece por padrão. -->
+  <div id="painelDia"></div>
+
+  <!-- Câmera: só aparece quando a pessoa toca para bater um ponto. -->
+  <div id="areaCamera" class="hide">
+    <div class="camwrap">
+      <video id="video" playsinline muted autoplay></video>
+      <canvas class="ov" id="overlay"></canvas>
+      <div class="guia-oval" aria-hidden="true"></div>
+      <div class="camoff hide" id="camOff">Câmera desligada</div>
+      <div class="dica" id="dica"></div>
+    </div>
+    <p class="privacidade">Nenhuma imagem é armazenada, apenas o template biométrico</p>
+    <button class="act ghost" id="btnFecharCamera">Cancelar</button>
   </div>
-  <p class="privacidade">Nenhuma imagem é armazenada, apenas o template biométrico</p>
 
   <div id="cartao"></div>
 </div>

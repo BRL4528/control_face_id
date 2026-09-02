@@ -13,7 +13,7 @@ import { Store } from './store.js';
 import { Api } from './api.js';
 import { Face, DICA_ADORNO } from './face.js';
 import { criarDetectorPiscada } from './liveness.js';
-import { tipoDaVez, vereditoPorDistancia, emCooldown, agoraCorrigido, euclidiana, dia } from './regras.js';
+import { tipoDaVez, pontosDoDia, vereditoPorDistancia, emCooldown, agoraCorrigido, euclidiana, dia } from './regras.js';
 import { $, esc, mostrar, toast, hora } from './ui.js';
 
 const cfg = () => window.EFRAT_CFG;
@@ -38,27 +38,81 @@ export const Ponto = {
     mostrar('fila');
     $('cartao').innerHTML = '';
     $('quemFila') && ($('quemFila').textContent = dispositivo.colaborador.nome.split(' ')[0]);
+    $('btnFecharCamera').onclick = () => this.fecharCamera();
     await this.recarregarDia();
-    if (!this.template) { this.semBiometria(); return; }
-    if (!(await this.ligarCamera())) { this.sair(); return; }
+    this.pintarPainelDia();   // começa no PAINEL DO DIA, câmera fechada
+  },
+
+  /* --------------------------------------------------- painel do dia */
+
+  /**
+   * Tela inicial: os 4 pontos padrão (manhã E/S, tarde E/S). A câmera fica
+   * fechada; só abre quando a pessoa toca em "bater o próximo ponto".
+   */
+  pintarPainelDia() {
+    this.fecharCamera();   // garante câmera desligada
+    $('cartao').innerHTML = '';
+    const { slots, proximo, completo } = pontosDoDia(this.doDia);
+
+    if (!this.template) {
+      $('painelDia').innerHTML =
+        '<div class="card"><div class="tit">Cadastro facial pendente</div>' +
+        '<p class="nota">O RH ainda não cadastrou seu rosto. Procure o RH.</p></div>';
+      return;
+    }
+
+    const linhas = slots.map((s, i) => {
+      const ativo = i === proximo;
+      const h = s.batido ? hora(s.marcacao.marcado_em) : '';
+      return '<div class="slot ' + (s.batido ? 'batido' : ativo ? 'ativo' : 'pendente') + '">' +
+        '<div class="slot-ic">' + (s.batido ? '✓' : ativo ? '➜' : '') + '</div>' +
+        '<div class="slot-tx"><div class="slot-rot">' + s.rotulo + '</div>' +
+          '<div class="slot-sub">' + (s.batido ? 'às ' + h : ativo ? 'próximo a bater' : 'aguardando') + '</div></div>' +
+        (s.batido ? '<div class="slot-h mono">' + h + '</div>' : '') +
+      '</div>';
+    }).join('');
+
+    const alocTxt = this.alocacao
+      ? 'Local de hoje: ' + esc(this.alocacao.equipe_nome || 'sua equipe')
+      : '⚠ Sem alocação hoje — o ponto irá para conferência do RH';
+
+    $('painelDia').innerHTML =
+      '<div class="card diacard">' +
+        '<div class="dia-topo"><span class="lb">Hoje</span>' +
+          '<span class="dia-prog mono">' + slots.filter(s => s.batido).length + '/4</span></div>' +
+        '<div class="slots-dia">' + linhas + '</div>' +
+        '<p class="nota aloc-nota">' + alocTxt + '</p>' +
+        (completo
+          ? '<div class="dia-ok">✓ Dia completo. Todos os pontos registrados.</div>'
+          : '<button class="act big" id="btnBater">Bater ' + slots[proximo].rotulo.toLowerCase() + '</button>') +
+      '</div>';
+
+    if (!completo) $('btnBater').onclick = () => this.abrirCamera();
+  },
+
+  /* ------------------------------------------------------- câmera */
+
+  async abrirCamera() {
+    $('painelDia').classList.add('hide');
+    $('areaCamera').classList.remove('hide');
+    if (!(await this.ligarCamera())) { this.fecharCamera(); return; }
     this.iniciarCiclo();
   },
 
-  semBiometria() {
-    $('cartao').innerHTML = '<div class="cartao warn"><div class="tit">Cadastro facial pendente</div>' +
-      '<div class="sub">O RH ainda não cadastrou seu rosto. Procure o RH.</div></div>';
+  fecharCamera() {
+    this.pararCamera();
+    $('areaCamera') && $('areaCamera').classList.add('hide');
+    $('painelDia') && $('painelDia').classList.remove('hide');
+    this.estado = 'parado';
   },
 
   iniciarCiclo() {
     this.estado = 'aguardando';
     this.piscada = null;
-    $('dica').textContent = 'Olhe para a câmera';
-    this.pintarStatusCerca();
-  },
-
-  /** Faixa discreta dizendo se a pessoa está no local certo — antes de bater. */
-  async pintarStatusCerca() {
-    if (!this.alocacao) { $('dica').textContent = 'Sem alocação hoje — o ponto irá para revisão'; return; }
+    const { slots, proximo } = pontosDoDia(this.doDia);
+    const rot = proximo != null ? slots[proximo].rotulo : 'ponto';
+    $('dica').textContent = 'Registrando: ' + rot + ' — olhe para a câmera';
+    if (!this.alocacao) toast('Sem alocação hoje — irá para conferência do RH', 'warn');
   },
 
   async ligarCamera() {
@@ -190,16 +244,25 @@ export const Ponto = {
 
   comprovante(m) {
     this.estado = 'comprovante';
+    // Desliga a câmera na hora — o ponto já foi capturado, não precisa mais dela.
+    this.pararCamera();
+    $('areaCamera').classList.add('hide');
     const col = this.dispositivo.colaborador;
     $('cartao').innerHTML =
       '<div class="cartao ok">' +
-        '<div class="tit">✓ ' + (m.tipo === 'entrada' ? 'ENTRADA' : 'SAÍDA') + '</div>' +
+        '<div class="tit">✓ ' + (m.tipo === 'entrada' ? 'ENTRADA' : 'SAÍDA') + ' registrada</div>' +
         '<div class="horaGrande">' + hora(m.marcado_em) + '</div>' +
         '<div class="sub">' + esc(col.nome) + ' · comprovante <b class="mono">' +
           m.id_cliente.slice(0, 8).toUpperCase() + '</b></div>' +
       '</div>';
+    // Depois do comprovante, volta ao PAINEL DO DIA (mostra os registros), não
+    // reabre a câmera — é o que o usuário pediu: só mostra a câmera se tocar.
     clearTimeout(this._t);
-    this._t = setTimeout(() => { $('cartao').innerHTML = ''; this.iniciarCiclo(); }, 3500);
+    this._t = setTimeout(() => {
+      $('cartao').innerHTML = '';
+      $('painelDia').classList.remove('hide');
+      this.pintarPainelDia();
+    }, 3000);
   },
 
   async recarregarDia() {

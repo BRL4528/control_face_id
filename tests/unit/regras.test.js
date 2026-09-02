@@ -5,7 +5,7 @@ import {
   itensParaRemover, agoraCorrigido, calcularDeriva, cargaValida, euclidiana, dia,
   indicadores, espelho, gestorDeveMarcar,
   presencaPorEquipe, statusPresenca, serieDiaria, pendenciasPorMotivo, LIMIAR_PRESENCA
-} from '../../js/regras.js';
+, pontosDoDia } from '../../js/regras.js';
 
 const CFG = { limiarAceite: 0.45, limiarCinza: 0.58 };
 
@@ -326,4 +326,37 @@ test('pendenciasPorMotivo soma recadastros e ignora nao-pendentes', () => {
   assert.equal(por.gestor, 1);
   assert.equal(por.manual, 0);
   assert.equal(por.recadastro, 1);
+});
+
+test('pontosDoDia: dia vazio → próximo é entrada manhã (índice 0)', () => {
+  const r = pontosDoDia([]);
+  assert.equal(r.proximo, 0);
+  assert.equal(r.completo, false);
+  assert.equal(r.slots[0].rotulo, 'Entrada manhã');
+  assert.equal(r.slots.filter(s => s.batido).length, 0);
+});
+test('pontosDoDia: 2 marcações → próximo é entrada tarde (índice 2)', () => {
+  const ms = [
+    { marcado_em: '2026-09-01T08:00:00Z' },
+    { marcado_em: '2026-09-01T12:00:00Z' }
+  ];
+  const r = pontosDoDia(ms);
+  assert.equal(r.proximo, 2);
+  assert.equal(r.slots[0].batido, true);
+  assert.equal(r.slots[1].batido, true);
+  assert.equal(r.slots[2].batido, false);
+});
+test('pontosDoDia: 4 marcações → dia completo, sem próximo', () => {
+  const ms = ['08:00','12:00','13:00','17:00'].map(h => ({ marcado_em: '2026-09-01T'+h+':00Z' }));
+  const r = pontosDoDia(ms);
+  assert.equal(r.completo, true);
+  assert.equal(r.proximo, null);
+});
+test('pontosDoDia: ordena por horário mesmo se vier fora de ordem', () => {
+  const ms = [
+    { marcado_em: '2026-09-01T12:00:00Z' },
+    { marcado_em: '2026-09-01T08:00:00Z' }
+  ];
+  const r = pontosDoDia(ms);
+  assert.equal(r.slots[0].marcacao.marcado_em, '2026-09-01T08:00:00Z');
 });
