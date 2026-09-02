@@ -65,40 +65,78 @@
   <div id="cartao"></div>
 </div>
 
-<!-- ===================== RH ===================== -->
-<div id="rh" class="wrap hide">
-  <header>
-    <div class="marca">Control Face ID</div>
-    <div>
-      <div class="quem" id="rhNome">RH</div>
-      <div class="eq" id="rhPeriodo">últimos 30 dias</div>
+<!-- ===================== RH (painel v2: sidebar + topbar) ===================== -->
+<div id="rh" class="hide">
+
+  <aside class="sidebar">
+    <div class="side-marca">
+      <span class="side-logo">CF</span>
+      <span class="side-marca-txt">
+        <span class="side-titulo">Control Face ID</span>
+        <span class="side-empresa" id="rhEmpresa">Painel do RH</span>
+      </span>
     </div>
-    <div class="toolbar">
-      <div class="periodo" id="rhToggle">
-        <button data-dias="7">7d</button>
-        <button data-dias="30" class="on">30d</button>
-        <button data-dias="90">90d</button>
+
+    <nav class="side-nav">
+      <div class="nav-grupo">
+        <div class="nav-label">Operação</div>
+        <button class="nav-item on" data-aba="painel">Central operacional</button>
+        <button class="nav-item" data-aba="alocacao">Alocações</button>
+        <button class="nav-item" data-aba="mapa" data-stub="Mapa">Mapa</button>
       </div>
-      <button id="btnAtualizarRh">Atualizar</button>
-      <button id="btnSairRh">Sair</button>
+      <div class="nav-grupo">
+        <div class="nav-label">Ponto</div>
+        <button class="nav-item" data-aba="pendencias">Pendências <span class="nav-badge hide" id="navBadgePend"></span></button>
+        <button class="nav-item" data-aba="registros">Espelho de ponto</button>
+        <button class="nav-item" data-aba="jornadas" data-stub="Jornadas">Jornadas</button>
+      </div>
+      <div class="nav-grupo">
+        <div class="nav-label">Pessoas</div>
+        <button class="nav-item" data-aba="pessoas">Colaboradores</button>
+        <button class="nav-item" data-aba="equipes">Equipes</button>
+      </div>
+      <div class="nav-grupo">
+        <div class="nav-label">Administração</div>
+        <button class="nav-item" data-aba="relatorios" data-stub="Relatórios">Relatórios</button>
+        <button class="nav-item" data-aba="auditoria" data-stub="Auditoria">Auditoria</button>
+        <button class="nav-item" data-aba="config" data-stub="Configurações">Configurações</button>
+      </div>
+    </nav>
+
+    <div class="side-user">
+      <span class="side-avatar" id="rhIniciais">RH</span>
+      <span class="side-user-txt">
+        <span class="side-user-nome" id="rhNome">RH</span>
+        <span class="side-user-papel">Administrador</span>
+      </span>
     </div>
-  </header>
+  </aside>
 
-  <nav>
-    <button data-aba="painel" class="on">Painel</button>
-    <button data-aba="alocacao">Alocação</button>
-    <button data-aba="pendencias">Pendências</button>
-    <button data-aba="pessoas">Colaboradores</button>
-    <button data-aba="equipes">Equipes</button>
-    <button data-aba="registros">Registros</button>
-  </nav>
+  <div class="rh-main">
+    <header class="topbar">
+      <div class="crumb"><span>Operação</span><span class="crumb-sep">›</span><span class="crumb-atual" id="rhCrumb">Central operacional</span></div>
+      <div class="topbar-dir">
+        <div class="periodo" id="rhToggle">
+          <button data-dias="7">7d</button>
+          <button data-dias="30" class="on">30d</button>
+          <button data-dias="90">90d</button>
+        </div>
+        <span class="eq" id="rhPeriodo">últimos 30 dias</span>
+        <button class="tb-btn" id="btnAtualizarRh">Atualizar</button>
+        <button class="tb-btn ghost" id="btnSairRh">Sair</button>
+      </div>
+    </header>
 
-  <section id="rh-painel"></section>
-  <section id="rh-alocacao" class="hide"></section>
-  <section id="rh-pendencias" class="hide"></section>
-  <section id="rh-pessoas" class="hide"></section>
-  <section id="rh-equipes" class="hide"></section>
-  <section id="rh-registros" class="hide"></section>
+    <main class="rh-conteudo">
+      <section id="rh-painel"></section>
+      <section id="rh-alocacao" class="hide"></section>
+      <section id="rh-pendencias" class="hide"></section>
+      <section id="rh-pessoas" class="hide"></section>
+      <section id="rh-equipes" class="hide"></section>
+      <section id="rh-registros" class="hide"></section>
+      <section id="rh-stub" class="hide"></section>
+    </main>
+  </div>
 </div>
 
 <!-- ===================== LOGIN RH ===================== -->

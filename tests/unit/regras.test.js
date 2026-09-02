@@ -5,7 +5,7 @@ import {
   itensParaRemover, agoraCorrigido, calcularDeriva, cargaValida, euclidiana, dia,
   indicadores, espelho, gestorDeveMarcar,
   presencaPorEquipe, statusPresenca, serieDiaria, pendenciasPorMotivo, LIMIAR_PRESENCA
-, pontosDoDia } from '../../js/regras.js';
+, pontosDoDia, exceptionsDoDia, TIPOS_EXCECAO } from '../../js/regras.js';
 
 const CFG = { limiarAceite: 0.45, limiarCinza: 0.58 };
 
@@ -359,4 +359,88 @@ test('pontosDoDia: ordena por horário mesmo se vier fora de ordem', () => {
   ];
   const r = pontosDoDia(ms);
   assert.equal(r.slots[0].marcacao.marcado_em, '2026-09-01T08:00:00Z');
+});
+
+
+/* --------------------------------------- fila de exceções do RH (v2) */
+
+const XHOJE = '2026-08-14';
+const XPESSOAS = [
+  { pessoa_id: 'a', nome: 'Ana', equipe_id: 'e1', ativo: true },
+  { pessoa_id: 'b', nome: 'Bruno', equipe_id: 'e1', ativo: true },
+  { pessoa_id: 'c', nome: 'Carla', equipe_id: 'e1', ativo: true },
+  { pessoa_id: 'd', nome: 'Dario', equipe_id: 'e1', ativo: false }   // inativo: nunca cobra
+];
+const XALOC = [
+  { colaborador_id: 'a', equipe_id: 'e1', cerca_lat: -20, cerca_lng: -54, cerca_raio_m: 200 },
+  { colaborador_id: 'b', equipe_id: 'e1', cerca_lat: -20, cerca_lng: -54, cerca_raio_m: 200 },
+  { colaborador_id: 'c', equipe_id: 'e1', cerca_lat: -20, cerca_lng: -54, cerca_raio_m: 200 },
+  { colaborador_id: 'd', equipe_id: 'e1', cerca_lat: -20, cerca_lng: -54, cerca_raio_m: 200 }
+];
+// Ana: marcação fora da cerca (crítico). Bruno: manual pendente. Carla: nada (sem entrada).
+const XMARCS = [
+  { id_cliente: 'm1', pessoa_id: 'a', equipe_id: 'e1', marcado_dia: XHOJE, marcado_em: XHOJE + 'T08:14:00Z',
+    pendente: true, dentro_cerca: false, origem: 'biometria', veredito: 'aceito' },
+  { id_cliente: 'm2', pessoa_id: 'b', equipe_id: 'e1', marcado_dia: XHOJE, marcado_em: XHOJE + 'T07:03:00Z',
+    pendente: true, dentro_cerca: true, origem: 'manual', veredito: 'aceito' }
+];
+const AGORA = XHOJE + 'T09:00:00Z';   // já passou das 08:00
+
+test('exceptionsDoDia classifica fora da cerca como crítico', () => {
+  const x = exceptionsDoDia(XMARCS, XPESSOAS, XALOC, XHOJE, AGORA, '08:00');
+  const ana = x.find(i => i.pessoa_id === 'a');
+  assert.equal(ana.tipo, 'fora_da_cerca');
+  assert.equal(ana.severidade, 'critico');
+  assert.equal(ana.alvo.tipo, 'marcacao');
+  assert.equal(ana.alvo.id, 'm1');
+});
+
+test('exceptionsDoDia reconhece registro manual pendente', () => {
+  const x = exceptionsDoDia(XMARCS, XPESSOAS, XALOC, XHOJE, AGORA, '08:00');
+  const bruno = x.find(i => i.pessoa_id === 'b');
+  assert.equal(bruno.tipo, 'registro_manual');
+  assert.equal(bruno.severidade, 'atencao');
+});
+
+test('exceptionsDoDia deriva "sem entrada" de quem alocou mas não marcou', () => {
+  const x = exceptionsDoDia(XMARCS, XPESSOAS, XALOC, XHOJE, AGORA, '08:00');
+  const carla = x.find(i => i.pessoa_id === 'c');
+  assert.equal(carla.tipo, 'sem_entrada');
+  assert.equal(carla.marcacao, null);
+  assert.equal(carla.alvo.tipo, 'sem_entrada');
+  assert.equal(carla.alvo.id, 'c');
+});
+
+test('exceptionsDoDia não cobra "sem entrada" de pessoa inativa', () => {
+  const x = exceptionsDoDia(XMARCS, XPESSOAS, XALOC, XHOJE, AGORA, '08:00');
+  assert.equal(x.some(i => i.pessoa_id === 'd'), false);
+});
+
+test('exceptionsDoDia: antes da hora de entrada não cobra ausência', () => {
+  const cedo = XHOJE + 'T06:30:00Z';   // antes das 08:00
+  const x = exceptionsDoDia(XMARCS, XPESSOAS, XALOC, XHOJE, cedo, '08:00');
+  assert.equal(x.some(i => i.tipo === 'sem_entrada'), false);
+  // mas as exceções ancoradas em marcação continuam valendo
+  assert.equal(x.some(i => i.tipo === 'fora_da_cerca'), true);
+});
+
+test('exceptionsDoDia: quem apareceu não vira "sem entrada" mesmo sem bater todos os pontos', () => {
+  // Bruno tem marcação hoje (manual) — não pode aparecer também como sem_entrada
+  const x = exceptionsDoDia(XMARCS, XPESSOAS, XALOC, XHOJE, AGORA, '08:00');
+  assert.equal(x.filter(i => i.pessoa_id === 'b').length, 1);
+  assert.equal(x.find(i => i.pessoa_id === 'b').tipo, 'registro_manual');
+});
+
+test('exceptionsDoDia ordena crítico antes de atenção', () => {
+  const x = exceptionsDoDia(XMARCS, XPESSOAS, XALOC, XHOJE, AGORA, '08:00');
+  assert.equal(x[0].severidade, 'critico');   // Ana (fora da cerca) primeiro
+  assert.equal(x[0].pessoa_id, 'a');
+});
+
+test('exceptionsDoDia: marcação não-pendente não vira exceção', () => {
+  const marcs = [{ id_cliente: 'ok', pessoa_id: 'a', equipe_id: 'e1', marcado_dia: XHOJE,
+    marcado_em: XHOJE + 'T08:00:00Z', pendente: false, dentro_cerca: true, origem: 'biometria', veredito: 'aceito' }];
+  const x = exceptionsDoDia(marcs, XPESSOAS, [XALOC[0]], XHOJE, AGORA, '08:00');
+  // Ana marcou e está ok → nem exceção de marcação, nem sem_entrada
+  assert.equal(x.some(i => i.pessoa_id === 'a'), false);
 });

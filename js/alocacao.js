@@ -84,6 +84,8 @@ export const Alocacao = {
     const eqs = d.equipes || [];
     const locais = d.locais || [];
     $('rh-alocacao').innerHTML =
+      '<div class="pg-head"><div><h1 class="tit">Alocações</h1>' +
+        '<p class="sub">Defina onde cada equipe trabalha hoje e a cerca virtual do ponto.</p></div></div>' +
       '<div class="card">' +
         '<h2>Alocação do dia</h2>' +
         '<div class="alrow">' +

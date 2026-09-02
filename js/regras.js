@@ -292,3 +292,82 @@ export function pendenciasPorMotivo(marcacoes, recadastros, pessoas) {
     { chave: 'recadastro', rotulo: 'Recadastro', total: c.recadastro }
   ].sort((a, b) => b.total - a.total);
 }
+
+/* ------------------------------------------ fila de exceções do RH (v2) */
+
+// Catálogo de tipos de exceção. severidade 'critico' pesa mais na ordenação e
+// pinta vermelho; 'atencao' é âmbar. `titulo` é o rótulo curto do card.
+export const TIPOS_EXCECAO = {
+  fora_da_cerca:   { rotulo: 'Registro fora da área', severidade: 'critico' },
+  sem_entrada:     { rotulo: 'Entrada não registrada', severidade: 'atencao' },
+  registro_manual: { rotulo: 'Registro manual sem biometria', severidade: 'atencao' },
+  zona_cinzenta:   { rotulo: 'Similaridade na zona cinzenta', severidade: 'atencao' }
+};
+
+// Hora-limite padrão da entrada. Só usada para decidir quando cobrar "sem
+// entrada": antes disso, ausência é normal (o dia ainda não começou).
+export const HORA_ENTRADA_PADRAO = '08:00';
+
+/**
+ * Fila unificada de exceções que o RH precisa tratar. Duas origens:
+ *
+ *   • MARCAÇÕES pendentes de hoje que destoam do plano — cada uma vira exceção
+ *     do tipo mais forte que dispara (fora da cerca > manual > zona cinzenta).
+ *     Trazem `id_cliente` para o RH aprovar/rejeitar via /rh/decidir.
+ *   • SEM ENTRADA — derivada: existe alocação para a pessoa hoje, já passou da
+ *     hora de entrada, e ela não tem NENHUMA marcação hoje. Não há marcação para
+ *     anexar; o RH resolve lançando um ponto manual (/rh/lancar-ponto). Some da
+ *     fila sozinha quando a pessoa aparece.
+ *
+ * Pura e testável: recebe `agoraISO` (relógio do servidor) e `horaEntrada` em
+ * vez de ler o relógio. `hoje` é 'YYYY-MM-DD'. Retorna ordenado por severidade
+ * (crítico primeiro) e, dentro disso, por horário.
+ */
+export function exceptionsDoDia(marcacoes, pessoas, alocacoesHoje, hoje, agoraISO, horaEntrada) {
+  const ativos = {};
+  for (const p of (pessoas || [])) ativos[p.pessoa_id] = p;
+  const itens = [];
+
+  // 1) Exceções ancoradas numa marcação pendente de hoje.
+  const marcadasHoje = {};   // pessoa_id -> tem alguma marcação hoje?
+  for (const m of (marcacoes || [])) {
+    if (!m || m.marcado_dia !== hoje) continue;
+    marcadasHoje[m.pessoa_id] = true;
+    if (!m.pendente) continue;
+    let tipo = null;
+    if (m.dentro_cerca === false) tipo = 'fora_da_cerca';
+    else if (m.origem === 'manual') tipo = 'registro_manual';
+    else if (m.veredito === 'revisar') tipo = 'zona_cinzenta';
+    else continue;   // pendente por outro motivo sutil não vira card próprio
+    itens.push({
+      id: 'm:' + m.id_cliente,
+      tipo, severidade: TIPOS_EXCECAO[tipo].severidade, rotulo: TIPOS_EXCECAO[tipo].rotulo,
+      pessoa_id: m.pessoa_id, equipe_id: m.equipe_id,
+      hora: String(m.marcado_em).slice(11, 16),
+      marcacao: m, alocacao: null, alvo: { tipo: 'marcacao', id: m.id_cliente }
+    });
+  }
+
+  // 2) "Sem entrada" — derivada da alocação, só depois da hora-limite.
+  const limite = (hoje + 'T' + (horaEntrada || HORA_ENTRADA_PADRAO) + ':00');
+  const jaPassou = String(agoraISO || '').slice(0, 16) >= limite.slice(0, 16);
+  if (jaPassou) {
+    for (const a of (alocacoesHoje || [])) {
+      const p = ativos[a.colaborador_id];
+      if (!p || !p.ativo) continue;
+      if (marcadasHoje[a.colaborador_id]) continue;   // apareceu: não é exceção
+      itens.push({
+        id: 's:' + a.colaborador_id,
+        tipo: 'sem_entrada', severidade: TIPOS_EXCECAO.sem_entrada.severidade,
+        rotulo: TIPOS_EXCECAO.sem_entrada.rotulo,
+        pessoa_id: a.colaborador_id, equipe_id: a.equipe_id,
+        hora: horaEntrada || HORA_ENTRADA_PADRAO,
+        marcacao: null, alocacao: a, alvo: { tipo: 'sem_entrada', id: a.colaborador_id }
+      });
+    }
+  }
+
+  const peso = { critico: 0, atencao: 1 };
+  return itens.sort((x, y) =>
+    (peso[x.severidade] - peso[y.severidade]) || String(x.hora).localeCompare(String(y.hora)));
+}

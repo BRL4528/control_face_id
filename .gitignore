@@ -9,3 +9,6 @@ _to_delete/
 .vercel
 .env*
 pnpm-lock.yaml
+
+# Config local do Claude Code (permissões da sessão)
+.claude/
