@@ -201,6 +201,11 @@ async function boot() {
   $('btnVoltarPorta').onclick = () => irParaPorta();
   $('btnVoltarPortaRh').onclick = () => irParaPorta();
   $('btnSairFila').onclick = () => Ponto.sair();
+  // Handler do "Ativar" ligado no BOOT (não só em abrirPareamento) — assim o
+  // botão nunca fica órfão se a tela aparecer por outro caminho ou se o cache do
+  // SW misturar versões. Enter nos campos também ativa.
+  $('btnParear').onclick = executarPareamento;
+  $('pareMatricula').addEventListener('keydown', e => { if (e.key === 'Enter') executarPareamento(); });
 
   window.addEventListener('online', () => sincronizarFundo());
   document.addEventListener('visibilitychange', () => { if (!document.hidden) sincronizarFundo(); });

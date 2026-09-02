@@ -1,6 +1,6 @@
 // Cache dos estáticos. As chamadas de API nunca passam por aqui: resposta de
 // marcação em cache seria mentira sobre o que o servidor recebeu.
-const CACHE = 'efrat-ponto-v15';
+const CACHE = 'efrat-ponto-v16';
 const ASSETS = [
   './',
   './index.html',
@@ -58,10 +58,34 @@ self.addEventListener('activate', e => {
   );
 });
 
+// Duas estratégias, escolhidas pelo tipo de arquivo:
+//
+//   • CÓDIGO do app (HTML, JS, CSS) → NETWORK-FIRST. Um deploy novo sempre chega;
+//     o cache é só fallback offline. Antes era cache-first e servia código velho
+//     pra sempre — foi o que fez a correção não chegar ao celular do usuário.
+//   • Resto (modelos, fontes, vendor, ícones) → CACHE-FIRST. São pesados e
+//     imutáveis; baixar de novo à toa é desperdício.
+function ehCodigoApp(url) {
+  return /\.(html|js|css)$/.test(url.pathname) || url.pathname === '/' || url.pathname.endsWith('/');
+}
+
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
   if (url.origin !== location.origin) return;   // API e CDNs passam direto
+
+  if (ehCodigoApp(url)) {
+    // network-first: rede vence; cache é rede de segurança offline.
+    e.respondWith(
+      fetch(e.request).then(resp => {
+        if (resp.ok) { const cp = resp.clone(); caches.open(CACHE).then(c => c.put(e.request, cp)); }
+        return resp;
+      }).catch(() => caches.match(e.request).then(hit => hit || caches.match('./index.html')))
+    );
+    return;
+  }
+
+  // cache-first para o resto.
   e.respondWith(
     caches.match(e.request).then(hit => hit || fetch(e.request).then(resp => {
       if (resp.ok) { const cp = resp.clone(); caches.open(CACHE).then(c => c.put(e.request, cp)); }
