@@ -24,8 +24,13 @@ export function hashCredencial(credencial) {
 
 /**
  * Autentica o dispositivo pela credencial no Bearer. Devolve o vínculo
- * { dispositivo, colaborador } ou null. Não distingue "não existe" de
- * "credencial errada" para o chamador — ambos são 401.
+ * { dispositivo_id, estado, empresa_id, colaborador_id|null, nome, papel, bloqueado }
+ * ou null (credencial desconhecida / aparelho substituído — ambos 401).
+ *
+ * Estados: 'pendente' (bateu ponto pelo link da empresa, RH ainda não
+ * identificou — sem colaborador), 'ativo' (pareado a um colaborador) e
+ * 'bloqueado' (RH rejeitou, ou colaborador saiu da empresa). Bloqueado NÃO é
+ * null: o chamador responde 403 BLOQUEADO para o app parar de insistir.
  */
 export async function autenticarDispositivo(req) {
   const cred = bearer(req);
@@ -33,15 +38,17 @@ export async function autenticarDispositivo(req) {
   const hash = hashCredencial(cred);
   const sql = db();
   const linhas = await sql`
-    SELECT d.id AS dispositivo_id, d.ativo AS disp_ativo,
-           c.id AS colaborador_id, c.empresa_id, c.nome, c.matricula, c.papel, c.ativo AS colab_ativo
+    SELECT d.id AS dispositivo_id, d.ativo AS disp_ativo, d.estado, d.matricula_informada,
+           COALESCE(d.empresa_id, c.empresa_id) AS empresa_id,
+           c.id AS colaborador_id, c.nome, c.matricula, c.papel, c.ativo AS colab_ativo
     FROM dispositivo d
-    JOIN colaborador c ON c.id = d.colaborador_id
+    LEFT JOIN colaborador c ON c.id = d.colaborador_id
     WHERE d.credencial_hash = ${hash}
     LIMIT 1`;
   const r = linhas[0];
-  if (!r || !r.disp_ativo || !r.colab_ativo) return null;
-  return r;
+  if (!r || !r.disp_ativo) return null;
+  const bloqueado = r.estado === 'bloqueado' || (r.colaborador_id && !r.colab_ativo);
+  return Object.assign(r, { bloqueado, estado: bloqueado ? 'bloqueado' : (r.colaborador_id ? 'ativo' : 'pendente') });
 }
 
 /* ----------------------------------------------------------------- RH */

@@ -15,6 +15,7 @@ import XLSX from 'xlsx';
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
+import { sincronizarBloqueios } from '../_lib/dispositivos.js';
 
 const MAX_BYTES = 4 * 1024 * 1024;
 const MAX_LINHAS = 5000;
@@ -197,6 +198,7 @@ export default async function handler(req, res) {
         [rh.empresa_id, ids.slice(i, i + LOTE), mats.slice(i, i + LOTE), nomes.slice(i, i + LOTE), eqs.slice(i, i + LOTE), ativos.slice(i, i + LOTE)]);
       for (const row of (r.rows || r)) { if (row.inserido) criados++; else atualizados++; }
     }
+    await sincronizarBloqueios(sql, rh.empresa_id);   // Status 'Inativo' na planilha bloqueia o aparelho
     const equipesCriadas = criarEquipes ? nomesEq.filter(n => !antes.has(n.toLowerCase())).length : 0;
     return ok(res, { criados, atualizados, equipes_criadas: equipesCriadas, total: ids.length });
   }

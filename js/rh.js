@@ -176,7 +176,16 @@ export const Rh = {
       }));
     // Hora sempre no fuso do RH (regras.js devolve a fatia UTC do ISO, pura e testável).
     const hojeItens = this.exceptions().map(x => x.marcacao ? Object.assign(x, { hora: hora(x.marcacao.marcado_em) }) : x);
-    return hojeItens.concat(antigas);
+    // Aparelhos que bateram ponto pelo link da empresa e ainda não têm dono: o RH
+    // identifica (vira colaborador + cadastro facial + pontos válidos) ou bloqueia.
+    const aparelhos = (this.dados.aparelhos_pendentes || []).map(a => {
+      const ult = (a.marcacoes || [])[0];
+      return { id: 'd:' + a.dispositivo_id, tipo: 'aparelho', severidade: 'atencao', rotulo: 'Aparelho não identificado',
+               pessoa_id: null, equipe_id: null, aparelho: a, marcacao: null, alocacao: null,
+               hora: ult ? this.dataCurta(ult.marcado_dia) + ' · ' + hora(ult.marcado_em) : this.dataCurta(String(a.pareado_em).slice(0, 10)),
+               alvo: { tipo: 'dispositivo', id: a.dispositivo_id }, resolvida: false };
+    });
+    return aparelhos.concat(hojeItens, antigas);
   },
 
   dataCurta(iso) {
@@ -454,6 +463,16 @@ export const Rh = {
 
   // "Hoje" segundo o relógio do servidor, não o do PC do RH — é ele que carimba
   // marcado_dia. Sem isso, um PC com data errada mostraria a equipe toda ausente.
+  /** Link de primeiro acesso da empresa (/e/<token>). */
+  linkEmpresa() {
+    const t = this.dados && this.dados.empresa && this.dados.empresa.link_token;
+    return t ? location.origin + '/e/' + t : location.origin;
+  },
+  mensagemLink() {
+    const emp = (this.dados.empresa && this.dados.empresa.nome) || 'a empresa';
+    return 'Ponto facial da ' + emp + ': abra o link no seu celular e toque em BATER PONTO. Só olhar para a câmera — sem código, sem senha.\n\n' + this.linkEmpresa();
+  },
+
   hojeServidor() {
     if (this.dados && this.dados.hoje) return this.dados.hoje;   // já no fuso da empresa
     const iso = (this.dados && this.dados.servidor_hora) || new Date().toISOString();
@@ -834,8 +853,11 @@ export const Rh = {
         '<div class="top"><span class="sev ' + sevCls + '">' + sevTxt + '</span>' +
           '<span class="hora">' + esc(x.hora) + '</span></div>' +
         '<div class="tit">' + esc(x.rotulo) + '</div>' +
-        '<div class="who">' + esc(p ? p.nome : x.pessoa_id) + ' · ' + esc(this.nomeEquipe(x.equipe_id)) + '</div>' +
-        '<div class="est">' + est + '</div></button>';
+        '<div class="who">' + (x.tipo === 'aparelho'
+            ? esc((x.aparelho.matricula_informada ? 'Matrícula informada: ' + x.aparelho.matricula_informada : 'Quem é?') +
+                  ' · ' + (x.aparelho.marcacoes || []).length + ' batida(s)')
+            : esc(p ? p.nome : x.pessoa_id) + ' · ' + esc(this.nomeEquipe(x.equipe_id))) + '</div>' +
+        '<div class="est">' + (x.tipo === 'aparelho' ? 'Identificar ou bloquear' : est) + '</div></button>';
     };
 
     el.innerHTML =
@@ -882,6 +904,8 @@ export const Rh = {
     if (!x) return '<div class="pend-vazio"><div><div style="font-size:22px">📥</div>' +
       '<div style="margin-top:10px;font-weight:500">Selecione uma pendência</div>' +
       '<div style="font-size:13px;color:#64748b;margin-top:3px">O detalhe abre aqui com evidência, mapa e decisão.</div></div></div>';
+
+    if (x.tipo === 'aparelho') return this.htmlDetalheAparelho(x.aparelho);
 
     const p = this.pessoaDe(x.pessoa_id);
     const m = x.marcacao;
@@ -961,10 +985,95 @@ export const Rh = {
       '</svg>';
   },
 
+  /**
+   * Aparelho pendente: foto do 1º ponto, batidas com hora e GPS, e a decisão —
+   * "é esta pessoa" (lista de colaboradores, pré-selecionada pela matrícula
+   * informada; ou cadastrar novo) ou "bloquear" (não é da empresa).
+   */
+  htmlDetalheAparelho(a) {
+    const pessoas = (this.dados.pessoas || []).filter(p => p.ativo).slice().sort((x, y) => x.nome.localeCompare(y.nome));
+    const mat = (a.matricula_informada || '').trim();
+    const sugerida = mat ? pessoas.find(p => String(p.matricula).trim() === mat) : null;
+    const foto = a.miniatura || ((a.marcacoes || []).find(m => m.foto_url) || {}).foto_url;
+    const marcs = (a.marcacoes || []);
+    const linha = m => '<tr><td>' + esc(this.dataCurta(m.marcado_dia)) + ' · <span class="mono">' + esc(hora(m.marcado_em)) + '</span></td>' +
+      '<td>' + (m.tipo === 'entrada' ? 'Entrada' : 'Saída') + '</td>' +
+      '<td>' + (m.lat != null ? '<a href="https://www.openstreetmap.org/?mlat=' + m.lat + '&mlon=' + m.lng + '#map=17/' + m.lat + '/' + m.lng + '" target="_blank" rel="noopener">' +
+        Number(m.lat).toFixed(4) + ', ' + Number(m.lng).toFixed(4) + '</a>' + (m.precisao_m ? ' <span class="nota">±' + Math.round(m.precisao_m) + ' m</span>' : '') : '<span class="nota">sem GPS</span>') + '</td>' +
+      '<td>' + (m.liveness_ok === false ? '<span class="badfg">sem piscada</span>' : m.liveness_ok ? 'ok' : '—') + '</td></tr>';
+    return '<div class="pend-det-head">' +
+        '<span class="av" style="width:56px;height:56px;border-radius:14px;overflow:hidden">' + (foto ? '<img src="' + esc(foto) + '" style="width:100%;height:100%;object-fit:cover">' : '📱') + '</span>' +
+        '<div style="flex:1"><div class="nome">Aparelho não identificado <span class="sev warn">ATENÇÃO</span></div>' +
+          '<div class="meta">Bateu ponto pelo link da empresa em ' + esc(this.dataLonga(String(a.pareado_em).slice(0, 10))) +
+            (mat ? ' · informou a matrícula <b class="mono">' + esc(mat) + '</b>' : ' · não informou matrícula') + '</div></div>' +
+      '</div>' +
+      '<div class="pend-grid2">' +
+        '<div class="v2card" style="padding:14px"><h3>Foto do primeiro ponto</h3>' +
+          '<div class="foto" style="max-width:220px">' + (foto ? '<img src="' + esc(foto) + '" style="width:100%;border-radius:12px">' : '<div class="nota">Sem foto (a câmera não capturou um quadro bom).</div>') + '</div>' +
+          '<p class="nota" style="margin:8px 0 0">Ao identificar, esta captura vira o cadastro facial da pessoa (substitui o anterior, se houver).</p></div>' +
+        '<div class="v2card" style="padding:14px"><h3>Batidas deste aparelho (' + marcs.length + ')</h3>' +
+          (marcs.length ? '<div style="overflow:auto;max-height:220px"><table class="tabdados"><thead><tr><th>Quando</th><th>Tipo</th><th>GPS</th><th>Prova de vida</th></tr></thead><tbody>' +
+            marcs.map(linha).join('') + '</tbody></table></div>' : '<p class="nota">Nenhuma batida ainda.</p>') +
+          '<p class="nota" style="margin:8px 0 0">Valem retroativamente para a pessoa identificada, reconferindo a cerca de cada dia.</p></div>' +
+      '</div>' +
+      '<div class="v2card" style="padding:14px;margin-top:12px" id="pendAcoes">' +
+        '<h3>Quem é esta pessoa?</h3>' +
+        '<div class="form-grid" style="margin-top:8px">' +
+          '<div style="grid-column:1/-1"><label class="lb2">Colaborador já cadastrado</label>' +
+            '<select class="inp" id="apColab"><option value="">— escolha —</option>' +
+              pessoas.map(p => '<option value="' + p.pessoa_id + '"' + (sugerida && sugerida.pessoa_id === p.pessoa_id ? ' selected' : '') + '>' +
+                esc(p.nome) + ' · ' + esc(p.matricula) + (p.tem_biometria ? '' : ' · sem cadastro facial') + '</option>').join('') + '</select>' +
+            (sugerida ? '<p class="nota" style="margin:4px 0 0">Sugerido pela matrícula informada.</p>' : '') + '</div>' +
+        '</div>' +
+        '<details style="margin-top:10px"><summary class="nota" style="cursor:pointer">Não está na lista? Cadastrar novo colaborador</summary>' +
+          '<div class="form-grid" style="margin-top:8px">' +
+            '<div><label class="lb2">Nome</label><input class="inp" id="apNovoNome"></div>' +
+            '<div><label class="lb2">Matrícula</label><input class="inp" id="apNovoMat" value="' + esc(mat) + '"></div>' +
+            '<div><label class="lb2">Equipe</label><select class="inp" id="apNovoEq"><option value="">— sem equipe —</option>' +
+              (this.dados.equipes || []).map(e => '<option value="' + e.equipe_id + '">' + esc(e.nome) + '</option>').join('') + '</select></div>' +
+          '</div></details>' +
+        '<div class="row2" style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">' +
+          '<button class="v2btn" data-identificar="' + esc(a.dispositivo_id) + '">Identificar e liberar</button>' +
+          '<button class="v2btn danger" data-bloquear="' + esc(a.dispositivo_id) + '" style="margin-left:auto">Não é da empresa — bloquear</button>' +
+        '</div>' +
+        '<p class="nota" style="margin:8px 0 0">Bloquear faz o aparelho parar de enviar (a API recusa) e tira as batidas dele da fila. Só o RH desbloqueia, reativando o colaborador.</p>' +
+      '</div>';
+  },
+
   ligarAcoesDetalhe() {
     const cont = $('pendAcoes');
     if (!cont) return;
     const just = () => (($('pendJust') && $('pendJust').value) || '').trim();
+
+    cont.querySelectorAll('button[data-identificar]').forEach(b => {
+      b.onclick = async () => {
+        const colab = $('apColab').value;
+        const novoNome = ($('apNovoNome') && $('apNovoNome').value.trim()) || '';
+        const novoMat = ($('apNovoMat') && $('apNovoMat').value.trim()) || '';
+        const corpo = { tipo: 'dispositivo', id: b.dataset.identificar, acao: 'identificar' };
+        if (colab) corpo.colaborador_id = colab;
+        else if (novoNome && novoMat) corpo.novo = { nome: novoNome, matricula: novoMat, equipe_id: ($('apNovoEq') && $('apNovoEq').value) || null };
+        else { toast('Escolha um colaborador da lista ou preencha nome e matrícula do novo', 'warn'); return; }
+        b.disabled = true;
+        const r = await ApiRh.decidir(this.token, corpo);
+        if (!r.ok) { toast(r.erro || 'Falha', 'bad'); b.disabled = false; return; }
+        const d = r.dados;
+        toast(d.nome + ' identificado · ' + d.marcacoes_atribuidas + ' ponto(s) atribuído(s)' + (d.ainda_em_revisao ? ', ' + d.ainda_em_revisao + ' ainda em revisão' : '') + (d.template_criado ? ' · cadastro facial criado' : ''), 'ok');
+        this.pendSel = null;
+        await this.recarregar();
+      };
+    });
+    cont.querySelectorAll('button[data-bloquear]').forEach(b => {
+      b.onclick = async () => {
+        if (!confirm('Bloquear este aparelho? Ele para de enviar registros e as batidas dele saem da fila.')) return;
+        b.disabled = true;
+        const r = await ApiRh.decidir(this.token, { tipo: 'dispositivo', id: b.dataset.bloquear, acao: 'bloquear' });
+        if (!r.ok) { toast(r.erro || 'Falha', 'bad'); b.disabled = false; return; }
+        toast('Aparelho bloqueado', 'ok');
+        this.pendSel = null;
+        await this.recarregar();
+      };
+    });
 
     cont.querySelectorAll('button[data-decidir]').forEach(b => {
       b.onclick = async () => {
@@ -1243,12 +1352,12 @@ export const Rh = {
     const link = location.origin;
     // Mensagem com cada dado em sua PRÓPRIA linha e prefixado — assim, mesmo no
     // WhatsApp, o funcionário consegue tocar-e-segurar pra copiar só o código.
-    const texto = 'Olá ' + primeiro + '! Ative seu ponto facial:\n\n' +
-      '1) Abra: ' + link + '\n' +
-      '2) Toque em ATIVAR MEU PONTO\n\n' +
-      'Código da empresa:\n' + empresa + '\n\n' +
-      'Sua matrícula:\n' + matricula + '\n\n' +
-      'Depois é só olhar para a câmera e piscar.';
+    const linkEmp = this.linkEmpresa();
+    const texto = 'Olá ' + primeiro + '! Seu ponto facial:\n\n' +
+      '1) Abra no celular: ' + linkEmp + '\n' +
+      '2) Toque em BATER PONTO e olhe para a câmera\n\n' +
+      'Se pedir, sua matrícula é: ' + matricula + '\n\n' +
+      'Trocou de celular? No link, toque em "Já tenho cadastro" e informe a matrícula.';
     // cada campo com botão de copiar SÓ aquele valor
     const campo = (rotulo, valor, id) =>
       '<div class="cod-linha"><div class="cod-info"><span class="lb">' + rotulo + '</span>' +
@@ -1257,9 +1366,9 @@ export const Rh = {
     $('areaBio').innerHTML =
       '<div class="card"><h2>Código de ativação de ' + esc(nome) + '</h2>' +
         '<p class="nota" style="margin:-4px 0 12px">Envie ao funcionário. Ele usa uma vez para ativar o ponto no próprio celular. Copie cada dado separadamente ou a mensagem inteira.</p>' +
-        campo('Código da empresa', empresa, 'cpEmp') +
+        campo('Link da empresa (primeiro acesso)', linkEmp, 'cpLinkEmp') +
         campo('Matrícula', matricula, 'cpMat') +
-        campo('Link do app', link, 'cpLink') +
+        campo('Código da empresa (só se o link não abrir)', empresa, 'cpEmp') +
         '<button class="act" id="btnAbrirWa">📲 Enviar pelo WhatsApp</button>' +
         '<button class="act ghost" id="btnCopiarConvite">Copiar mensagem inteira</button>' +
         '<button class="act ghost" id="btnFecharCodigo">Fechar</button>' +
@@ -1785,6 +1894,13 @@ export const Rh = {
         '</div>' +
         '<button class="act" id="btnSalvarCfg" style="margin-top:14px;width:auto;padding:10px 18px">Salvar parâmetros</button></div>' +
 
+      '<div class="cfg-sec"><h2>Link da empresa</h2>' +
+        '<p class="cap">Envie este link no grupo da equipe. Quem abrir já está na sua empresa e bate o ponto sem digitar nada: você identifica a pessoa em Pendências na primeira vez.</p>' +
+        '<div class="eq-vincular"><input class="inp" id="cfLink" readonly value="' + esc(this.linkEmpresa()) + '" style="margin:0;font-family:var(--font-mono)">' +
+          '<button class="v2btn ghost" id="btnCopiarLink">Copiar</button>' +
+          '<button class="v2btn ghost" id="btnWaLink">WhatsApp</button>' +
+          '<button class="v2btn ghost" id="btnNovoLink" title="O link antigo para de funcionar; quem já ativou continua normal">Gerar novo</button></div></div>' +
+
       '<div class="cfg-sec"><h2>Empresa</h2>' +
         '<p class="cap">Nome exibido no painel e no pareamento do colaborador.</p>' +
         '<div class="form-grid">' +
@@ -1812,8 +1928,18 @@ export const Rh = {
       toast('Parâmetros salvos', 'ok');
       await this.recarregar();
     };
+    $('btnCopiarLink').onclick = async () => { try { await navigator.clipboard.writeText(this.linkEmpresa()); toast('Link copiado', 'ok'); } catch (e) { toast('Selecione e copie manualmente', 'warn'); } };
+    $('btnWaLink').onclick = () => window.open('https://wa.me/?text=' + encodeURIComponent(this.mensagemLink()), '_blank', 'noopener');
+    $('btnNovoLink').onclick = async () => {
+      if (!confirm('Gerar um novo link? O link atual deixa de funcionar na hora. Quem já ativou o ponto continua normalmente.')) return;
+      const r = await ApiRh.config(this.token, { acao: 'novo_link' });
+      if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+      toast('Novo link gerado', 'ok');
+      await this.recarregar();
+    };
     $('btnSalvarEmp').onclick = async () => {
       const r = await ApiRh.config(this.token, { empresa_nome: $('cfNome').value.trim(), fuso: $('cfFuso').value.trim() });
+      void 0;
       if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
       toast('Empresa atualizada', 'ok');
       await this.recarregar();

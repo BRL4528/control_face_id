@@ -27,6 +27,8 @@ async function req(rota, corpo, { bearer, metodo = 'POST', timeoutMs = 30000 } =
   } finally { clearTimeout(t); }
 }
 
+function codErro(r) { return (r.json && r.json.erro && r.json.erro.codigo) || null; }
+
 function msgErro(r, fallback) {
   return (r.json && r.json.erro && r.json.erro.mensagem) || (r.rede ? 'sem conexão' : fallback);
 }
@@ -34,11 +36,24 @@ function msgErro(r, fallback) {
 /* ------------------------------------------------- dispositivo (colaborador) */
 
 export const Api = {
-  /** Pareamento inicial do celular ao colaborador (uma vez na vida do aparelho). */
+  /** Resolve o link da empresa (/e/<token>) → { id, nome, token }. */
+  async empresaPorToken(token) {
+    const r = await req('/empresa?t=' + encodeURIComponent(token), null, { metodo: 'GET' });
+    if (!r.ok || !r.json || !r.json.ok) return { ok: false, status: r.status, rede: r.rede === true, erro: msgErro(r, 'link inválido') };
+    return { ok: true, empresa: r.json.empresa };
+  },
+
+  /** Pareamento do celular: com matrícula (vira ativo) ou anônimo (nasce pendente). */
   async parear(dados) {
     const r = await req('/parear', dados);
-    if (!r.ok || !r.json || !r.json.ok) return { ok: false, status: r.status, erro: msgErro(r, 'falha ao parear') };
-    return { ok: true, colaborador: r.json.colaborador };
+    if (!r.ok || !r.json || !r.json.ok) return { ok: false, status: r.status, codigo: codErro(r), erro: msgErro(r, 'falha ao parear') };
+    return { ok: true, estado: r.json.estado || 'ativo', colaborador: r.json.colaborador || null, empresa: r.json.empresa || null };
+  },
+
+  /** Aparelho pendente informa a matrícula (opcional) para o RH aprovar em um clique. */
+  async informarMatricula(credencial, matricula) {
+    const r = await req('/parear', { acao: 'informar', matricula }, { bearer: credencial });
+    return { ok: !!(r.ok && r.json && r.json.ok), status: r.status, codigo: codErro(r) };
   },
 
   /** Carga do dia: template 1:1 do próprio colaborador + alocação/cerca de hoje. */
@@ -46,10 +61,12 @@ export const Api = {
     const t0 = Date.now();
     const r = await req('/carga-dia', { dia }, { bearer: credencial });
     const t1 = Date.now();
-    if (!r.ok || !r.json || !r.json.ok) return { ok: false, status: r.status, rede: r.rede === true, erro: msgErro(r, 'falha na carga') };
+    if (!r.ok || !r.json || !r.json.ok) return { ok: false, status: r.status, codigo: codErro(r), rede: r.rede === true, erro: msgErro(r, 'falha na carga') };
     const c = r.json;
     return {
       ok: true,
+      estado: c.estado || 'ativo',           // ativo | pendente (RH ainda não identificou)
+      matricula_informada: c.matricula_informada || null,
       colaborador: c.colaborador,
       template: c.template,       // { versao, vetores } ou null
       alocacao: c.alocacao,       // { equipe_id, equipe_nome, cerca } ou null
@@ -81,7 +98,7 @@ export const Api = {
     const r = await req('/ponto', { marcacoes: lote }, { bearer: credencial });
     if (!r.ok || !r.json || !r.json.ok) {
       await Store.registrar('sync_falhou', { status: r.status });
-      return { ok: false, erro: msgErro(r, 'falha ao enviar') };
+      return { ok: false, status: r.status, codigo: codErro(r), erro: msgErro(r, 'falha ao enviar') };
     }
     const resultados = r.json.resultados || [];
     for (const id of itensParaRemover(resultados)) {

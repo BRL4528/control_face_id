@@ -4,6 +4,7 @@
 import { db } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
+import { gerarLinkToken } from '../_lib/dispositivos.js';
 
 // Whitelist de parâmetros aceitos em config_empresa.dados, com coerção segura.
 const num = (v, lo, hi, def) => {
@@ -30,6 +31,14 @@ export default async function handler(req, res) {
   if (!rh) return erro(res, 401, 'SESSAO_INVALIDA', 'faça login novamente');
   const b = corpo(req);
   const sql = db();
+
+  // Novo link da empresa: o antigo para de funcionar na hora (quem já abriu e
+  // pareou continua — o token só serve para entrar).
+  if (b.acao === 'novo_link') {
+    const token = gerarLinkToken();
+    await sql`UPDATE empresa SET link_token=${token} WHERE id=${rh.empresa_id}`;
+    return ok(res, { link_token: token });
+  }
 
   // Dados da empresa (nome, fuso).
   const nome = b.empresa_nome != null ? String(b.empresa_nome).trim() : null;

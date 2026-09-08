@@ -8,20 +8,7 @@
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
-
-async function guardarMiniatura(dataUrl, colaboradorId) {
-  if (!dataUrl || !dataUrl.startsWith('data:')) return dataUrl || null;
-  if (!process.env.BLOB_READ_WRITE_TOKEN) return dataUrl; // sem Blob: guarda inline
-  try {
-    const { put } = await import('@vercel/blob');
-    const base64 = dataUrl.split(',')[1];
-    const bin = Buffer.from(base64, 'base64');
-    const r = await put(`biometria/${colaboradorId}-${Date.now()}.jpg`, bin, {
-      access: 'public', contentType: 'image/jpeg'
-    });
-    return r.url;
-  } catch { return dataUrl; }
-}
+import { guardarMiniatura } from '../_lib/blob.js';
 
 export default async function handler(req, res) {
   if (cors(req, res)) return;

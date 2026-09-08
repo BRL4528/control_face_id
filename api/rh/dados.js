@@ -22,7 +22,7 @@ export default async function handler(req, res) {
   const empresa = rh.empresa_id;
   const sql = db();
 
-  const [equipes, pessoas, marcacoes, alocacoes, locais, jornadas, empresaRow, configRow, usuariosRh, correcoes, planos] = await Promise.all([
+  const [equipes, pessoas, marcacoes, alocacoes, locais, jornadas, empresaRow, configRow, usuariosRh, correcoes, planos, aparelhosPendentes] = await Promise.all([
     sql`SELECT id AS equipe_id, nome, ativo, jornada_id, supervisor_id FROM equipe WHERE empresa_id = ${empresa} ORDER BY nome`,
     sql`SELECT c.id AS pessoa_id, c.nome, c.matricula, c.papel, c.equipe_padrao AS equipe_id, c.ativo,
                EXISTS(SELECT 1 FROM template_facial t WHERE t.colaborador_id = c.id AND t.estado='ativo') AS tem_biometria,
@@ -34,7 +34,8 @@ export default async function handler(req, res) {
                (m.requer_revisao AND NOT EXISTS(
                   SELECT 1 FROM correcao co WHERE co.alvo_tipo='marcacao' AND co.alvo_id=m.id_cliente)) AS pendente
         FROM marcacao m
-        WHERE m.empresa_id = ${empresa} AND m.marcado_dia >= (CURRENT_DATE - ${dias}::int)
+        WHERE m.empresa_id = ${empresa} AND m.colaborador_id IS NOT NULL
+          AND m.marcado_dia >= (CURRENT_DATE - ${dias}::int)
         ORDER BY m.marcado_em DESC`,
     // Alocações de uma janela em torno de hoje (ontem..+30): cobre as tabs de dia
     // e os alertas de planejamento (pessoa em 2 equipes, sem plano futuro).
@@ -46,7 +47,7 @@ export default async function handler(req, res) {
         WHERE empresa_id = ${empresa} AND ativo = true ORDER BY nome`,
     sql`SELECT id AS jornada_id, nome, to_char(entrada,'HH24:MI') AS entrada, to_char(saida,'HH24:MI') AS saida,
                tolerancia_min, ativa FROM jornada WHERE empresa_id = ${empresa} ORDER BY nome`,
-    sql`SELECT nome, fuso FROM empresa WHERE id = ${empresa} LIMIT 1`,
+    sql`SELECT nome, fuso, link_token FROM empresa WHERE id = ${empresa} LIMIT 1`,
     sql`SELECT dados FROM config_empresa WHERE empresa_id = ${empresa} LIMIT 1`,
     sql`SELECT id AS usuario_id, usuario, nome, ativo, trocar_senha,
                to_char(criado_em,'YYYY-MM-DD') AS criado_em FROM usuario_rh
@@ -65,7 +66,21 @@ export default async function handler(req, res) {
     sql`SELECT id AS plano_id, nome, equipe_id, colaboradores, cerca_lat, cerca_lng, cerca_raio_m,
                dias_semana, to_char(vigencia_inicio,'YYYY-MM-DD') AS vigencia_inicio,
                to_char(vigencia_fim,'YYYY-MM-DD') AS vigencia_fim, ativo
-        FROM plano_alocacao WHERE empresa_id = ${empresa} AND ativo = true ORDER BY criado_em DESC`
+        FROM plano_alocacao WHERE empresa_id = ${empresa} AND ativo = true ORDER BY criado_em DESC`,
+    // Aparelhos que bateram ponto pelo link da empresa e o RH ainda não identificou,
+    // com as marcações deles (sem colaborador) para o RH ver hora, GPS e foto.
+    sql`SELECT d.id AS dispositivo_id, d.matricula_informada, d.ua, d.pareado_em, d.visto_em,
+               d.cadastro->>'miniatura_url' AS miniatura,
+               COALESCE((SELECT json_agg(json_build_object(
+                   'id_cliente', m.id_cliente, 'tipo', m.tipo, 'marcado_em', m.marcado_em,
+                   'marcado_dia', to_char(m.marcado_dia,'YYYY-MM-DD'), 'lat', m.lat, 'lng', m.lng,
+                   'precisao_m', m.precisao_m, 'liveness_ok', m.liveness_ok, 'foto_url', m.foto_url)
+                 ORDER BY m.marcado_em DESC)
+                 FROM marcacao m WHERE m.dispositivo_id = d.id AND m.colaborador_id IS NULL AND m.requer_revisao
+                   AND NOT EXISTS (SELECT 1 FROM correcao co WHERE co.alvo_tipo='marcacao' AND co.alvo_id=m.id_cliente)), '[]'::json) AS marcacoes
+        FROM dispositivo d
+        WHERE d.empresa_id = ${empresa} AND d.estado = 'pendente' AND d.ativo = true
+        ORDER BY d.pareado_em DESC`
   ]);
 
   // "Hoje" no fuso da EMPRESA, não em UTC: às 21h em Campo Grande já é amanhã em
@@ -79,7 +94,8 @@ export default async function handler(req, res) {
   return ok(res, {
     usuario: { nome: rh.nome, usuario: rh.usuario },
     empresa_id: empresa,   // o app do colaborador usa como "código da empresa" no pareamento
-    empresa: empresaRow[0] || { nome: '', fuso: 'America/Campo_Grande' },
+    empresa: empresaRow[0] || { nome: '', fuso: 'America/Campo_Grande', link_token: null },
+    aparelhos_pendentes: aparelhosPendentes,
     config: (configRow[0] && configRow[0].dados) || {},
     periodo_dias: dias,
     servidor_hora: new Date().toISOString(),

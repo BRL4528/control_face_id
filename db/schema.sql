@@ -286,3 +286,29 @@ ALTER TABLE plano_alocacao ADD COLUMN IF NOT EXISTS nome text;
 ALTER TABLE alocacao ADD COLUMN IF NOT EXISTS origem text NOT NULL DEFAULT 'manual';
 ALTER TABLE alocacao ADD COLUMN IF NOT EXISTS plano_id text;
 CREATE INDEX IF NOT EXISTS ix_aloc_plano ON alocacao (plano_id) WHERE plano_id IS NOT NULL;
+
+-- ═══════════════════════════════════════════════════════ primeiro acesso sem barreira
+--
+-- O RH manda UM link por empresa (/e/<link_token>). Quem abre já está "na
+-- empresa" e bate ponto sem digitar nada: o aparelho nasce PENDENTE (sem
+-- colaborador), as marcações nascem sem colaborador e o RH identifica a pessoa
+-- em Pendências. Nesse ato o aparelho vira ativo, as fotos viram o cadastro
+-- facial e as marcações pendentes são atribuídas (valem retroativamente).
+-- Aparelho de quem saiu da empresa (colaborador inativo) ou rejeitado pelo RH
+-- fica BLOQUEADO: a API responde 403 e o app para de enviar.
+ALTER TABLE empresa ADD COLUMN IF NOT EXISTS link_token text;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_empresa_link_token ON empresa (link_token);
+
+ALTER TABLE dispositivo ALTER COLUMN colaborador_id DROP NOT NULL;
+ALTER TABLE dispositivo ADD COLUMN IF NOT EXISTS empresa_id text REFERENCES empresa(id) ON DELETE CASCADE;
+ALTER TABLE dispositivo ADD COLUMN IF NOT EXISTS estado text NOT NULL DEFAULT 'ativo';  -- pendente | ativo | bloqueado
+ALTER TABLE dispositivo ADD COLUMN IF NOT EXISTS matricula_informada text;              -- opcional, digitada após o 1º ponto
+ALTER TABLE dispositivo ADD COLUMN IF NOT EXISTS cadastro jsonb;                        -- {vetores, miniatura_url} do 1º ponto; vira template ao identificar
+ALTER TABLE dispositivo ADD COLUMN IF NOT EXISTS bloqueado_em timestamptz;
+ALTER TABLE dispositivo ADD COLUMN IF NOT EXISTS motivo_bloqueio text;                  -- colaborador_inativo | rejeitado_rh
+UPDATE dispositivo d SET empresa_id = c.empresa_id FROM colaborador c WHERE c.id = d.colaborador_id AND d.empresa_id IS NULL;
+CREATE INDEX IF NOT EXISTS ix_disp_empresa_estado ON dispositivo (empresa_id, estado);
+
+ALTER TABLE marcacao ALTER COLUMN colaborador_id DROP NOT NULL;
+ALTER TABLE marcacao ADD COLUMN IF NOT EXISTS dispositivo_id text;
+CREATE INDEX IF NOT EXISTS ix_marc_disp_pendente ON marcacao (dispositivo_id) WHERE colaborador_id IS NULL;

@@ -37,7 +37,9 @@ export const Ponto = {
     this.aoSair = aoSair;
     mostrar('fila');
     $('cartao').innerHTML = '';
-    $('quemFila') && ($('quemFila').textContent = dispositivo.colaborador.nome.split(' ')[0]);
+    // Modo cadastro: aparelho pendente (link da empresa) — sem colaborador nem template.
+    this.modoCadastro = !dispositivo.colaborador;
+    $('quemFila') && ($('quemFila').textContent = dispositivo.colaborador ? dispositivo.colaborador.nome.split(' ')[0] : 'primeiro acesso');
     $('btnFecharCamera').onclick = () => this.fecharCamera();
     await this.recarregarDia();
     this.pintarPainelDia();   // começa no PAINEL DO DIA, câmera fechada
@@ -54,7 +56,7 @@ export const Ponto = {
     $('cartao').innerHTML = '';
     const { slots, proximo, completo } = pontosDoDia(this.doDia);
 
-    if (!this.template) {
+    if (!this.template && !this.modoCadastro) {
       $('painelDia').innerHTML =
         '<div class="card"><div class="tit">Cadastro facial pendente</div>' +
         '<p class="nota">O RH ainda não cadastrou seu rosto. Procure o RH.</p></div>';
@@ -72,9 +74,11 @@ export const Ponto = {
       '</div>';
     }).join('');
 
-    const alocTxt = this.alocacao
-      ? 'Local de hoje: ' + esc(this.alocacao.equipe_nome || 'sua equipe')
-      : '⚠ Sem alocação hoje — o ponto irá para conferência do RH';
+    const alocTxt = this.modoCadastro
+      ? 'Seu cadastro ainda será confirmado pelo RH. Pode bater o ponto normalmente: ele vale depois da confirmação.'
+      : this.alocacao
+        ? 'Local de hoje: ' + esc(this.alocacao.equipe_nome || 'sua equipe')
+        : '⚠ Sem alocação hoje — o ponto irá para conferência do RH';
 
     $('painelDia').innerHTML =
       '<div class="card diacard">' +
@@ -112,7 +116,7 @@ export const Ponto = {
     const { slots, proximo } = pontosDoDia(this.doDia);
     const rot = proximo != null ? slots[proximo].rotulo : 'ponto';
     $('dica').textContent = 'Registrando: ' + rot + ' — olhe para a câmera';
-    if (!this.alocacao) toast('Sem alocação hoje — irá para conferência do RH', 'warn');
+    if (!this.alocacao && !this.modoCadastro) toast('Sem alocação hoje — irá para conferência do RH', 'warn');
   },
 
   async ligarCamera() {
@@ -156,6 +160,25 @@ export const Ponto = {
     this.estado = 'processando';
     $('dica').textContent = 'Conferindo…';
 
+    // Modo cadastro: não há com quem comparar. Exige quadro de boa qualidade (vai
+    // virar o cadastro facial) e segue para a prova de vida; o RH confirma depois.
+    if (this.modoCadastro) {
+      if (cap.reprovado) {
+        this.estado = 'aguardando';
+        $('cartao').innerHTML = '<div class="cartao warn"><div class="tit">Preciso de uma foto melhor</div>' +
+          '<div class="sub">De frente, com boa luz, sem boné ou óculos escuros.</div></div>';
+        setTimeout(() => { if (this.estado === 'aguardando') $('cartao').innerHTML = ''; }, 2500);
+        return;
+      }
+      this.capPendente = { cap, dist: null, veredito: 'revisar' };
+      if (cfg().livenessAtivo) {
+        this.estado = 'liveness';
+        this.piscada = criarDetectorPiscada();
+        this._livenessTimer = setTimeout(() => this.aposLiveness(), cfg().livenessTimeoutMs);
+      } else this.aposLiveness();
+      return;
+    }
+
     // 1:1 — menor distância entre o capturado e os vetores do próprio template.
     const dists = (this.template.vetores || []).map(v => euclidiana(cap.descritor, v));
     const dist = dists.length ? Math.min.apply(null, dists) : Infinity;
@@ -169,7 +192,7 @@ export const Ponto = {
       return;
     }
 
-    const pid = this.dispositivo.colaborador.id;
+    const pid = this.dispositivo.colaborador ? this.dispositivo.colaborador.id : null;
     if (emCooldown(pid, this.doDia, Date.now(), cfg().cooldownMs)) {
       this.estado = 'aguardando';
       toast('Você já marcou agora há pouco', 'warn');
@@ -212,16 +235,17 @@ export const Ponto = {
 
   async registrar({ cap, dist, veredito }, livenessOk) {
     const quando = agoraCorrigido(this.deriva);
-    const tipo = tipoDaVez(this.doDia.filter(m => m.pessoa_id === this.dispositivo.colaborador.id));
+    const col = this.dispositivo.colaborador;   // null no modo cadastro
+    const meuId = col ? col.id : null;
+    const tipo = tipoDaVez(this.doDia.filter(m => (m.pessoa_id || null) === meuId));
     const pos = await this.posicao();
-    const col = this.dispositivo.colaborador;
 
     const m = {
       id_cliente: crypto.randomUUID(),
-      pessoa_id: col.id,
+      pessoa_id: meuId,
       equipe_id: (this.alocacao && this.alocacao.equipe_id) || '',
       tipo, origem: 'biometria', veredito,
-      score: Number(dist.toFixed(4)),
+      score: dist == null ? null : Number(dist.toFixed(4)),
       liveness_ok: livenessOk,
       marcado_em: quando.toISOString(),
       marcado_dia: dia(quando.toISOString()),
@@ -232,8 +256,11 @@ export const Ponto = {
       // Foto de auditoria só quando pode ir para revisão — o servidor decide, mas
       // já mandamos quando há sinal de exceção (cinza, sem liveness, sem GPS).
       foto_url: (veredito === 'revisar' || !livenessOk || !pos) ? cap.thumb : '',
-      _nome: col.nome
+      _nome: col ? col.nome : ''
     };
+    // Aparelho pendente: a 1ª marcação leva o cadastro facial (descritor + miniatura)
+    // que vira template quando o RH identificar a pessoa. O servidor guarda só uma vez.
+    if (this.modoCadastro) m.cadastro = { vetores: [cap.descritor], miniatura: cap.thumb };
 
     await Store.enfileirar(m);
     await Store.registrar('marcacao', { tipo, veredito, liveness: livenessOk });
@@ -248,6 +275,34 @@ export const Ponto = {
     this.pararCamera();
     $('areaCamera').classList.add('hide');
     const col = this.dispositivo.colaborador;
+    if (this.modoCadastro) {
+      // Primeiro ponto sem cadastro: confirma, explica em uma linha e oferece a
+      // matrícula como atalho OPCIONAL para o RH — nunca como barreira.
+      $('cartao').innerHTML =
+        '<div class="cartao ok">' +
+          '<div class="tit">✓ ' + (m.tipo === 'entrada' ? 'ENTRADA' : 'SAÍDA') + ' registrada</div>' +
+          '<div class="horaGrande">' + hora(m.marcado_em) + '</div>' +
+          '<div class="sub">O RH vai confirmar seu cadastro. Este ponto já conta.</div>' +
+          (this.dispositivo.matricula_informada ? '' :
+            '<div class="sub" style="margin-top:12px">Sabe sua matrícula? Informe para o RH liberar mais rápido (opcional).</div>' +
+            '<div class="row2" style="margin-top:6px"><input type="text" id="cadMatricula" class="inp" placeholder="matrícula" inputmode="numeric" style="margin:0">' +
+            '<button class="act" id="cadEnviarMat" style="margin:0">Enviar</button></div>') +
+          '<button class="act ghost" id="cadOk" style="margin-top:12px">Voltar</button>' +
+        '</div>';
+      const voltar = () => { $('cartao').innerHTML = ''; $('painelDia').classList.remove('hide'); this.pintarPainelDia(); };
+      $('cadOk').onclick = voltar;
+      const env = $('cadEnviarMat');
+      if (env) env.onclick = async () => {
+        const mat = ($('cadMatricula').value || '').trim();
+        if (!mat) { voltar(); return; }
+        env.disabled = true;
+        const r = await Api.informarMatricula(this.dispositivo.credencial, mat);
+        if (r.ok) { this.dispositivo.matricula_informada = mat; await Store.set('matricula_informada', mat); toast('Matrícula enviada ao RH', 'ok'); }
+        else toast('Não consegui enviar agora. Tudo bem, o RH identifica pela foto.', 'warn');
+        voltar();
+      };
+      return;
+    }
     $('cartao').innerHTML =
       '<div class="cartao ok">' +
         '<div class="tit">✓ ' + (m.tipo === 'entrada' ? 'ENTRADA' : 'SAÍDA') + ' registrada</div>' +

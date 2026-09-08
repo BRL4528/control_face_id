@@ -3,6 +3,7 @@
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
+import { sincronizarBloqueios } from '../_lib/dispositivos.js';
 
 export default async function handler(req, res) {
   if (cors(req, res)) return;
@@ -24,6 +25,8 @@ export default async function handler(req, res) {
   if (existentes[0]) {
     await sql`UPDATE colaborador SET nome=${nome}, papel=${papel}, equipe_padrao=${equipeId},
               ativo=${b.ativo === false ? false : true} WHERE id = ${existentes[0].id}`;
+    // Saiu da empresa ⇒ aparelho bloqueado (403 no app); voltou ⇒ libera.
+    await sincronizarBloqueios(sql, rh.empresa_id);
     return ok(res, { colaborador_id: existentes[0].id, atualizado: true });
   }
 

@@ -217,8 +217,8 @@ test('guarda 6: todo arquivo local referenciado no index.html deve estar no prec
   const assetsSw = [...sw.matchAll(/'(\.\/[^']+)'/g)].map(m => m[1]);
   const links = [...html.matchAll(/(?:href|src)=["']([^"']+)["']/g)].map(m => m[1]);
   
-  // Lista de exceções legítimas não-cacheadas por Service Worker (se houver no futuro)
-  const excecoesLegitimas = new Set([]);
+  // Exceções legítimas: '/' é o <base href> (raiz do app para funcionar em /e/<token>), não um recurso.
+  const excecoesLegitimas = new Set(['/']);
 
   for (const l of links) {
     if (l.startsWith('http://') || l.startsWith('https://') || l.startsWith('data:') || l.startsWith('#') || l.startsWith('mailto:')) {

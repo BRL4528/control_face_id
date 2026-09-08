@@ -65,5 +65,11 @@
       "path": "/api/cron/renovar-escala",
       "schedule": "0 3 * * *"
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/e/:token",
+      "destination": "/index.html"
+    }
   ]
 }
