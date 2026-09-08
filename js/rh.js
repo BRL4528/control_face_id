@@ -500,7 +500,7 @@ export const Rh = {
     const cards = presencaPorEquipe(d.pessoas, d.marcacoes, d.equipes, hoje);
     const serie = serieDiaria(d.marcacoes, d.periodo_dias || this.dias, hoje);
     const motivos = pendenciasPorMotivo(d.marcacoes, d.recadastros, d.pessoas);
-    const exc = this.exceptions();
+    const exc = this.pendenciasAbertas();   // mesmo número do badge e da aba Pendências
     const alerts = this.alertas();
     const cercaPorEquipe = this.cercaPorEquipe();
 
@@ -552,7 +552,7 @@ export const Rh = {
       return '<div class="aten"><div class="aten-top">' + sevPill(x.severidade) +
         '<span class="aten-tit">' + esc(x.rotulo) + '</span>' +
         '<span class="aten-hora">' + esc(x.hora) + '</span></div>' +
-        '<div class="aten-sub">' + esc(p ? p.nome : x.pessoa_id) + ' · ' + esc(this.nomeEquipe(x.equipe_id)) + '</div>' +
+        '<div class="aten-sub">' + (x.tipo === 'aparelho' ? esc((x.aparelho.matricula_informada ? 'Matrícula informada ' + x.aparelho.matricula_informada : 'Quem é?') + ' · ' + (x.aparelho.marcacoes || []).length + ' batida(s)') : esc(p ? p.nome : x.pessoa_id) + ' · ' + esc(this.nomeEquipe(x.equipe_id))) + '</div>' +
         '<button class="v2btn ghost mini" data-exc="' + esc(x.id) + '" style="margin-top:9px">Analisar</button></div>';
     }).join('') || '<div class="aten"><div class="aten-sub">Nada requer atenção agora. 🎉</div></div>';
 
