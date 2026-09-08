@@ -166,6 +166,18 @@ canvas.ov{transform:scaleX(-1);pointer-events:none}
 /* linha-item clicável (lista de nomes do gestor) — reseta o cromo de <button> */
 button.linha-item{border:0;background:none;font:inherit;color:inherit;cursor:pointer;width:100%}
 
+/* Equipes: bloco expansível com membros + seletor de vínculo */
+.eq-bloco .eq-head:hover .nm{color:var(--azul)}
+.eq-seta{color:var(--muted-2);font-size:12px;flex:none}
+.eq-corpo{padding:4px 0 12px 19px}
+.eq-membro{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px dashed var(--linha-2)}
+.eq-membro .nm{font-size:13px;color:var(--ink)} .eq-membro .mt{font-size:11px;color:var(--muted)}
+#rh .eq-membro .av{width:28px;height:28px;flex:none;display:grid;place-items:center;border-radius:9px;
+  background:var(--azul-bg);color:var(--azul-esc);font-size:11px;font-weight:700}
+.eq-vincular{display:flex;gap:8px;align-items:center;margin-top:10px}
+.eq-vincular select,.eq-vincular input{margin:0;flex:1;min-width:0}
+.eq-vincular .v2btn{flex:none}
+
 /* ════════════════ RH · painel v2 (sidebar + topbar, desktop-first) ════════════════
    Reforma visual estilo SaaS (Linear/Vercel). Paleta v2 escopada ao #rh: azul
    #1d4ed8, fundo claro #f6f7f9, superfícies brancas, cantos 9–12px, sombras

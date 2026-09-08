@@ -28,6 +28,7 @@ export const Rh = {
   token: null,       // JWT emitido por /rh/login
   dados: null,
   aba: 'painel',
+  equipeAberta: null,   // equipe expandida na tela Equipes
   stub: null,        // rótulo da tela "entra depois" quando aba === 'stub'
   pendSel: null,     // exceção selecionada no master-detail de pendências
   pendTab: 'abertas',
@@ -1318,31 +1319,93 @@ export const Rh = {
 
   pintarEquipes() {
     const eqs = (this.dados.equipes || []).slice().sort((a, b) => a.nome.localeCompare(b.nome));
-    const cont = {};
-    for (const p of (this.dados.pessoas || [])) if (p.ativo) cont[p.equipe_id] = (cont[p.equipe_id] || 0) + 1;
+    const pessoas = (this.dados.pessoas || []).filter(p => p.ativo).slice().sort((a, b) => a.nome.localeCompare(b.nome));
+    const membros = eq => pessoas.filter(p => p.equipe_id === eq);
+    const semEquipe = pessoas.filter(p => !p.equipe_id || !eqs.some(e => e.equipe_id === p.equipe_id));
+    const escalasDe = eq => (this.dados.planos || []).filter(pl => pl.equipe_id === eq);
+    if (!this.equipeAberta && eqs[0]) this.equipeAberta = eqs[0].equipe_id;
+
+    const opcao = p => '<option value="' + p.pessoa_id + '">' + esc(p.nome) +
+      (p.equipe_id ? ' · ' + esc(this.nomeEquipe(p.equipe_id)) : ' · sem equipe') + '</option>';
+
+    const bloco = e => {
+      const ms = membros(e.equipe_id);
+      const aberta = this.equipeAberta === e.equipe_id;
+      const candidatos = pessoas.filter(p => p.equipe_id !== e.equipe_id);
+      // Sem equipe primeiro: é quem mais provavelmente está sendo vinculado.
+      candidatos.sort((a, b) => (!a.equipe_id === !b.equipe_id ? a.nome.localeCompare(b.nome) : (a.equipe_id ? 1 : -1)));
+      const escalas = escalasDe(e.equipe_id);
+      return '<div class="eq-bloco' + (aberta ? ' aberta' : '') + '">' +
+        '<button class="linha-item eq-head" data-eqtoggle="' + esc(e.equipe_id) + '">' +
+          '<span class="ponto ' + (e.ativo ? 'ok' : 'bad') + '"></span>' +
+          '<div style="flex:1;text-align:left"><div class="nm">' + esc(e.nome) + '</div>' +
+          '<div class="mt">' + ms.length + ' pessoa(s)' + (escalas.length ? ' · ' + escalas.length + ' escala(s)' : '') + '</div></div>' +
+          '<span class="eq-seta">' + (aberta ? '▾' : '▸') + '</span></button>' +
+        (aberta ?
+          '<div class="eq-corpo">' +
+            (ms.length ? ms.map(p =>
+              '<div class="eq-membro"><span class="av">' + esc(this.iniciais(p.nome)) + '</span>' +
+                '<div style="flex:1"><div class="nm">' + esc(p.nome) + '</div><div class="mt">Matrícula ' + esc(p.matricula) + (p.papel === 'gestor' ? ' · gestor' : '') + '</div></div>' +
+                '<button class="v2btn ghost mini" data-desv="' + esc(p.pessoa_id) + '">Remover da equipe</button></div>').join('')
+              : '<p class="nota" style="padding:8px 0">Nenhum colaborador nesta equipe.</p>') +
+            '<div class="eq-vincular">' +
+              '<select class="inp" data-vsel="' + esc(e.equipe_id) + '">' +
+                '<option value="">— escolha um colaborador para vincular —</option>' + candidatos.map(opcao).join('') + '</select>' +
+              '<button class="v2btn" data-vinc="' + esc(e.equipe_id) + '">Vincular</button></div>' +
+            (escalas.length ? '<p class="nota" style="margin:8px 0 0">Quem entra na equipe agora não entra sozinho na escala já criada. Edite a escala ' +
+              escalas.map(pl => '"' + esc(pl.nome || e.nome) + '"').join(', ') + ' e marque o nome.</p>' : '') +
+          '</div>' : '') +
+      '</div>';
+    };
+
     $('rh-equipes').innerHTML =
       '<div class="pg-head"><div><h1 class="tit">Equipes</h1>' +
-        '<p class="sub">' + eqs.length + ' equipe(s) cadastrada(s).</p></div></div>' +
+        '<p class="sub">' + eqs.length + ' equipe(s) · ' + pessoas.length + ' colaborador(es) ativo(s)' +
+          (semEquipe.length ? ' · <b>' + semEquipe.length + ' sem equipe</b>' : '') + '</p></div></div>' +
       '<div class="card"><h2>Nova equipe</h2>' +
-        '<label class="lb">Nome</label><input type="text" id="eNome">' +
-        '<label class="lb">Unidade</label><input type="text" id="eUnidade" value="Unidade Piloto">' +
-        '<button class="act" id="btnNovaEquipe">Criar equipe</button>' +
-        '<p class="nota" style="margin-top:8px">Equipes da mesma unidade compartilham a carga — é isso que permite marcar um colaborador remanejado sem cair em registro manual.</p></div>' +
-      '<div class="card"><h2>Equipes</h2>' +
-        (eqs.length ? eqs.map(e =>
-          '<div class="linha-item"><span class="ponto ' + (e.ativo ? 'ok' : 'bad') + '"></span>' +
-          '<div style="flex:1"><div class="nm">' + esc(e.nome) + '</div>' +
-          '<div class="mt">' + esc(e.unidade) + ' · ' + (cont[e.equipe_id] || 0) + ' pessoas</div></div></div>').join('')
-          : '<p class="nota">Nenhuma equipe.</p>') +
+        '<div class="eq-vincular"><input type="text" id="eNome" placeholder="Nome da equipe" style="margin:0">' +
+        '<button class="v2btn" id="btnNovaEquipe">Criar equipe</button></div></div>' +
+      '<div class="card"><h2>Equipes e colaboradores</h2>' +
+        (eqs.length ? eqs.map(bloco).join('') : '<p class="nota">Nenhuma equipe.</p>') +
       '</div>';
+
     $('btnNovaEquipe').onclick = async () => {
-      const r = await ApiRh.equipe(this.token, {
-        nome: $('eNome').value.trim(), unidade: $('eUnidade').value.trim()
-      });
+      const nome = $('eNome').value.trim();
+      if (!nome) { toast('Dê um nome à equipe', 'warn'); return; }
+      const r = await ApiRh.equipe(this.token, { nome });
       if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+      this.equipeAberta = r.dados.equipe_id;
       toast('Equipe criada', 'ok');
       await this.recarregar();
     };
+    $('eNome').onkeydown = e => { if (e.key === 'Enter') $('btnNovaEquipe').click(); };
+    $('rh-equipes').querySelectorAll('[data-eqtoggle]').forEach(b => {
+      b.onclick = () => { this.equipeAberta = this.equipeAberta === b.dataset.eqtoggle ? null : b.dataset.eqtoggle; this.pintarEquipes(); };
+    });
+    $('rh-equipes').querySelectorAll('[data-vinc]').forEach(b => {
+      b.onclick = async () => {
+        const sel = $('rh-equipes').querySelector('[data-vsel="' + b.dataset.vinc + '"]');
+        const id = sel.value;
+        if (!id) { toast('Escolha um colaborador', 'warn'); return; }
+        const p = pessoas.find(x => x.pessoa_id === id);
+        b.disabled = true;
+        const r = await ApiRh.equipe(this.token, { acao: 'vincular', equipe_id: b.dataset.vinc, colaborador_id: id });
+        b.disabled = false;
+        if (!r.ok) { toast(r.erro || 'Falha ao vincular', 'bad'); return; }
+        toast((p ? p.nome : 'Colaborador') + ' agora é da equipe ' + this.nomeEquipe(b.dataset.vinc), 'ok');
+        await this.recarregar();
+      };
+    });
+    $('rh-equipes').querySelectorAll('[data-desv]').forEach(b => {
+      b.onclick = async () => {
+        const p = pessoas.find(x => x.pessoa_id === b.dataset.desv);
+        if (!confirm('Tirar ' + (p ? p.nome : 'este colaborador') + ' da equipe? A pessoa fica sem equipe até ser vinculada a outra.')) return;
+        const r = await ApiRh.equipe(this.token, { acao: 'desvincular', colaborador_id: b.dataset.desv });
+        if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+        toast('Removido da equipe', 'ok');
+        await this.recarregar();
+      };
+    });
   },
 
   /* ------------------------------------------------------- registros */
