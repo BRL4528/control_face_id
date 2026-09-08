@@ -6,6 +6,11 @@ import { db } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
 import { cors, ok, erro, exigeMetodo } from '../_lib/http.js';
 
+function diaNoFuso(d, fuso) {
+  try { return new Intl.DateTimeFormat('en-CA', { timeZone: fuso, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d); }
+  catch { return d.toISOString().slice(0, 10); }
+}
+
 export default async function handler(req, res) {
   if (cors(req, res)) return;
   if (exigeMetodo(req, res, 'POST')) return;
@@ -15,7 +20,6 @@ export default async function handler(req, res) {
 
   const dias = Math.min(Math.max(Number((req.body || {}).dias) || 30, 1), 365);
   const empresa = rh.empresa_id;
-  const hoje = new Date().toISOString().slice(0, 10);
   const sql = db();
 
   const [equipes, pessoas, marcacoes, alocacoes, locais, jornadas, empresaRow, configRow, usuariosRh, correcoes, planos] = await Promise.all([
@@ -34,7 +38,7 @@ export default async function handler(req, res) {
         ORDER BY m.marcado_em DESC`,
     // Alocações de uma janela em torno de hoje (ontem..+30): cobre as tabs de dia
     // e os alertas de planejamento (pessoa em 2 equipes, sem plano futuro).
-    sql`SELECT a.dia, a.colaborador_id, a.equipe_id, a.cerca_lat, a.cerca_lng, a.cerca_raio_m,
+    sql`SELECT to_char(a.dia,'YYYY-MM-DD') AS dia, a.colaborador_id, a.equipe_id, a.cerca_lat, a.cerca_lng, a.cerca_raio_m,
                a.origem, a.plano_id
         FROM alocacao a
         WHERE a.empresa_id = ${empresa} AND a.dia BETWEEN (CURRENT_DATE - 1) AND (CURRENT_DATE + 30)`,
@@ -64,7 +68,13 @@ export default async function handler(req, res) {
         FROM plano_alocacao WHERE empresa_id = ${empresa} AND ativo = true ORDER BY criado_em DESC`
   ]);
 
-  const alocacoesHoje = alocacoes.filter(a => String(a.dia).slice(0, 10) === hoje);
+  // "Hoje" no fuso da EMPRESA, não em UTC: às 21h em Campo Grande já é amanhã em
+  // UTC e o painel inteiro (cercas do dia, exceções, mapa) mudaria de dia às 20h.
+  const fuso = (empresaRow[0] && empresaRow[0].fuso) || 'America/Campo_Grande';
+  const hoje = diaNoFuso(new Date(), fuso);
+  // a.dia já vem 'YYYY-MM-DD' (to_char); antes era Date e String(Date).slice(0,10)
+  // dava "Tue Sep 08" — a lista de hoje saía sempre vazia (mapa sem cercas).
+  const alocacoesHoje = alocacoes.filter(a => a.dia === hoje);
 
   return ok(res, {
     usuario: { nome: rh.nome, usuario: rh.usuario },
@@ -73,6 +83,7 @@ export default async function handler(req, res) {
     config: (configRow[0] && configRow[0].dados) || {},
     periodo_dias: dias,
     servidor_hora: new Date().toISOString(),
+    hoje,                     // 'YYYY-MM-DD' no fuso da empresa — o front usa este, não o UTC
     equipes, pessoas, marcacoes, locais, jornadas, planos,
     usuarios_rh: usuariosRh, correcoes,
     alocacoes,                 // janela ontem..+30 (tabs de dia + alertas de planejamento)

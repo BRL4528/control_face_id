@@ -455,7 +455,8 @@ export const Rh = {
   // "Hoje" segundo o relógio do servidor, não o do PC do RH — é ele que carimba
   // marcado_dia. Sem isso, um PC com data errada mostraria a equipe toda ausente.
   hojeServidor() {
-    const iso = this.dados.servidor_hora || new Date().toISOString();
+    if (this.dados && this.dados.hoje) return this.dados.hoje;   // já no fuso da empresa
+    const iso = (this.dados && this.dados.servidor_hora) || new Date().toISOString();
     return String(iso).slice(0, 10);
   },
 

@@ -423,10 +423,14 @@ button.linha-item{border:0;background:none;font:inherit;color:inherit;cursor:poi
 #rh .modal-body{padding:16px 18px 20px}
 
 /* ---- mapa operacional (tela cheia) ---- */
-#rh .mapa-full{height:calc(100vh - 120px);border-radius:12px;overflow:hidden;border:1px solid var(--v2-linha);background:var(--v2-surf2)}
+#rh .mapa-full{height:clamp(380px,62vh,680px);position:relative;border-radius:12px;overflow:hidden;border:1px solid var(--v2-linha);background:var(--v2-surf2)}
 #rh .mapa-legenda{display:flex;gap:16px;margin:12px 0 0;font-size:12.5px;color:var(--v2-sub)}
 #rh .mapa-legenda span{display:inline-flex;align-items:center;gap:6px}
 #rh .mapa-legenda i{width:9px;height:9px;border-radius:999px;display:inline-block}
+#rh .mapa-rotulo{background:rgba(255,255,255,.92);border:1px solid #c7d2fe;color:#1e40af;border-radius:999px;padding:3px 9px;
+  font-size:11.5px;font-weight:600;white-space:nowrap;box-shadow:var(--v2-sombra);pointer-events:none}
+#rh .mapa-vazio{position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:2;background:rgba(255,255,255,.94);
+  border:1px solid var(--v2-linha);border-radius:10px;padding:8px 14px;font-size:12.5px;color:var(--v2-sub);box-shadow:var(--v2-sombra);max-width:90%;text-align:center}
 
 /* ---- tabelas de admin (jornadas, auditoria, usuários) ---- */
 #rh .adtable{width:100%;border-collapse:collapse;font-size:13.5px}
