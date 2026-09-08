@@ -25,7 +25,7 @@ export default async function handler(req, res) {
                (SELECT miniatura_url FROM template_facial t WHERE t.colaborador_id=c.id AND t.estado='ativo' ORDER BY versao DESC LIMIT 1) AS miniatura
         FROM colaborador c WHERE c.empresa_id = ${empresa} ORDER BY c.nome`,
     sql`SELECT m.id_cliente, m.colaborador_id AS pessoa_id, m.equipe_id, m.tipo, m.origem, m.veredito,
-               m.marcado_em, m.marcado_dia, m.deriva_ms AS deriva_relogio_ms, m.dentro_cerca,
+               m.marcado_em, to_char(m.marcado_dia,'YYYY-MM-DD') AS marcado_dia, m.deriva_ms AS deriva_relogio_ms, m.dentro_cerca,
                m.distancia_cerca_m, m.lat, m.lng, m.foto_url AS foto_auditoria, m.requer_revisao, m.score,
                (m.requer_revisao AND NOT EXISTS(
                   SELECT 1 FROM correcao co WHERE co.alvo_tipo='marcacao' AND co.alvo_id=m.id_cliente)) AS pendente

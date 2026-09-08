@@ -127,8 +127,9 @@ export const Rh = {
       b.classList.toggle('on', on);
     });
 
-    // badge da sidebar = exceções do dia + alertas de planejamento
-    const nExc = this.exceptions().length + this.alertas().length;
+    // badge da sidebar = exatamente o que a tela Pendências lista (aba Abertas).
+    // Alertas de planejamento têm o próprio card na Central operacional.
+    const nExc = this.pendenciasAbertas().length;
     const badge = $('navBadgePend');
     if (badge) { badge.textContent = nExc; badge.classList.toggle('hide', nExc === 0); }
 
@@ -159,6 +160,27 @@ export const Rh = {
       d.marcacoes, d.pessoas, d.alocacoes_hoje, this.hojeServidor(),
       d.servidor_hora, cfg.horaEntrada || '08:00',
       horasEntradaPorEquipe(d.equipes, d.jornadas));   // hora-limite por jornada da equipe
+  },
+
+  /** Fila de Pendências: exceções de hoje + marcações que ficaram pendentes em
+   *  dias anteriores (sem decisão do RH). Antes só o dia corrente entrava e uma
+   *  batida fora da cerca de ontem sumia da fila sem nunca ser decidida. */
+  pendenciasAbertas() {
+    const hoje = this.hojeServidor();
+    const antigas = (this.dados.marcacoes || [])
+      .filter(m => m.pendente && m.marcado_dia && m.marcado_dia < hoje)
+      .sort((a, b) => String(b.marcado_em).localeCompare(String(a.marcado_em)))
+      .map(m => Object.assign(this.excDeMarcacao(m), {
+        resolvida: false,
+        hora: this.dataCurta(m.marcado_dia) + ' · ' + hora(m.marcado_em)
+      }));
+    // Hora sempre no fuso do RH (regras.js devolve a fatia UTC do ISO, pura e testável).
+    const hojeItens = this.exceptions().map(x => x.marcacao ? Object.assign(x, { hora: hora(x.marcacao.marcado_em) }) : x);
+    return hojeItens.concat(antigas);
+  },
+
+  dataCurta(iso) {
+    return new Date(String(iso).slice(0, 10) + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
   },
 
   /** Alertas de planejamento (gestão da escala), pura. */
@@ -784,7 +806,7 @@ export const Rh = {
 
   pintarPendencias() {
     const el = $('rh-pendencias');
-    const abertas = this.exceptions();
+    const abertas = this.pendenciasAbertas();
     // Resolvidas: marcações de hoje que já tiveram decisão do RH (não mais pendentes,
     // mas que um dia foram exceção). Aproximação leve: manuais/revisadas de hoje já
     // decididas. Aqui listamos as marcações de hoje NÃO pendentes que vieram de
@@ -820,7 +842,7 @@ export const Rh = {
         '<div class="pend-master">' +
           '<div class="pend-master-head">' +
             '<h1>Pendências</h1>' +
-            '<p>Exceções detectadas contra o plano do dia.</p>' +
+            '<p>Batidas que precisam da sua decisão: fora da cerca, registro manual ou rosto em dúvida.</p>' +
             '<div class="segtabs">' + seg('abertas', 'Abertas', abertas.length) + seg('resolvidas', 'Resolvidas', resolvidas.length) + '</div>' +
           '</div>' +
           '<div class="pend-list">' +
@@ -850,7 +872,7 @@ export const Rh = {
     return {
       id: 'm:' + m.id_cliente, tipo, severidade: (TIPOS_EXCECAO[tipo] || {}).severidade || 'atencao',
       rotulo: (TIPOS_EXCECAO[tipo] || {}).rotulo || 'Exceção', pessoa_id: m.pessoa_id,
-      equipe_id: m.equipe_id, hora: String(m.marcado_em).slice(11, 16), marcacao: m, alocacao: null,
+      equipe_id: m.equipe_id, hora: hora(m.marcado_em), marcacao: m, alocacao: null,
       alvo: { tipo: 'marcacao', id: m.id_cliente }, resolvida: true
     };
   },
@@ -1578,7 +1600,7 @@ export const Rh = {
 
     $('btnCsvMarc').onclick = () => {
       const linhas = (d.marcacoes || []).map(m => [
-        m.marcado_dia, String(m.marcado_em).slice(11, 16), this.nomeDe(m.pessoa_id),
+        m.marcado_dia, hora(m.marcado_em), this.nomeDe(m.pessoa_id),
         this.nomeEquipe(m.equipe_id), m.tipo, m.origem, m.veredito,
         m.dentro_cerca === false ? 'fora' : (m.dentro_cerca ? 'dentro' : '')
       ]);
