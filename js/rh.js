@@ -479,6 +479,105 @@ export const Rh = {
     return String(iso).slice(0, 10);
   },
 
+  /* ------------------------------------------------ painel da equipe (hoje) */
+
+  /**
+   * Modal a partir do card da Central: quem está previsto hoje nesta equipe, quem
+   * bateu (horas), quem não bateu, quem tem pendência — e as ações para resolver
+   * sem sair daqui: analisar a pendência, lançar entrada, cadastrar face, editar
+   * a escala ou ajustar só o dia.
+   */
+  abrirPainelEquipe(equipeId) {
+    const d = this.dados; const hoje = this.hojeServidor();
+    const eq = (d.equipes || []).find(e => e.equipe_id === equipeId); if (!eq) return;
+    const alocHoje = (d.alocacoes_hoje || []).filter(a => a.equipe_id === equipeId);
+    const idsAloc = new Set(alocHoje.map(a => a.colaborador_id));
+    const pessoas = (d.pessoas || []).filter(p => p.ativo && (p.equipe_id === equipeId || idsAloc.has(p.pessoa_id)))
+      .sort((a, b) => a.nome.localeCompare(b.nome));
+    const pend = this.pendenciasAbertas();
+    const marcsDe = id => (d.marcacoes || []).filter(m => m.pessoa_id === id && String(m.marcado_dia).slice(0, 10) === hoje)
+      .sort((a, b) => String(a.marcado_em).localeCompare(String(b.marcado_em)));
+    const escalas = (d.planos || []).filter(pl => pl.equipe_id === equipeId);
+    const alertasEq = this.alertas().filter(a => a.equipe_id === equipeId);
+    const cerca = alocHoje[0];
+    const enderecoDe = a => { const l = (d.locais || []).find(x => Math.abs(x.lat - a.cerca_lat) < 1e-4 && Math.abs(x.lng - a.cerca_lng) < 1e-4); return l ? l.nome : Number(a.cerca_lat).toFixed(4) + ', ' + Number(a.cerca_lng).toFixed(4); };
+
+    let presentes = 0;
+    const linha = p => {
+      const ms = marcsDe(p.pessoa_id);
+      const ent = ms.find(m => m.tipo === 'entrada'), sai = ms.slice().reverse().find(m => m.tipo === 'saida');
+      const minhas = pend.filter(x => x.pessoa_id === p.pessoa_id);
+      const alocado = idsAloc.has(p.pessoa_id);
+      const deOutra = p.equipe_id !== equipeId;
+      if (ent) presentes++;
+      let estado, cls;
+      if (!p.tem_biometria) { estado = 'sem cadastro facial'; cls = 'bad'; }
+      else if (!alocado) { estado = 'sem alocação hoje'; cls = 'mut'; }
+      else if (ent && sai) { estado = 'dia completo'; cls = 'ok'; }
+      else if (ent) { estado = 'presente'; cls = 'ok'; }
+      else { estado = 'sem entrada'; cls = 'warn'; }
+      const acoes = [];
+      if (minhas.length) acoes.push('<button class="v2btn ghost mini" data-eqp-exc="' + esc(minhas[0].id) + '">Analisar pendência' + (minhas.length > 1 ? ' (' + minhas.length + ')' : '') + '</button>');
+      if (!ent && p.tem_biometria) acoes.push('<button class="v2btn ghost mini" data-eqp-lancar="' + esc(p.pessoa_id) + '">Lançar entrada</button>');
+      if (!p.tem_biometria) acoes.push('<button class="v2btn ghost mini" data-eqp-bio="' + esc(p.pessoa_id) + '">Cadastrar face</button>');
+      return '<div class="eqp-row">' +
+        '<span class="av' + (p.tem_biometria ? '' : ' bad') + '">' + esc(this.iniciais(p.nome)) + '</span>' +
+        '<div class="eqp-quem"><div class="nm">' + esc(p.nome) + (deOutra ? ' <span class="pill mut" style="padding:0 7px">ajuste de hoje · ' + esc(this.nomeEquipe(p.equipe_id)) + '</span>' : '') +
+          (p.papel === 'gestor' ? ' <span class="tag">gestor</span>' : '') + '</div>' +
+          '<div class="mt">' + (ent ? 'Entrada <b class="mono">' + esc(hora(ent.marcado_em)) + '</b>' : 'Sem entrada') + (sai ? ' · Saída <b class="mono">' + esc(hora(sai.marcado_em)) + '</b>' : '') +
+            (minhas.length ? ' · <span class="badfg">' + esc(minhas.map(x => x.rotulo).join(', ')) + '</span>' : '') + '</div></div>' +
+        '<span class="pill ' + cls + '"><span class="dot"></span>' + esc(estado) + '</span>' +
+        '<div class="eqp-acoes">' + acoes.join('') + '</div></div>';
+    };
+    const linhas = pessoas.map(linha).join('');
+
+    const html =
+      '<div id="eqpModal" class="modal-back"><div class="modal" style="width:min(860px,100%)"><div class="modal-head">' +
+        '<h2>' + esc(eq.nome) + ' · hoje</h2><button class="modal-x" id="eqpX">✕</button></div>' +
+        '<div class="modal-body">' +
+          '<div class="aloc-card-grid" style="padding:0;margin-bottom:12px">' +
+            '<div><div class="k">Presença</div><div class="v"><b>' + presentes + '</b> de ' + pessoas.length + '</div></div>' +
+            '<div><div class="k">Jornada</div><div class="v">' + esc(this.jornadaDe(equipeId)) + '</div></div>' +
+            '<div><div class="k">Cerca de hoje</div><div class="v">' + (cerca ? esc(enderecoDe(cerca)) + ' · ' + cerca.cerca_raio_m + ' m' : '<span class="badfg">sem cerca hoje</span>') + '</div></div>' +
+            '<div><div class="k">Escala</div><div class="v">' + (escalas.length ? escalas.map(pl => esc(pl.nome || eq.nome)).join(', ') : '<span class="badfg">nenhuma</span>') + '</div></div>' +
+          '</div>' +
+          (alertasEq.length ? '<p class="nota" style="margin:0 0 10px"><b>Planejamento:</b> ' + alertasEq.map(a => esc(a.rotulo || a.tipo)).join(' · ') + '</p>' : '') +
+          '<div class="eqp-lista">' + (linhas || '<p class="nota">Nenhum colaborador ativo nesta equipe.</p>') + '</div>' +
+          '<div class="row2" style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">' +
+            (escalas.length ? '<button class="v2btn ghost" data-eqp-escala="' + esc(escalas[0].plano_id) + '">Editar escala</button>' : '<button class="v2btn ghost" id="eqpNovaEscala">Criar escala</button>') +
+            '<button class="v2btn ghost" id="eqpAjustar">Ajustar só hoje</button>' +
+            '<button class="v2btn ghost" id="eqpEquipe">Membros da equipe</button>' +
+            '<button class="v2btn" id="eqpFechar" style="margin-left:auto">Fechar</button>' +
+          '</div>' +
+        '</div></div></div>';
+    const antigo = $('eqpModal'); if (antigo) antigo.remove();
+    $('rh').insertAdjacentHTML('beforeend', html);
+    const fechar = () => { const m = $('eqpModal'); if (m) m.remove(); };
+    $('eqpX').onclick = fechar; $('eqpFechar').onclick = fechar;
+    $('eqpModal').onclick = e => { if (e.target.id === 'eqpModal') fechar(); };
+    const ir = (aba, depois) => { fechar(); this.aba = aba; this.pintar(); if (depois) depois(); };
+    $('eqpAjustar').onclick = () => { this.alocDia = hoje; ir('alocacao'); };
+    $('eqpEquipe').onclick = () => { this.equipeAberta = equipeId; ir('equipes'); };
+    const nova = $('eqpNovaEscala'); if (nova) nova.onclick = () => ir('planos', () => this.abrirEditorPlano({ equipe_id: equipeId }));
+    $('eqpModal').querySelectorAll('[data-eqp-escala]').forEach(b => { b.onclick = () => ir('planos', () => this.abrirEditorPlano((d.planos || []).find(pl => pl.plano_id === b.dataset.eqpEscala))); });
+    $('eqpModal').querySelectorAll('[data-eqp-exc]').forEach(b => { b.onclick = () => { this.pendSel = b.dataset.eqpExc; this.pendTab = 'abertas'; ir('pendencias'); }; });
+    $('eqpModal').querySelectorAll('[data-eqp-bio]').forEach(b => { b.onclick = () => ir('pessoas', () => this.abrirBiometria(b.dataset.eqpBio)); });
+    $('eqpModal').querySelectorAll('[data-eqp-lancar]').forEach(b => {
+      b.onclick = async () => {
+        const p = this.pessoaDe(b.dataset.eqpLancar);
+        const motivo = prompt('Lançar ENTRADA de ' + (p ? p.nome : '') + ' agora. Justificativa (fica na auditoria e no espelho):', 'entrada lançada pelo RH');
+        if (motivo == null) return;
+        b.disabled = true;
+        const r = await ApiRh.lancarPonto(this.token, { colaborador_id: b.dataset.eqpLancar, tipo: 'entrada',
+          marcado_em: this.dados.servidor_hora || new Date().toISOString(), motivo: motivo.trim() || 'entrada lançada pelo RH' });
+        if (!r.ok) { toast(r.erro || 'Falha', 'bad'); b.disabled = false; return; }
+        toast('Entrada lançada para ' + (p ? p.nome.split(' ')[0] : 'colaborador'), 'ok');
+        await this.recarregar();
+        this.abrirPainelEquipe(equipeId);
+      };
+    });
+  },
+
   pintarStub() {
     $('rh-stub').innerHTML =
       '<div class="stub"><div class="cx">' +
@@ -521,7 +620,7 @@ export const Rh = {
       const ausentes = c.ausentes.length;
       if (ausentes) chips.push({ label: ausentes + (ausentes > 1 ? ' ausentes' : ' ausente'), tone: '#dc2626' });
       else chips.push({ label: 'sem ocorrências', tone: '#16a34a' });
-      return '<div class="team">' +
+      return '<div class="team team-click" data-team="' + esc(c.equipe_id) + '" title="Abrir o painel da equipe">' +
         '<div class="team-map">' + this.svgMiniMapa(c.status) +
           (cerca ? '<span class="cerca-tag">cerca ' + cerca.cerca_raio_m + ' m</span>' : '') +
         '</div>' +
@@ -633,6 +732,7 @@ export const Rh = {
       '</div>';
 
     $('verPlanejamento').onclick = () => { this.aba = 'alocacao'; this.pintar(); };
+    $('rh-painel').querySelectorAll('[data-team]').forEach(el => { el.onclick = () => this.abrirPainelEquipe(el.dataset.team); });
     $('abrirFila').onclick = () => { this.aba = 'pendencias'; this.pintar(); };
     $('abrirPlanos').onclick = () => { this.aba = 'planos'; this.pintar(); };
     $('rh-painel').querySelectorAll('button[data-plan]').forEach(b => {

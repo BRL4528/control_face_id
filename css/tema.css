@@ -642,3 +642,15 @@ button.linha-item{border:0;background:none;font:inherit;color:inherit;cursor:poi
 .aloc-nota{text-align:center;margin:0 0 12px}
 .dia-ok{text-align:center;padding:16px;border-radius:12px;background:var(--verde-bg);
   color:var(--verde-ink);font-weight:700;border:1px solid var(--verde)}
+
+/* Painel da equipe (modal a partir do card da Central) */
+#rh .team.team-click{cursor:pointer;transition:box-shadow .15s,transform .15s}
+#rh .team.team-click:hover{box-shadow:0 8px 22px rgba(16,24,40,.10);transform:translateY(-1px)}
+#rh .eqp-lista{max-height:52vh;overflow:auto}
+#rh .eqp-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--v2-linha2)}
+#rh .eqp-row:first-child{border-top:0}
+#rh .eqp-quem{flex:1;min-width:0}
+#rh .eqp-quem .nm{font-size:13.5px;font-weight:600}
+#rh .eqp-quem .mt{font-size:12px;color:var(--v2-mut);margin-top:2px}
+#rh .eqp-acoes{display:flex;gap:6px;flex:none;flex-wrap:wrap;justify-content:flex-end}
+@media (max-width:700px){#rh .eqp-row{flex-wrap:wrap} #rh .eqp-acoes{width:100%;justify-content:flex-start}}
