@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<title>Ponto Facial · Efrat</title>
+<title>Control Face ID · Ponto Facial</title>
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <link rel="icon" href="./icon-192.png">
@@ -18,19 +18,47 @@
 
 <!-- ===================== PORTA ===================== -->
 <div id="porta">
-  <h1>Ponto Facial</h1>
-  <div class="sub" id="portaSub">Seu ponto, no seu celular</div>
-  <button class="act big" id="btnPonto">REGISTRAR PONTO</button>
-  <p class="nota" id="portaStatus" style="margin-top:20px"></p>
+  <!-- Painel de marca: no desktop ocupa a coluna esquerda; no celular vira só o cabeçalho. -->
+  <aside class="porta-marca">
+    <div class="marca-topo"><span class="marca-logo">CF</span><span class="marca-nome">Control Face ID</span></div>
+    <div class="marca-msg">
+      <h2>Ponto por reconhecimento facial, no celular de cada colaborador.</h2>
+      <ul class="marca-lista">
+        <li><span class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="11" r="3"/><path d="M7 17c1.2-1.8 3-2.5 5-2.5s3.8.7 5 2.5"/></svg></span>
+          <div><b>Reconhecimento 1:1</b><span>O aparelho reconhece só o próprio dono. Sem fila, sem cartão.</span></div></li>
+        <li><span class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s7-6.2 7-12a7 7 0 0 0-14 0c0 5.8 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/></svg></span>
+          <div><b>Cerca virtual</b><span>O ponto só vale dentro da área que o RH definiu para a equipe.</span></div></li>
+        <li><span class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5a7 7 0 0 1 14 0"/><path d="M8.5 15.5a3.5 3.5 0 0 1 7 0"/><circle cx="12" cy="19" r="1"/><path d="M2 9.5a11 11 0 0 1 20 0"/></svg></span>
+          <div><b>Funciona sem sinal</b><span>Marca offline e envia sozinho quando a rede voltar.</span></div></li>
+      </ul>
+    </div>
+    <div class="marca-rodape">Ponto eletrônico para equipes em campo</div>
+  </aside>
+
+  <main class="porta-acao">
+    <div class="porta-card">
+      <span class="porta-chip">Colaborador</span>
+      <h1>Ponto Facial</h1>
+      <div class="sub" id="portaSub">Seu ponto, no seu celular</div>
+      <button class="act big" id="btnPonto">REGISTRAR PONTO</button>
+      <p class="nota" id="portaStatus"></p>
+      <ol class="porta-passos">
+        <li><span>1</span>Toque no botão</li>
+        <li><span>2</span>Olhe para a câmera</li>
+        <li><span>3</span>Ponto registrado</li>
+      </ol>
+    </div>
+  </main>
 </div>
 
 <!-- Acesso do RH: fora do rodízio exclusivo de mostrar(), sempre alcançável. -->
-<button id="btnAcessar" class="hide">Acessar RH</button>
+<button id="btnAcessar" class="hide">Acesso do RH</button>
 
 <!-- ===================== PAREAMENTO (primeira vez) ===================== -->
-<div id="pareamento" class="hide" style="max-width:380px;margin:0 auto;padding:12vh 22px 40px">
-  <h1 style="font-size:22px;margin:0 0 4px">Ativar meu ponto</h1>
-  <p class="nota" style="margin:0 0 26px">Só na primeira vez. Depois é só olhar para a câmera.</p>
+<div id="pareamento" class="entrada hide">
+  <div class="entrada-topo"><span class="marca-logo">CF</span><span class="marca-nome">Control Face ID</span></div>
+  <h1>Ativar meu ponto</h1>
+  <p class="nota entrada-sub">Só na primeira vez. Depois é só olhar para a câmera.</p>
   <label class="lb">Código da empresa</label>
   <input type="text" id="pareEmpresa" autocapitalize="off" spellcheck="false" placeholder="fornecido pelo RH">
   <label class="lb">Sua matrícula</label>
@@ -146,9 +174,10 @@
 </div>
 
 <!-- ===================== LOGIN RH ===================== -->
-<div id="loginRh" class="hide" style="max-width:380px;margin:0 auto;padding:12vh 22px 40px">
-  <h1 style="font-size:22px;margin:0 0 4px">Acesso do RH</h1>
-  <p class="nota" style="margin:0 0 26px">A senha não sai deste aparelho.</p>
+<div id="loginRh" class="entrada hide">
+  <div class="entrada-topo"><span class="marca-logo">CF</span><span class="marca-nome">Control Face ID</span></div>
+  <h1>Acesso do RH</h1>
+  <p class="nota entrada-sub">A senha não sai deste aparelho.</p>
   <label class="lb">Usuário</label>
   <input type="text" id="rhUsuario" autocomplete="username" autocapitalize="off" spellcheck="false">
   <label class="lb">Senha</label>

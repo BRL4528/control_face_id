@@ -1,5 +1,5 @@
 {
-  "name": "Efrat — Teste de Ponto Facial",
+  "name": "Control Face ID — Ponto Facial",
   "short_name": "Ponto Facial",
   "start_url": "./index.html",
   "display": "standalone",
