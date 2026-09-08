@@ -30,7 +30,10 @@ export default async function handler(req, res) {
   // ---- remover (soft) ----
   if (b.acao === 'remover') {
     if (!b.plano_id) return erro(res, 400, 'CORPO_INVALIDO', 'plano_id obrigatório');
-    await sql`DELETE FROM alocacao WHERE plano_id=${b.plano_id} AND dia >= ${hoje} AND origem='plano'`;
+    // Confere que o plano é desta empresa ANTES de apagar alocações (isolamento de tenant).
+    const dono = await sql`SELECT id FROM plano_alocacao WHERE id=${b.plano_id} AND empresa_id=${rh.empresa_id} LIMIT 1`;
+    if (!dono[0]) return erro(res, 404, 'PLANO_NAO_ENCONTRADO', 'escala não encontrada');
+    await sql`DELETE FROM alocacao WHERE plano_id=${b.plano_id} AND empresa_id=${rh.empresa_id} AND dia >= ${hoje} AND origem='plano'`;
     await sql`UPDATE plano_alocacao SET ativo=false, atualizado_em=now() WHERE id=${b.plano_id} AND empresa_id=${rh.empresa_id}`;
     return ok(res, { removido: true });
   }

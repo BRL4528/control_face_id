@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS usuario_rh (
   criado_em    timestamptz NOT NULL DEFAULT now(),
   UNIQUE (empresa_id, usuario)
 );
+-- O login não pede empresa (só usuário + senha), então o usuário precisa ser
+-- único no SISTEMA, não só na empresa — senão dois RHs "rh" de empresas
+-- diferentes colidem e o LIMIT 1 do login escolhe um deles às cegas.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_usuario_rh_usuario ON usuario_rh (lower(usuario));
 
 -- ═══════════════════════════════════════════════════════ equipes
 

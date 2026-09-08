@@ -17,6 +17,17 @@ export default async function handler(req, res) {
   if (!b.id) return erro(res, 400, 'CORPO_INVALIDO', 'id obrigatório');
   const sql = db();
 
+  // Isolamento de tenant: o alvo precisa pertencer à empresa do RH. Marcação
+  // tem empresa_id direto; template chega ao dono via colaborador.
+  if (tipo === 'template') {
+    const dono = await sql`SELECT 1 FROM template_facial t JOIN colaborador c ON c.id=t.colaborador_id
+                           WHERE t.id=${b.id} AND c.empresa_id=${rh.empresa_id} LIMIT 1`;
+    if (!dono[0]) return erro(res, 404, 'ALVO_NAO_ENCONTRADO', 'cadastro facial não encontrado');
+  } else {
+    const dono = await sql`SELECT 1 FROM marcacao WHERE id_cliente=${b.id} AND empresa_id=${rh.empresa_id} LIMIT 1`;
+    if (!dono[0]) return erro(res, 404, 'ALVO_NAO_ENCONTRADO', 'marcação não encontrada');
+  }
+
   await sql`
     INSERT INTO correcao (id, empresa_id, alvo_tipo, alvo_id, acao, motivo, usuario_rh_id)
     VALUES (${novoId()}, ${rh.empresa_id}, ${tipo}, ${b.id}, ${acao}, ${b.motivo || null}, ${rh.sub})`;

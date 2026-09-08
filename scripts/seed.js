@@ -47,4 +47,9 @@ async function main() {
   console.log('  Guarde o empresa_id — o app o usa no pareamento do celular.');
 }
 
-main().catch(e => { console.error(e); process.exit(1); });
+main().catch(e => {
+  if (e && e.code === '23505' && /usuario_rh/.test(String(e.message))) {
+    console.error(`✗ Já existe um usuário do RH chamado "${usuario}" em outra empresa. O usuário é único no sistema: escolha outro (3º argumento).`);
+  } else console.error(e);
+  process.exit(1);
+});

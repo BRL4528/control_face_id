@@ -60,7 +60,8 @@ export default async function handler(req, res) {
   if (!usuario || !nome) return erro(res, 400, 'CORPO_INVALIDO', 'usuario e nome obrigatórios');
   if (!/^[a-z0-9._-]{3,32}$/.test(usuario)) return erro(res, 400, 'CORPO_INVALIDO', 'usuário: 3–32 letras/números/._-');
 
-  const jaExiste = await sql`SELECT 1 FROM usuario_rh WHERE empresa_id=${rh.empresa_id} AND usuario=${usuario} LIMIT 1`;
+  // Único no sistema inteiro (o login não pede empresa) — ver ux_usuario_rh_usuario.
+  const jaExiste = await sql`SELECT 1 FROM usuario_rh WHERE lower(usuario)=${usuario} LIMIT 1`;
   if (jaExiste.length) return erro(res, 409, 'USUARIO_EXISTE', 'já existe um usuário com esse login');
 
   const senha = senhaTemporaria();
