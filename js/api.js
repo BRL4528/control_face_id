@@ -123,5 +123,12 @@ export const ApiRh = {
   config(token, d) { return reqRh('/rh/config', token, d); },
   usuario(token, d) { return reqRh('/rh/usuario', token, d); },
   plano(token, d) { return reqRh('/rh/plano', token, d); },
-  importar(token, d) { return reqRh('/rh/importar', token, d, undefined); }
+  importar(token, d) { return reqRh('/rh/importar', token, d, undefined); },
+  /** Planilha modelo de importação (binário). Devolve Blob ou null. */
+  async modeloImportacao(token) {
+    try {
+      const r = await fetch(cfg().apiBase + '/rh/importar?modelo=1', { headers: { Authorization: 'Bearer ' + token } });
+      return r.ok ? await r.blob() : null;
+    } catch { return null; }
+  }
 };

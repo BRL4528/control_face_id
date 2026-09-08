@@ -1060,7 +1060,8 @@ export const Rh = {
       '<div class="pg-head"><div>' +
         '<h1 class="tit">Colaboradores</h1>' +
         '<p class="sub">' + total + ' pessoas cadastradas.</p></div>' +
-        '<div class="acoes"><button class="v2btn ghost" id="btnImportar" title="Planilha xlsx ou csv com matrícula e nome">Importar planilha</button>' +
+        '<div class="acoes"><button class="v2btn ghost" id="btnModelo" title="Planilha xlsx com as colunas certas e instruções">Baixar modelo</button>' +
+          '<button class="v2btn ghost" id="btnImportar" title="Planilha xlsx ou csv com matrícula e nome">Importar planilha</button>' +
           '<input type="file" id="impArquivo" accept=".xlsx,.xls,.csv" class="hide">' +
           '<button class="v2btn" id="btnAbrirNovo">+ Colaborador</button></div>' +
       '</div>' +
@@ -1089,6 +1090,16 @@ export const Rh = {
     };
     $('btnAbrirNovo').onclick = () => this.formColaborador(null);
     $('btnImportar').onclick = () => $('impArquivo').click();
+    $('btnModelo').onclick = async () => {
+      const btn = $('btnModelo'); btn.disabled = true;
+      const blob = await ApiRh.modeloImportacao(this.token);
+      btn.disabled = false;
+      if (!blob) { toast('Não consegui gerar o modelo', 'bad'); return; }
+      const url = URL.createObjectURL(blob);
+      const a = Object.assign(document.createElement('a'), { href: url, download: 'modelo-colaboradores.xlsx' });
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    };
     $('impArquivo').onchange = e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) this.importarPlanilha(f); };
 
     $('rh-pessoas').querySelectorAll('button[data-bio]').forEach(b => {

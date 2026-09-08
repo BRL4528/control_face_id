@@ -9,6 +9,8 @@
 //   • acao 'importar' { linhas, criar_equipes }: upsert em lote por (empresa,
 //     matrícula) num único INSERT via unnest — 1000 linhas em poucas queries,
 //     dentro do teto de 15 s da function. Não mexe em biometria nem em escala.
+//   • GET ?modelo=1: baixa a planilha MODELO (aba Colaboradores com exemplos +
+//     aba Instruções), com os cabeçalhos exatos que o 'analisar' reconhece.
 import XLSX from 'xlsx';
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
@@ -79,11 +81,48 @@ export function analisarPlanilha(buffer) {
   return { aba: wb.SheetNames[0], colunas: cols, linhas, ignoradas };
 }
 
+/** Planilha modelo para o RH preencher — cabeçalhos casam com MAPA. */
+export function planilhaModelo() {
+  const wb = XLSX.utils.book_new();
+  const dados = XLSX.utils.aoa_to_sheet([
+    ['Matrícula', 'Nome', 'Equipe', 'Status'],
+    ['1001', 'MARIA DA SILVA', 'Obra Norte', 'Ativo'],
+    ['1002', 'JOSÉ PEREIRA', 'Obra Norte', 'Ativo'],
+    ['1003', 'ANA SOUZA', 'Escritório', 'Inativo']
+  ]);
+  dados['!cols'] = [{ wch: 12 }, { wch: 34 }, { wch: 26 }, { wch: 10 }];
+  XLSX.utils.book_append_sheet(wb, dados, 'Colaboradores');
+  const instr = XLSX.utils.aoa_to_sheet([
+    ['Como preencher'],
+    [''],
+    ['Matrícula', 'Obrigatória. Identifica a pessoa: quem já existe com a mesma matrícula é ATUALIZADO, não duplicado. É também o que o colaborador digita ao ativar o ponto no celular.'],
+    ['Nome', 'Obrigatório. Nome completo.'],
+    ['Equipe', 'Opcional. Nome da equipe (obra, frente, setor). Se já existir uma equipe com esse nome, a pessoa entra nela; se não existir, o sistema oferece criar na prévia. Vazio = sem equipe (não tira de uma equipe já vinculada no sistema).'],
+    ['Status', 'Opcional. "Ativo" ou "Inativo". Vazio = Ativo. Inativo não consegue bater ponto.'],
+    [''],
+    ['Regras', 'Linha sem matrícula ou sem nome é ignorada. Matrícula repetida na planilha: só a primeira vale. Biometria, escala e ajustes de dia nunca são alterados pela importação.'],
+    ['Formato', 'Salve como .xlsx ou .csv. Só a primeira aba é lida. Os títulos das colunas podem ficar em qualquer ordem, mas mantenha os nomes (Matrícula/Código, Nome, Equipe/Local de alocação, Status).']
+  ]);
+  instr['!cols'] = [{ wch: 14 }, { wch: 110 }];
+  XLSX.utils.book_append_sheet(wb, instr, 'Instruções');
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+}
+
 export default async function handler(req, res) {
   if (cors(req, res)) return;
-  if (exigeMetodo(req, res, 'POST')) return;
   const rh = autenticarRh(req);
   if (!rh) return erro(res, 401, 'SESSAO_INVALIDA', 'faça login novamente');
+
+  if (req.method === 'GET') {
+    if (!(req.query && req.query.modelo)) return erro(res, 400, 'CORPO_INVALIDO', 'use ?modelo=1');
+    const buf = planilhaModelo();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="modelo-colaboradores.xlsx"');
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(200).end(buf);
+    return;
+  }
+  if (exigeMetodo(req, res, 'POST')) return;
   const b = corpo(req);
   const sql = db();
 
