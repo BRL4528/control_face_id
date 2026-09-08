@@ -122,5 +122,6 @@ export const ApiRh = {
   jornada(token, d) { return reqRh('/rh/jornada', token, d); },
   config(token, d) { return reqRh('/rh/config', token, d); },
   usuario(token, d) { return reqRh('/rh/usuario', token, d); },
-  plano(token, d) { return reqRh('/rh/plano', token, d); }
+  plano(token, d) { return reqRh('/rh/plano', token, d); },
+  importar(token, d) { return reqRh('/rh/importar', token, d, undefined); }
 };

@@ -1060,7 +1060,9 @@ export const Rh = {
       '<div class="pg-head"><div>' +
         '<h1 class="tit">Colaboradores</h1>' +
         '<p class="sub">' + total + ' pessoas cadastradas.</p></div>' +
-        '<div class="acoes"><button class="v2btn" id="btnAbrirNovo">+ Colaborador</button></div>' +
+        '<div class="acoes"><button class="v2btn ghost" id="btnImportar" title="Planilha xlsx ou csv com matrícula e nome">Importar planilha</button>' +
+          '<input type="file" id="impArquivo" accept=".xlsx,.xls,.csv" class="hide">' +
+          '<button class="v2btn" id="btnAbrirNovo">+ Colaborador</button></div>' +
       '</div>' +
       '<div id="areaNovo"></div>' +
       '<div class="tbl-wrap">' +
@@ -1086,6 +1088,8 @@ export const Rh = {
       const nb = $('pBusca'); if (nb) { nb.focus(); nb.setSelectionRange(caret, caret); }
     };
     $('btnAbrirNovo').onclick = () => this.formColaborador(null);
+    $('btnImportar').onclick = () => $('impArquivo').click();
+    $('impArquivo').onchange = e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) this.importarPlanilha(f); };
 
     $('rh-pessoas').querySelectorAll('button[data-bio]').forEach(b => {
       b.onclick = () => this.abrirBiometria(b.dataset.bio);
@@ -1096,6 +1100,77 @@ export const Rh = {
     $('rh-pessoas').querySelectorAll('button[data-editar]').forEach(b => {
       b.onclick = () => this.formColaborador(this.pessoaDe(b.dataset.editar));
     });
+  },
+
+  /* ------------------------------------------------- importação por planilha */
+
+  /** Lê a planilha no servidor (prévia) e abre o modal de confirmação. */
+  async importarPlanilha(arquivo) {
+    if (arquivo.size > 4 * 1024 * 1024) { toast('Planilha acima de 4 MB', 'warn'); return; }
+    toast('Lendo ' + arquivo.name + '…', 'ok');
+    const b64 = await new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(String(fr.result).split(',')[1] || '');
+      fr.onerror = () => rej(fr.error);
+      fr.readAsDataURL(arquivo);
+    });
+    const r = await ApiRh.importar(this.token, { acao: 'analisar', arquivo_b64: b64, nome_arquivo: arquivo.name });
+    if (!r.ok) { toast(r.erro || 'Não consegui ler a planilha', 'bad'); return; }
+    this.modalImportacao(arquivo.name, r.dados);
+  },
+
+  modalImportacao(nomeArquivo, an) {
+    const rs = an.resumo, linhas = an.linhas || [];
+    const col = (rot, val) => '<div><div class="k">' + rot + '</div><div class="v">' + val + '</div></div>';
+    const amostra = linhas.slice(0, 12);
+    const eqsNovas = rs.equipes_novas || [];
+    const html =
+      '<div id="impModal" class="modal-back"><div class="modal"><div class="modal-head">' +
+        '<h2>Importar colaboradores</h2><button class="modal-x" id="impX">✕</button></div>' +
+        '<div class="modal-body">' +
+          '<p class="nota" style="margin:0 0 10px">' + esc(nomeArquivo) + ' · aba "' + esc(an.aba) + '" · colunas usadas: ' +
+            Object.entries(an.colunas).map(([k, v]) => '<b>' + esc(v) + '</b> → ' + k).join(', ') + '</p>' +
+          '<div class="aloc-card-grid" style="padding:0;margin-bottom:12px">' +
+            col('Linhas válidas', rs.total) + col('Novos', rs.novos) + col('Já cadastrados (atualiza)', rs.atualizados) +
+            col('Ficam inativos', rs.inativos) + '</div>' +
+          (eqsNovas.length ?
+            '<div style="border:1px solid var(--linha);border-radius:10px;padding:10px 12px;margin-bottom:10px">' +
+              '<b style="font-size:13px">Equipes novas na coluna "' + esc(an.colunas.equipe || 'Equipe') + '" (' + eqsNovas.length + ')</b>' +
+              '<p class="nota" style="margin:2px 0 8px">Desmarque o que não é equipe (ex.: "Férias", "Ausente"). Quem estiver nessas linhas entra sem equipe.</p>' +
+              '<div class="lista-check" style="max-height:160px">' + eqsNovas.map((n, i) =>
+                '<label class="check"><input type="checkbox" data-impeq="' + esc(n) + '" checked style="width:auto;margin:0">' +
+                '<span>' + esc(n) + ' <span class="nota">· ' + linhas.filter(l => l.equipe === n).length + '</span></span></label>').join('') + '</div></div>' : '') +
+          (rs.ignoradas && rs.ignoradas.length ?
+            '<p class="nota" style="margin:0 0 10px"><b>' + rs.ignoradas.length + ' linha(s) ignorada(s):</b> ' +
+              rs.ignoradas.slice(0, 8).map(x => 'linha ' + x.linha + ' (' + esc(x.nome || x.matricula || '?') + ': ' + esc(x.motivo) + ')').join('; ') +
+              (rs.ignoradas.length > 8 ? '…' : '') + '</p>' : '') +
+          '<div style="overflow:auto;max-height:260px"><table class="tabdados"><thead><tr><th>Matrícula</th><th>Nome</th><th>Equipe</th><th>Status</th><th></th></tr></thead><tbody>' +
+            amostra.map(l => '<tr><td class="mono">' + esc(l.matricula) + '</td><td>' + esc(l.nome) + '</td><td>' + esc(l.equipe || '—') + '</td>' +
+              '<td>' + (l.ativo ? 'ativo' : '<span class="badfg">inativo</span>') + '</td><td class="nota">' + (l.existe ? 'atualiza' : 'novo') + '</td></tr>').join('') +
+          '</tbody></table></div>' +
+          (linhas.length > amostra.length ? '<p class="nota" style="margin:6px 0 0">… e mais ' + (linhas.length - amostra.length) + ' linha(s).</p>' : '') +
+          '<p class="nota" style="margin:10px 0 0">Biometria, escala e ajustes de dia não mudam. Quem já existe é localizado pela matrícula; a equipe só é trocada se a planilha trouxer uma.</p>' +
+          '<div class="row2" style="margin-top:14px">' +
+            '<button class="act" id="impOk"' + (linhas.length ? '' : ' disabled') + '>Importar ' + linhas.length + ' colaborador(es)</button>' +
+            '<button class="act ghost" id="impCancelar">Cancelar</button></div>' +
+        '</div></div></div>';
+    const antigo = $('impModal'); if (antigo) antigo.remove();
+    $('rh').insertAdjacentHTML('beforeend', html);
+    const fechar = () => { const m = $('impModal'); if (m) m.remove(); };
+    $('impX').onclick = fechar; $('impCancelar').onclick = fechar;
+    $('impModal').onclick = e => { if (e.target.id === 'impModal') fechar(); };
+    $('impOk').onclick = async () => {
+      const btn = $('impOk'); btn.disabled = true; btn.textContent = 'Importando…';
+      // Equipes novas desmarcadas não são criadas: a pessoa entra sem equipe.
+      const recusadas = new Set([...document.querySelectorAll('#impModal [data-impeq]')].filter(c => !c.checked).map(c => c.dataset.impeq));
+      const r = await ApiRh.importar(this.token, { acao: 'importar', criar_equipes: true,
+        linhas: linhas.map(l => ({ matricula: l.matricula, nome: l.nome, equipe: l.equipe && !recusadas.has(l.equipe) ? l.equipe : null, ativo: l.ativo })) });
+      if (!r.ok) { btn.disabled = false; btn.textContent = 'Tentar de novo'; toast(r.erro || 'Falha na importação', 'bad'); return; }
+      fechar();
+      const d = r.dados;
+      toast('Importação concluída · ' + d.criados + ' novo(s), ' + d.atualizados + ' atualizado(s)' + (d.equipes_criadas ? ', ' + d.equipes_criadas + ' equipe(s) criada(s)' : ''), 'ok');
+      await this.recarregar();
+    };
   },
 
   /**
