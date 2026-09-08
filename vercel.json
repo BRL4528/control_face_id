@@ -69,7 +69,7 @@
   "rewrites": [
     {
       "source": "/e/:token",
-      "destination": "/index.html"
+      "destination": "/"
     }
   ]
 }
