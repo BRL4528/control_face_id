@@ -232,6 +232,7 @@ button.linha-item{border:0;background:none;font:inherit;color:inherit;cursor:poi
 #rh .team-body{flex:1;min-width:0;display:flex;flex-direction:column}
 #rh .team-top{display:flex;align-items:center;gap:9px}
 #rh .team-nome{font-size:15px;font-weight:600;letter-spacing:-.01em}
+#rh .team-nome small{display:block;font-size:12px;font-weight:400;color:var(--v2-mut);letter-spacing:0}
 #rh .team-cnt{margin-left:auto;font-size:12.5px;color:var(--v2-mut)}
 #rh .team-meta{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--v2-sub);margin-top:6px}
 #rh .team-pres{margin-top:auto;padding-top:12px}

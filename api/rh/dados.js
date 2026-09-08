@@ -58,7 +58,7 @@ export default async function handler(req, res) {
         WHERE co.empresa_id = ${empresa}
         ORDER BY co.criada_em DESC LIMIT 500`,
     // Planos de alocação recorrente ativos (para a aba Planos e os alertas).
-    sql`SELECT id AS plano_id, equipe_id, colaboradores, cerca_lat, cerca_lng, cerca_raio_m,
+    sql`SELECT id AS plano_id, nome, equipe_id, colaboradores, cerca_lat, cerca_lng, cerca_raio_m,
                dias_semana, to_char(vigencia_inicio,'YYYY-MM-DD') AS vigencia_inicio,
                to_char(vigencia_fim,'YYYY-MM-DD') AS vigencia_fim, ativo
         FROM plano_alocacao WHERE empresa_id = ${empresa} AND ativo = true ORDER BY criado_em DESC`

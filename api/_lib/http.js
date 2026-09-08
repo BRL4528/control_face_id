@@ -15,8 +15,10 @@ export function ok(res, dados, status = 200) {
   res.status(status).json(Object.assign({ ok: true }, dados));
 }
 
-export function erro(res, status, codigo, mensagem) {
-  res.status(status).json({ ok: false, erro: { codigo, mensagem } });
+export function erro(res, status, codigo, mensagem, detalhes) {
+  const e = { codigo, mensagem };
+  if (detalhes) e.detalhes = detalhes;
+  res.status(status).json({ ok: false, erro: e });
 }
 
 /** Corpo JSON já vem parseado no runtime Node da Vercel; normaliza o resto. */

@@ -16,7 +16,7 @@ import { $, esc, mostrar, toast, hora, data } from './ui.js';
 
 // Rótulo da aba na trilha do topo (breadcrumb) e no título de página.
 const TITULOS = {
-  painel: 'Central operacional', alocacao: 'Alocações', planos: 'Planos recorrentes', mapa: 'Mapa',
+  painel: 'Central operacional', alocacao: 'Ajustes do dia', planos: 'Escala', mapa: 'Mapa',
   pendencias: 'Pendências', registros: 'Espelho de ponto', jornadas: 'Jornadas',
   pessoas: 'Colaboradores', equipes: 'Equipes',
   relatorios: 'Relatórios', auditoria: 'Auditoria', config: 'Configurações'
@@ -190,6 +190,12 @@ export const Rh = {
     return d.toISOString().slice(0, 10);
   },
 
+  /** Nome de exibição de uma escala: o projeto/obra que o RH deu, senão a equipe. */
+  nomePlano(planoId) {
+    const pl = (this.dados.planos || []).find(p => p.plano_id === planoId);
+    return pl ? (pl.nome || this.nomeEquipe(pl.equipe_id)) : null;
+  },
+
   /** Alocações do dia agrupadas por equipe (uma cerca representa o grupo). */
   alocacoesDoDia(dia) {
     const linhas = (this.dados.alocacoes || []).filter(a => String(a.dia).slice(0, 10) === dia);
@@ -197,10 +203,11 @@ export const Rh = {
     for (const a of linhas) {
       const g = porEquipe[a.equipe_id] || (porEquipe[a.equipe_id] = {
         equipe_id: a.equipe_id, cerca_lat: a.cerca_lat, cerca_lng: a.cerca_lng,
-        cerca_raio_m: a.cerca_raio_m, colaboradores: [], temPlano: false, temManual: false
+        cerca_raio_m: a.cerca_raio_m, colaboradores: [], temPlano: false, temManual: false, planos: new Set()
       });
       g.colaboradores.push(a.colaborador_id);
-      if (a.origem === 'manual') g.temManual = true; else g.temPlano = true;
+      if (a.origem === 'manual') g.temManual = true;
+      else { g.temPlano = true; if (a.plano_id) g.planos.add(a.plano_id); }
     }
     return Object.values(porEquipe);
   },
@@ -232,11 +239,12 @@ export const Rh = {
     const card = g => {
       const nome = this.nomeEquipe(g.equipe_id);
       const total = (this.dados.pessoas || []).filter(p => p.ativo && p.equipe_id === g.equipe_id).length;
-      // De onde veio a alocação deste dia: só do plano, só manual, ou misto.
+      // De onde veio este dia: da escala (mostra qual), de um ajuste só deste dia, ou misto.
+      const escalas = [...g.planos].map(id => this.nomePlano(id)).filter(Boolean).join(', ');
       const origemPill = g.temManual && g.temPlano
-        ? '<span class="pill warn" style="padding:0 7px">plano + ajuste</span>'
-        : g.temManual ? '<span class="pill mut" style="padding:0 7px">ajuste manual</span>'
-        : '<span class="pill ok" style="padding:0 7px">do plano</span>';
+        ? '<span class="pill warn" style="padding:0 7px">escala + ajuste</span>'
+        : g.temManual ? '<span class="pill mut" style="padding:0 7px">ajuste deste dia</span>'
+        : '<span class="pill ok" style="padding:0 7px" title="Gerado pela escala">' + esc(escalas ? 'Escala: ' + escalas : 'da escala') + '</span>';
       return '<div class="v2card aloc-card">' +
         '<div class="aloc-card-head"><span class="team-nome">' + esc(nome) + '</span>' +
           origemPill +
@@ -257,9 +265,10 @@ export const Rh = {
     };
 
     $('rh-alocacao').innerHTML =
-      '<div class="pg-head"><div><h1 class="tit">Planejamento de equipes</h1>' +
-        '<p class="sub">Defina onde cada equipe trabalha, em que jornada e com qual cerca. É a referência que a operação compara durante o dia.</p></div>' +
-        '<div class="acoes"><button class="v2btn" id="btnNovaAloc">+ Nova alocação</button></div></div>' +
+      '<div class="pg-head"><div><h1 class="tit">Ajustes do dia</h1>' +
+        '<p class="sub">O que vale em cada dia, gerado pela escala. Mexa aqui só para exceção: alguém que não vai, ou a equipe em outro local só neste dia. A escala continua igual nos demais dias.</p></div>' +
+        '<div class="acoes"><button class="v2btn ghost" id="btnVoltarEscala">← Voltar à escala</button>' +
+          '<button class="v2btn" id="btnNovaAloc">+ Ajustar este dia</button></div></div>' +
       '<div class="aloc-barra">' +
         '<div class="segtabs" style="width:auto">' + tab('hoje', 'Hoje') + tab('amanha', 'Amanhã') + '</div>' +
         '<div class="aloc-dianav"><button id="diaPrev">‹</button><span class="mono">' + this.dataLonga(dia) + '</span><button id="diaNext">›</button></div>' +
@@ -268,14 +277,15 @@ export const Rh = {
       '<div class="aloc-grid">' +
         grupos.map(card).join('') +
         '<button class="aloc-novo" id="btnNovaAloc2"><span style="font-size:22px">+</span>' +
-          '<span style="font-weight:500">Alocar uma equipe neste dia</span>' +
-          '<span style="font-size:12.5px;color:#94a3b8">Escolha local, jornada e cerca</span></button>' +
+          '<span style="font-weight:500">Colocar uma equipe só neste dia</span>' +
+          '<span style="font-size:12.5px;color:#94a3b8">Não altera a escala dos outros dias</span></button>' +
       '</div>' +
       '<div id="alocModal" class="modal-back hide"><div class="modal"><div class="modal-head">' +
-        '<h2 id="alocModalTit">Nova alocação</h2>' +
+        '<h2 id="alocModalTit">Ajustar este dia</h2>' +
         '<button class="modal-x" id="alocModalX">✕</button></div>' +
         '<div id="alocEditor" class="modal-body"></div></div></div>';
 
+    $('btnVoltarEscala').onclick = () => { this.aba = 'planos'; this.pintar(); };
     $('diaPrev').onclick = () => { this.alocDia = this.diasRelativos(dia, -1); this.pintarAlocacao(); };
     $('diaNext').onclick = () => { this.alocDia = this.diasRelativos(dia, 1); this.pintarAlocacao(); };
     $('rh-alocacao').querySelectorAll('[data-diatab]').forEach(b => {
@@ -322,7 +332,7 @@ export const Rh = {
   },
 
   abrirEditorAlocacao(opts) {
-    $('alocModalTit').textContent = opts.equipeId ? ('Editar — ' + this.nomeEquipe(opts.equipeId)) : 'Nova alocação';
+    $('alocModalTit').textContent = (opts.equipeId ? ('Ajustar ' + this.nomeEquipe(opts.equipeId)) : 'Ajustar este dia') + ' — ' + this.dataLonga(opts.dia);
     $('alocModal').classList.remove('hide');
     Alocacao.abrir(this, Object.assign({
       alvo: 'alocEditor',
@@ -353,8 +363,10 @@ export const Rh = {
       const dias = (pl.dias_semana || []).slice().sort((a, b) => a - b).map(n => ROT[n]).join(' ');
       const vencendo = pl.vigencia_fim && pl.vigencia_fim >= hoje && pl.vigencia_fim <= limiteVenc;
       const vig = 'De ' + this.dataLonga(pl.vigencia_inicio) + (pl.vigencia_fim ? ' até ' + this.dataLonga(pl.vigencia_fim) : ' (sem prazo)');
+      // Título = nome do plano (projeto/obra) quando o RH deu um; a equipe vira subtítulo.
+      const titulo = pl.nome ? esc(pl.nome) + '<small>' + esc(this.nomeEquipe(pl.equipe_id)) + '</small>' : esc(this.nomeEquipe(pl.equipe_id));
       return '<div class="v2card aloc-card">' +
-        '<div class="aloc-card-head"><span class="team-nome">' + esc(this.nomeEquipe(pl.equipe_id)) + '</span>' +
+        '<div class="aloc-card-head"><span class="team-nome">' + titulo + '</span>' +
           (vencendo ? '<span class="pill warn"><span class="dot"></span>vencendo</span>' : '<span class="pill ok"><span class="dot"></span>ativo</span>') +
           '<span class="team-cnt">' + nColab + ' colaboradores</span></div>' +
         '<div class="aloc-card-map">' + this.svgMiniMapa('bom') +
@@ -366,22 +378,23 @@ export const Rh = {
         '</div>' +
         '<div class="aloc-card-acoes">' +
           '<button class="v2btn ghost mini" data-pled="' + esc(pl.plano_id) + '">Editar</button>' +
+          '<button class="v2btn ghost mini" data-pldia="' + esc(pl.plano_id) + '" title="Exceção: alguém que não vai, ou outro local só num dia">Ajustar um dia</button>' +
           '<button class="v2btn danger mini" data-plrm="' + esc(pl.plano_id) + '" style="margin-left:auto">Remover</button>' +
         '</div></div>';
     };
 
     $('rh-planos').innerHTML =
-      '<div class="pg-head"><div><h1 class="tit">Planos recorrentes</h1>' +
-        '<p class="sub">Defina uma vez e o sistema aplica sozinho todo dia útil. Ajustes pontuais na aba Alocações não são sobrescritos.</p></div>' +
-        '<div class="acoes"><button class="v2btn" id="btnNovoPlano">+ Novo plano</button></div></div>' +
+      '<div class="pg-head"><div><h1 class="tit">Escala das equipes</h1>' +
+        '<p class="sub">Cadastre onde cada equipe trabalha. O sistema aplica todo dia sozinho e avisa em Pendências quando alguém bate fora da cerca. Volte aqui só quando a equipe mudar de local.</p></div>' +
+        '<div class="acoes"><button class="v2btn" id="btnNovoPlano">+ Nova escala</button></div></div>' +
       '<div class="aloc-grid">' +
         planos.map(card).join('') +
         '<button class="aloc-novo" id="btnNovoPlano2"><span style="font-size:22px">+</span>' +
-          '<span style="font-weight:500">Criar um plano recorrente</span>' +
-          '<span style="font-size:12.5px;color:#94a3b8">Equipe, local, dias e vigência</span></button>' +
+          '<span style="font-weight:500">Criar uma escala</span>' +
+          '<span style="font-size:12.5px;color:#94a3b8">Equipe, projeto, local e dias da semana</span></button>' +
       '</div>' +
       '<div id="planoModal" class="modal-back hide"><div class="modal"><div class="modal-head">' +
-        '<h2 id="planoModalTit">Novo plano</h2><button class="modal-x" id="planoModalX">✕</button></div>' +
+        '<h2 id="planoModalTit">Nova escala</h2><button class="modal-x" id="planoModalX">✕</button></div>' +
         '<div id="planoEditor" class="modal-body"></div></div></div>';
 
     $('btnNovoPlano').onclick = () => this.abrirEditorPlano(null);
@@ -389,12 +402,15 @@ export const Rh = {
     $('rh-planos').querySelectorAll('[data-pled]').forEach(b => {
       b.onclick = () => this.abrirEditorPlano(planos.find(p => p.plano_id === b.dataset.pled));
     });
+    $('rh-planos').querySelectorAll('[data-pldia]').forEach(b => {
+      b.onclick = () => { this.alocDia = this.hojeServidor(); this.aba = 'alocacao'; this.pintar(); };
+    });
     $('rh-planos').querySelectorAll('[data-plrm]').forEach(b => {
       b.onclick = async () => {
-        if (!confirm('Remover este plano? As alocações futuras geradas por ele saem; ajustes manuais permanecem.')) return;
+        if (!confirm('Remover esta escala? Os dias futuros gerados por ela saem; ajustes feitos dia a dia permanecem.')) return;
         const r = await ApiRh.plano(this.token, { acao: 'remover', plano_id: b.dataset.plrm });
         if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
-        toast('Plano removido', 'ok');
+        toast('Escala removida', 'ok');
         await this.recarregar();
       };
     });
@@ -403,7 +419,7 @@ export const Rh = {
   },
 
   abrirEditorPlano(pl) {
-    $('planoModalTit').textContent = pl ? ('Editar plano — ' + this.nomeEquipe(pl.equipe_id)) : 'Novo plano recorrente';
+    $('planoModalTit').textContent = pl ? ('Editar escala — ' + (pl.nome || this.nomeEquipe(pl.equipe_id))) : 'Nova escala';
     $('planoModal').classList.remove('hide');
     PlanoEditor.abrir(this, Object.assign({
       alvo: 'planoEditor',
@@ -426,7 +442,7 @@ export const Rh = {
         '<div class="ic">🧭</div>' +
         '<h2>' + esc(this.stub || 'Em breve') + '</h2>' +
         '<p>Esta tela entra numa próxima rodada. Nesta versão o foco é Central operacional, ' +
-        'Alocações, Colaboradores e Pendências.</p>' +
+        'Escala, Colaboradores e Pendências.</p>' +
         '<button class="v2btn" id="stubVoltar" style="margin-top:16px">Voltar à central</button>' +
       '</div></div>';
     $('stubVoltar').onclick = () => { this.aba = 'painel'; this.stub = null; this.pintar(); };
@@ -534,7 +550,7 @@ export const Rh = {
       '<div class="painel-grid">' +
         '<section>' +
           '<div class="sec-tit"><h2>Equipes em operação</h2>' +
-            '<button class="link" id="verPlanejamento">Ver planejamento</button></div>' +
+            '<button class="link" id="verPlanejamento">Ver ajustes do dia</button></div>' +
           (cards.length ? cards.map(teamCard).join('')
             : '<div class="v2card" style="padding:20px;color:#64748b">Nenhuma equipe com pessoas ativas hoje.</div>') +
         '</section>' +

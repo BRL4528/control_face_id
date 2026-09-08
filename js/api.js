@@ -101,7 +101,10 @@ export const Api = {
 
 async function reqRh(rota, token, corpo, metodo) {
   const r = await req(rota, corpo, { bearer: token, metodo });
-  if (!r.ok || !r.json || !r.json.ok) return { ok: false, status: r.status, erro: msgErro(r, 'HTTP ' + r.status) };
+  if (!r.ok || !r.json || !r.json.ok) {
+    const e = (r.json && r.json.erro) || {};
+    return { ok: false, status: r.status, erro: msgErro(r, 'HTTP ' + r.status), codigo: e.codigo || null, detalhes: e.detalhes || null };
+  }
   return { ok: true, dados: r.json };
 }
 

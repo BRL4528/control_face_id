@@ -305,8 +305,8 @@ export const TIPOS_EXCECAO = {
   // Alertas de PLANEJAMENTO (não são do dia; são de gestão da escala).
   pessoa_em_2_equipes: { rotulo: 'Alocada em duas equipes no mesmo dia', severidade: 'critico' },
   cerca_sem_gente:     { rotulo: 'Equipe com cerca e sem colaboradores', severidade: 'atencao' },
-  ativo_sem_plano:     { rotulo: 'Colaborador ativo sem planejamento', severidade: 'atencao' },
-  plano_vencendo:      { rotulo: 'Plano vencendo', severidade: 'atencao' }
+  ativo_sem_plano:     { rotulo: 'Colaborador sem escala', severidade: 'atencao' },
+  plano_vencendo:      { rotulo: 'Escala vencendo', severidade: 'atencao' }
 };
 
 // Hora-limite padrão da entrada. Só usada para decidir quando cobrar "sem

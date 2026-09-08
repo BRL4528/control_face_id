@@ -271,6 +271,10 @@ CREATE TABLE IF NOT EXISTS plano_alocacao (
   atualizado_em  timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS ix_plano_empresa ON plano_alocacao (empresa_id, ativo);
+-- nome: rótulo livre do RH para o plano — em geral o PROJETO/obra em que a equipe
+-- está alocada ("Obra Norte", "Manutenção Sede"). NULL nos planos antigos: a tela
+-- cai no nome da equipe.
+ALTER TABLE plano_alocacao ADD COLUMN IF NOT EXISTS nome text;
 
 -- origem: 'plano' = linha gerada pela materialização (pode ser recriada);
 --         'manual' = ajuste pontual do RH (SAGRADO — a re-materialização não sobrescreve).
