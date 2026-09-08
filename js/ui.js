@@ -7,16 +7,13 @@ export const esc = s => {
   return d.innerHTML;
 };
 
-// Acesso do RH (T-E3DBD4): fica de fora do rodízio exclusivo abaixo de
-// propósito. É alcançável com o aparelho pendente OU aprovado — nunca durante
-// fila/rh/loginRh/painelGestor, onde já teria alternativa própria (ou já é o
-// próprio RH).
-const ACESSO_RH_VISIVEL = new Set(['porta', 'aguardando']);
+// Acesso do RH: fica fora do rodízio exclusivo abaixo. Só aparece na porta —
+// nas outras telas ou já é o próprio RH, ou é o colaborador no meio do ponto.
+const ACESSO_RH_VISIVEL = new Set(['porta']);
+const TELAS = ['porta', 'pareamento', 'fila', 'rh', 'loginRh'];
 
 export function mostrar(tela) {
-  ['porta', 'aguardando', 'fila', 'rh', 'loginRh', 'painelGestor', 'falhaBoot'].forEach(t => {
-    $(t).classList.toggle('hide', t !== tela);
-  });
+  TELAS.forEach(t => { const el = $(t); if (el) el.classList.toggle('hide', t !== tela); });
   $('btnAcessar').classList.toggle('hide', !ACESSO_RH_VISIVEL.has(tela));
 }
 

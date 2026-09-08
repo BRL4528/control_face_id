@@ -71,8 +71,10 @@ test('todo modulo de js/ esta no cache do service worker', () => {
 });
 
 test('as cinco telas do fluxo existem no index', () => {
+  // v4: o aparelho é do colaborador. A tela de "aguardando liberação do RH"
+  // (v3, aprovação de aparelho) deu lugar a #pareamento (ativação inicial).
   const html = ler('index.html');
-  for (const id of ['porta', 'aguardando', 'fila', 'rh', 'loginRh']) {
+  for (const id of ['porta', 'pareamento', 'fila', 'rh', 'loginRh']) {
     assert.match(html, new RegExp('id="' + id + '"'), 'falta a secao #' + id);
   }
 });

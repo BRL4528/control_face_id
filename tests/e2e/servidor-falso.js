@@ -7,92 +7,14 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { avaliarLoteFace } from '../../js/coerencia.js';
-import { normalizarTelefone, telefonesCompartilhados, normalizarUnidade } from '../../js/regras.js';
-// API-1 (T-C8316C): o nucleo extraido. A partir daqui este arquivo deixa de
-// ser a implementacao das rotas e passa a ser o que ele sempre deveria ter
-// sido -- um SERVIDOR DE TESTE: estaticos, _headers, semeadura, latencia
-// simulada e o `estado` que os e2e leem. A regra mora no nucleo, e a prova de
-// que a extracao nao mudou nada e que os 174 e2e nao mudaram uma assercao.
-import { criarRepositorioMemoria } from '../../nucleo/memoria.js';
-import { criarRoteador, despachar } from '../../nucleo/http.js';
-import { lerRequisicao } from '../../nucleo/http-node.js';
-import { ROTAS } from '../../nucleo/rotas.js';
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-
-// Origem da pagina publica de face. Placeholder ate o DevOps fechar o DNS.
-const ORIGEM_PUBLICA_PADRAO = 'https://ORIGEM-PUBLICA-A-DEFINIR';
 
 
 export function extrairCspDeHeaders() {
   const conteudo = fs.readFileSync(path.join(RAIZ, '_headers'), 'utf8');
   const match = conteudo.match(/Content-Security-Policy:\s*(.+)/);
   return match ? match[1].trim() : '';
-}
-
-// T-D00CE0 (docs/fase3-contrato.md §1.6 e §3.3.3): a decisao de servidor
-// sobre se uma marcacao entra, fica retida ou e rejeitada mora agora em
-// nucleo/dominio.js -- pura, sem HTTP e sem armazenamento, como sempre foi,
-// so que agora no lugar em que a API tambem a usa. Reexportada daqui porque
-// era daqui que ela saia.
-export {
-  JANELA_DRENAGEM_MS, TETO_RETIDAS_POS_REVOGACAO,
-  resultadoPorEstadoAparelho, resultadoPorEstadoPessoa, FRASES_MOTIVO
-} from '../../nucleo/dominio.js';
-import { JANELA_DRENAGEM_MS } from '../../nucleo/dominio.js';
-
-// _headers e a fonte unica da politica de borda. A CSP ja vinha de la; cache
-// tambem tem de vir, senao o E2E valida um cache que nao existe em producao —
-// o caso que importa e a pagina publica de uso unico, que nao pode ser servida
-// de cache velho.
-function blocosDeHeaders() {
-  const blocos = [];
-  let atual = null;
-  for (const linha of fs.readFileSync(path.join(RAIZ, '_headers'), 'utf8').split('\n')) {
-    if (!linha.trim() || linha.trim().startsWith('#')) continue;
-    if (!/^\s/.test(linha)) { atual = { padrao: linha.trim(), headers: {} }; blocos.push(atual); continue; }
-    const sep = linha.indexOf(':');
-    if (atual && sep > 0) atual.headers[linha.slice(0, sep).trim()] = linha.slice(sep + 1).trim();
-  }
-  return blocos;
-}
-
-// Todo bloco que casa e aplicado na ordem do arquivo: o mais especifico vem
-// depois e sobrescreve, igual a Vercel.
-export function headersPara(pathname) {
-  const saida = {};
-  for (const bloco of blocosDeHeaders()) {
-    const re = new RegExp('^' + bloco.padrao.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
-    if (re.test(pathname)) Object.assign(saida, bloco.headers);
-  }
-  return saida;
-}
-
-// T-D30529/§4.6: cabeçalhos da origem pública vêm de publico/vercel.json
-// (formato Vercel, não `_headers`) — fonte única, mesmo raciocínio de
-// `headersPara` acima. `source` já é um padrão de regex utilizável direto
-// (`/(.*)`, `/vendor/(.*)`), então não precisa do mesmo escape de `_headers`.
-export function headersPublicoPara(pathname) {
-  const vercelJson = JSON.parse(fs.readFileSync(path.join(RAIZ, 'publico', 'vercel.json'), 'utf8'));
-  const saida = {};
-  for (const bloco of (vercelJson.headers || [])) {
-    const re = new RegExp('^' + bloco.source + '$');
-    if (re.test(pathname)) for (const h of bloco.headers) saida[h.key] = h.value;
-  }
-  return saida;
-}
-
-// T-B1D7F6: este servidor e de teste, e servidor de teste nunca pode entregar o
-// app apontando para producao — registro de aparelho e marcacao de ponto sao
-// efeitos colaterais reais e irreversiveis. npm run serve fazia exatamente isso.
-// Prepend, nao append: js/config.js faz Object.assign(padroes, window.EFRAT_CFG),
-// entao o que ja estiver definido vence. Assim o override que os specs injetam
-// por addInitScript continua ganhando — inclusive a apiBase morta de proposito
-// em acesso.spec.js, que testa o app sem servidor.
-function configLocal(base) {
-  return 'window.EFRAT_CFG = Object.assign({ apiBase: ' + JSON.stringify(base + '/webhook') +
-    ' }, window.EFRAT_CFG || {});\n';
 }
 
 const TIPOS = {
@@ -125,17 +47,7 @@ export function semearPendencia(estado, pendencia) {
   return estado.correcoes.at(-1);
 }
 
-export function semearRecadastro(estado, recadastro) {
-  if (!recadastro || !recadastro.template_id) throw new Error('seed de recadastro exige template_id');
-  estado.recadastros.push(Object.assign({ versao: 1 }, recadastro));
-  return estado.recadastros.at(-1);
-}
-
 export function criarServidor(opts = {}) {
-  // Fonte única do limiar de aceite (docs/fase3-seguranca.md § 4.2c) — o mesmo
-  // valor que js/config.js define como cfg.limiarAceite. Configurável só para
-  // os testes provarem que mudar a config muda o veredito, sem duplicar 0,45.
-  const limiarAceiteCadastro = opts.limiarAceite != null ? opts.limiarAceite : 0.45;
   const estado = {
     token: opts.token || 'TOKEN-TESTE',
     marcacoes: new Map(),      // id_cliente -> marcação
@@ -144,22 +56,9 @@ export function criarServidor(opts = {}) {
     chamadas: { carga: 0, marcacoes: 0, cadastro: 0, rh: 0, registrar: 0, estado: 0, identificar: 0 },
     dispositivos: new Map(),
     codigosPendentes: new Map(),
-    // T-C20AD3: pendente_id -> dispositivo_id, handle opaco proprio da linha
-    // pendente (defesa em profundidade de §1.1 regra 2 — recusar resolve por
-    // aqui, nunca por dispositivo_id, que e o que /rh/aparelhos expoe).
-    pendentesPorId: new Map(),
-    // usuario de RH -> lista de timestamps de codigo errado nos ultimos 5min
-    // (§1.3 LIMITE_APROVACAO).
-    limitesAprovacao: new Map(),
     sessoesGestor: new Map(),
     correcoes: [],
     auditoriaIdentificacao: [],
-    // T-81C721 (§2.1e docs/fase3-seguranca.md, docs/adr-acesso-v3.md
-    // efrat_auditoria_identificacao): toda tentativa de aprovar aparelho,
-    // certa ou errada, com ou sem estourar LIMITE_APROVACAO — nunca só o
-    // 429, senão o padrão paciente (poucas tentativas por dia, todo dia,
-    // nunca batendo o teto) fica invisível. Nunca guarda o código tentado.
-    auditoriaAprovacao: [],
     limitesIdentificacao: new Map(),
     limitesCadastro: new Map(),
     tokenLegadoConsumido: false,
@@ -169,31 +68,11 @@ export function criarServidor(opts = {}) {
     colaboradoresCriados: [],
     decisoes: [],
     lotesSimultaneos: 0,
-    maxLotesSimultaneos: 0,
-    // T-8188C6: equipe real, não mais hardcoded no corpo de /rh/dados —
-    // senão criar/inativar equipe não tem onde persistir (docs/fase3-contrato.md §2.3).
-    equipes: new Map([
-      ['eq-1', { equipe_id: 'eq-1', nome: 'Equipe Um', unidade: 'Unidade A', ativo: true }],
-      ['eq-2', { equipe_id: 'eq-2', nome: 'Equipe Dois', unidade: 'Unidade A', ativo: true }]
-    ]),
-    // T-8ADD9C/§4.7: equivalente de efrat_modelo — modelo_id observado por
-    // OBSERVAÇÃO (nunca de build), com primeira/última aparição. A referência
-    // é o modelo_id mais recente visto no caminho do APP (o motor que de fato
-    // reconhece) — atualizada só por /efrat/carga, nunca pelas rotas de cadastro.
-    modelosObservados: new Map(),
-    referenciaModeloApp: null,
-    // T-D30529/§4.4: convite_id -> registro completo (com token_hash — o valor
-    // claro nunca fica gravado, só aparece uma vez, na resposta da emissão).
-    convites: new Map(),
-    tokenHashParaConvite: new Map(),
-    // §4.8: teto de volume por IP, generoso, nas 3 rotas anônimas — sem proxy,
-    // é a única coisa protegendo a instância de queimar execução.
-    limitesVolumeAnonimo: new Map()
+    maxLotesSimultaneos: 0
   };
 
   for (const marcacao of (opts.marcacoes || [])) semearMarcacao(estado, marcacao);
   for (const pendencia of (opts.pendencias || [])) semearPendencia(estado, pendencia);
-  for (const recadastro of (opts.recadastros || [])) semearRecadastro(estado, recadastro);
 
   const rhUsuario = opts.rhUsuario || {
     usuario: 'rh', nome: 'RH Teste',
@@ -206,60 +85,9 @@ export function criarServidor(opts = {}) {
     { pessoa_id: 'p-bruno', nome: 'Bruno Lima', matricula: '002', equipe_id: 'eq-1', papel: 'colaborador' },
     { pessoa_id: 'p-carla', nome: 'Carla Dias', matricula: '003', equipe_id: 'eq-2', papel: 'colaborador' },
     { pessoa_id: 'p-gestor', nome: 'Gestor Piloto', matricula: 'G01', equipe_id: 'eq-1', papel: 'gestor' }
-  ]).map(p => Object.assign({
-    versao: 1, vetores: [vetorDe(p.pessoa_id)], miniatura: '',
-    // T-8188C6: telefone vazio é tolerado na leitura (§3.1, "sem migração de
-    // dados") — só passa a ser exigido na escrita, então o piloto antigo continua
-    // legível sem backfill.
-    telefone: '', versao_cadastro: 1,
-    telefone_autorizado_por: null, telefone_autorizado_em: null, telefone_autorizacao_motivo: null,
-    inativado_em: null, inativado_por: null, motivo_inativacao: null
-  }, p));
+  ]).map(p => Object.assign({ versao: 1, vetores: [vetorDe(p.pessoa_id)], miniatura: '' }, p));
 
-  // =========================================================================
-  // O NUCLEO DA API (T-C8316C). O que estiver na tabela de rotas abaixo e
-  // servido POR ELE; o que nao estiver segue no codigo antigo deste arquivo,
-  // intocado, ate API-4 portar. Migracao rota a rota, com os 174 e2e verdes a
-  // cada passo -- e nao um corte grande de uma vez, que so diria "quebrou"
-  // sem dizer onde.
-  // =========================================================================
-  const cripto = {
-    uuid: () => crypto.randomUUID(),
-    tokenAleatorio: n => crypto.randomBytes(n).toString('base64url'),
-    inteiroAleatorio: n => crypto.randomInt(n),
-    // Mesmo hash que `hashCredencial` deste arquivo sempre usou -- e o que
-    // faz `credencial_publica` (gravada no registro) casar com o Bearer.
-    sha256: v => crypto.createHash('sha256').update(String(v)).digest('base64url')
-  };
-
-  const cfg = {
-    // Getter, e nao copia: `estado.token` e escrito pelos specs.
-    get tokenLegado() { return estado.token; },
-    limiarAceite: limiarAceiteCadastro,
-    consultarAposS: padrao => (opts.consultarAposS == null ? padrao : opts.consultarAposS),
-    expiraPendenteMs: opts.expiraPendenteMs || 24 * 60 * 60 * 1000,
-    expiraConviteMs: opts.expiraConviteMs || 60 * 60 * 1000,
-    origemPublica: opts.origemPublica || ORIGEM_PUBLICA_PADRAO,
-    cadastroJanelaMs: opts.cadastroJanelaMs || 60_000,
-    cadastroLimite: opts.cadastroLimite || 10,
-    identificarJanelaMs: opts.identificarJanelaMs || 60_000,
-    identificarLimite: opts.identificarLimite || 20,
-    volumeAnonimoJanelaMs: opts.volumeAnonimoJanelaMs || 60_000,
-    volumeAnonimoLimite: opts.volumeAnonimoLimite || 300,
-    // Sal fixo DE TESTE: so para o hash nao ser o IP cru. NUNCA e sal de
-    // deploy -- este arquivo e servidor de teste e o valor nao pode viajar
-    // para configuracao nenhuma que va ao ar.
-    salIp: 'sal-fake-servidor-de-teste-nao-e-producao'
-  };
-
-  const repositorio = criarRepositorioMemoria({ estado, pessoas, rhUsuario });
-  const nucleo = { repo: repositorio, cripto, cfg };
-
-  // A tabela vem de nucleo/rotas.js -- fonte unica com a ponte da Vercel
-  // (servidor/api/roteador.js), pra teste e producao nunca divergirem sobre
-  // quais das 25 rotas ja migraram.
-  const roteador = criarRoteador(ROTAS);
-
+  const alfabetoCodigo = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   const requestId = () => crypto.randomUUID();
   const erro = (codigo, mensagem, campo) => ({
     ok: false, erro: Object.assign({ codigo, mensagem }, campo ? { campo } : {}),
@@ -270,187 +98,23 @@ export function criarServidor(opts = {}) {
     return valor.startsWith('Bearer ') ? valor.slice(7) : '';
   };
   const hashCredencial = valor => crypto.createHash('sha256').update(String(valor)).digest('base64url');
-  // Intervalo que o servidor manda o aparelho esperar antes de reconsultar.
-  // js/app.js:207 obedece o servidor de proposito, entao quem testa o ciclo de
-  // liberacao pode encurtar o passo sem enfraquecer a prova: o que esta sob
-  // teste e a tela virar SO pelo poll de fundo, nao o intervalo valer 15s.
-  // Sem a opcao, os valores continuam os mesmos de antes (10 e 15).
-  const consultarAposS = padrao => (opts.consultarAposS == null ? padrao : opts.consultarAposS);
-  // Toda chamada autenticada de aparelho conta como "uso" — é o que a aba
-  // Aparelhos do RH mostra como "último uso" nos aprovados (T-87615C).
+  const codigoAleatorio = () => {
+    let codigo = '';
+    for (let i = 0; i < 6; i++) codigo += alfabetoCodigo[crypto.randomInt(alfabetoCodigo.length)];
+    return codigo;
+  };
+  const novoCodigoUnico = () => {
+    for (let tentativa = 0; tentativa < 3; tentativa++) {
+      const codigo = codigoAleatorio();
+      if (!estado.codigosPendentes.has(codigo)) return codigo;
+    }
+    return null;
+  };
   const dispositivoAutenticado = (req, dispositivoId) => {
     const dispositivo = estado.dispositivos.get(dispositivoId);
     const credencial = bearer(req);
     if (!dispositivo || !credencial || dispositivo.credencial_hash !== hashCredencial(credencial)) return null;
-    dispositivo.ultimo_uso = new Date().toISOString();
     return dispositivo;
-  };
-
-  // `estado.ipSimulado` (não cabeçalho) para os testes forjarem "outra
-  // origem" — achado do DevOps: um cabeçalho tem forma de protocolo e é
-  // exatamente o que alguém copiaria pro workflow real do n8n sem sentir
-  // nada de errado (mesmo risco que já aconteceu aqui com `coerencia`,
-  // T-8ADD9C). Estado é dado de teste, não protocolo — não existe artefato
-  // com cara de cabeçalho HTTP neste arquivo para vazar. Precedente:
-  // cadastro-procedencia.spec.js:31 e gestor-ajustar-contrato.spec.js:14 já
-  // escrevem direto em ctx.estado. Guarda de CI do DevOps (937fed8) cobre
-  // qualquer cabeçalho x-teste-/x-fake-/x-mock-/x-dev- que apareça fora de
-  // tests/ mesmo assim, como defesa em profundidade.
-  const ipDaRequisicao = req => String(estado.ipSimulado || req.socket.remoteAddress || 'desconhecido');
-
-  // Resumo de UA, o limite de tentativas de aprovacao e a auditoria de
-  // aprovacao saem daqui: moram em nucleo/dominio.js (resumirUa,
-  // JANELA_LIMITE_APROVACAO_MS, LIMITE_APROVACAO_TENTATIVAS,
-  // segundosAteLiberar) e nucleo/casos/aparelho.js, que le/escreve o limite
-  // pelo repositorio (tentativasNaJanela/registrarTentativaErrada/
-  // registrarAuditoriaAprovacao) em vez do Map local.
-
-  // C1-C3 do contrato (fase3-contrato.md §0): chave de idempotência no CORPO
-  // pras rotas /efrat/rh/* (credencial já é corpo). Mesma chave + mesmo corpo
-  // repete a resposta gravada; mesma chave + corpo diferente é conflito.
-  // Só as rotas NOVAS de escrita exigem a chave (C2) — por isso quem chama
-  // decide se `obrigatoria` é true.
-  const idempotente = (chave, corpo, obrigatoria) => {
-    if (!chave) {
-      if (obrigatoria) return { bloqueado: { status: 400, resposta: erro('IDEMPOTENCIA_AUSENTE', 'chave de idempotência obrigatória') } };
-      return { hash: null };
-    }
-    const hash = hashCredencial(JSON.stringify(corpo));
-    const anterior = estado.idempotencia.get(chave);
-    if (anterior && anterior.hash !== hash) {
-      return { bloqueado: { status: 409, resposta: erro('IDEMPOTENCIA_CONFLITANTE', 'chave reutilizada com outro corpo') } };
-    }
-    if (anterior) return { cache: anterior };
-    return { hash };
-  };
-  const gravarIdempotencia = (chave, hash, status, resposta) => {
-    if (chave && hash) estado.idempotencia.set(chave, { hash, status, resposta });
-  };
-
-  // T-8ADD9C/§4.7: registra a observação (nunca substitui — soma). Só ISSO —
-  // não mexe na referência. `origemObservada` aqui é so o rótulo de onde o
-  // modelo_id foi visto (app | publica), para a tabela de observação.
-  const registrarModeloObservado = (modeloId, origemObservada) => {
-    const agora = new Date().toISOString();
-    const existente = estado.modelosObservados.get(modeloId);
-    if (existente) {
-      existente.ultima_aparicao_em = agora;
-      existente.origens.add(origemObservada);
-    } else {
-      estado.modelosObservados.set(modeloId, {
-        modelo_id: modeloId, primeira_aparicao_em: agora, ultima_aparicao_em: agora,
-        origens: new Set([origemObservada])
-      });
-    }
-  };
-
-  // A funcao que definia a REFERENCIA saiu daqui: /efrat/carga (o unico
-  // caminho que a move) agora mora em nucleo/casos/dispositivo.js e chama
-  // ctx.repo.definirReferenciaModeloApp diretamente.
-
-  /**
-   * Classifica um modelo_id contra a referência ANTES de registrar esta
-   * observação (senão "conhecido" ficaria sempre verdadeiro, porque o
-   * próprio registro que acabou de acontecer já contaria).
-   *
-   * Sem referência nenhuma ainda (nenhum /efrat/carga reportou), não há
-   * contra o que comparar — tratado como `modelo_desconhecido`, a categoria
-   * conservadora (grava e sinaliza, nunca recusa; docs/fase3-contrato.md §4.7).
-   */
-  const classificarModelo = (modeloId, origemObservada) => {
-    const referenciaAnterior = estado.referenciaModeloApp;
-    const jaConhecido = estado.modelosObservados.has(modeloId);
-    registrarModeloObservado(modeloId, origemObservada);
-    if (referenciaAnterior == null) return { modelo_divergente: false, modelo_desconhecido: true };
-    if (modeloId === referenciaAnterior) return { modelo_divergente: false, modelo_desconhecido: false };
-    return { modelo_divergente: jaConhecido, modelo_desconhecido: !jaConhecido };
-  };
-
-  // T-D30529/§4.4: máquina de estados do convite. Token de 256 bits, CSPRNG;
-  // só o hash mora no servidor (mesma regra do código curto de aparelho,
-  // §1.1) — o valor claro aparece uma única vez, na resposta da emissão.
-  const ORIGEM_PUBLICA = cfg.origemPublica;
-  const EXPIRA_CONVITE_MS = opts.expiraConviteMs || 60 * 60 * 1000;
-  const LIMITE_ENVIOS_RECUSADOS = 5;
-  const gerarTokenConvite = () => crypto.randomBytes(32).toString('base64url');
-  const hashToken = token => crypto.createHash('sha256').update(String(token)).digest('base64url');
-
-  /** Expiração é computada NA LEITURA — nunca gravada por um timer de fundo. */
-  function estadoEfetivoConvite(c) {
-    if ((c.estado === 'emitido' || c.estado === 'aberto') && Date.now() > Date.parse(c.expira_em)) return 'expirado';
-    return c.estado;
-  }
-
-  /** "Um convite vivo por pessoa" — vivo = emitido/aberto, considerando expiração. */
-  function convitesVivos(pessoaId) {
-    return [...estado.convites.values()]
-      .filter(c => c.pessoa_id === pessoaId && ['emitido', 'aberto'].includes(estadoEfetivoConvite(c)));
-  }
-
-  /** Resolve pelo TOKEN CLARO do Authorization — nunca grava nem loga o valor claro. */
-  function convitePorToken(token) {
-    if (!token) return null;
-    const id = estado.tokenHashParaConvite.get(hashToken(token));
-    return id ? estado.convites.get(id) : null;
-  }
-
-  /**
-   * §4.8: teto de volume por IP nas rotas anônimas — generoso (ordem de
-   * centenas por minuto), porque sem proxy é a única coisa protegendo a
-   * instância de queimar execução; não é defesa contra flood determinado
-   * (registrado no contrato como limite conhecido). Devolve segundos de
-   * `Retry-After` se estourou, `null` se não.
-   */
-  function limiteVolumeAnonimo(req) {
-    const ip = (req.socket && req.socket.remoteAddress) || 'desconhecido';
-    const janelaMs = opts.volumeAnonimoJanelaMs || 60_000;
-    const limite = opts.volumeAnonimoLimite || 300;
-    const agora = Date.now();
-    let contador = estado.limitesVolumeAnonimo.get(ip);
-    if (!contador || agora - contador.inicio >= janelaMs) contador = { inicio: agora, total: 0 };
-    contador.total++;
-    estado.limitesVolumeAnonimo.set(ip, contador);
-    return contador.total > limite ? Math.max(1, Math.ceil((janelaMs - (agora - contador.inicio)) / 1000)) : null;
-  }
-
-  // T-8188C6: forma pública de uma pessoa, para corpo de erro (CADASTRO_DESATUALIZADO)
-  // e pra base do cálculo de telefone_compartilhado — a mesma forma que /rh/dados devolve.
-  const pessoaParaResposta = p => ({
-    pessoa_id: p.pessoa_id, matricula: p.matricula, nome: p.nome,
-    equipe_id: p.equipe_id, papel: p.papel, ativo: !estado.inativos.has(p.pessoa_id),
-    telefone: p.telefone || '', versao_cadastro: p.versao_cadastro,
-    tem_biometria: !!(p.vetores && p.vetores.length)
-  });
-
-  /**
-   * Normaliza e valida telefone (js/regras.js, compartilhado com o cliente);
-   * se colide com pessoa ativa diferente, exige autorizar_telefone_duplicado +
-   * motivo de 10-200 chars (§3.1). `pessoaIdAtual` exclui a própria pessoa da
-   * checagem de colisão (edição/reativação não colide consigo mesma).
-   */
-  const validarTelefoneOuDuplicado = (corpo, pessoaIdAtual) => {
-    const r = normalizarTelefone(corpo.telefone);
-    if (!r.ok) return { ok: false, status: 422, corpo: erro(r.codigo, r.mensagem, r.campo) };
-    const outra = pessoas.find(p => p.pessoa_id !== pessoaIdAtual && p.telefone === r.e164 && !estado.inativos.has(p.pessoa_id));
-    if (!outra) return { ok: true, e164: r.e164, autorizacao: null };
-    if (corpo.autorizar_telefone_duplicado === true) {
-      const motivo = String(corpo.motivo_telefone_duplicado || '').trim();
-      if (motivo.length < 10 || motivo.length > 200) {
-        return { ok: false, status: 422, corpo: erro('MOTIVO_INVALIDO', 'o motivo precisa ter entre 10 e 200 caracteres', 'motivo_telefone_duplicado') };
-      }
-      return {
-        ok: true, e164: r.e164,
-        autorizacao: {
-          telefone_autorizado_por: rhUsuario.usuario, telefone_autorizado_em: new Date().toISOString(),
-          telefone_autorizacao_motivo: motivo
-        }
-      };
-    }
-    return {
-      ok: false, status: 409,
-      corpo: Object.assign(erro('TELEFONE_DUPLICADO', 'esse telefone já é de ' + outra.nome, 'telefone'),
-        { pessoa_id: outra.pessoa_id, nome: outra.nome })
-    };
   };
 
   const distancia = (a, b) => Math.sqrt(a.reduce((soma, valor, i) => {
@@ -465,52 +129,33 @@ export function criarServidor(opts = {}) {
     return sessao;
   };
 
+  function carga() {
+    const fim = new Date(); fim.setHours(23, 59, 59, 0);
+    return {
+      ok: true,
+      gestor: { id: 'p-gestor', nome: 'Gestor Piloto' },
+      equipes: [
+        { equipe_id: 'eq-1', nome: 'Equipe Um', unidade: 'Unidade A', lat: 0, lng: 0, raio_m: 500, minha: true },
+        { equipe_id: 'eq-2', nome: 'Equipe Dois', unidade: 'Unidade A', lat: 0, lng: 0, raio_m: 500, minha: false }
+      ],
+      pessoas: pessoas.filter(p => !estado.inativos.has(p.pessoa_id)),
+      sem_cadastro: [{ pessoa_id: 'p-novo', nome: 'Novato Sem Face', matricula: '009', equipe_id: 'eq-1' }],
+      servidor_hora: new Date().toISOString(),
+      expira_em: fim.toISOString()
+    };
+  }
+
   const servidor = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
-    const responder = (cod, obj, extras) => {
-      res.writeHead(cod, Object.assign({
+    const responder = (cod, obj) => {
+      res.writeHead(cod, {
         'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Authorization, Content-Type, Idempotency-Key'
-      }, extras || {}));
-      res.end(JSON.stringify(obj));
-    };
-
-    // §4.6/critério 20: as duas rotas do convite público são as únicas que a
-    // página pública (origem própria) chama — CORS de LISTA, nunca `*`, e sem
-    // Allow-Credentials (o token viaja em header, não em cookie). As demais
-    // rotas continuam com `*` (nenhuma delas é alcançada de origem alheia hoje).
-    const ROTAS_FACE_PUBLICA = ['/webhook/efrat/face/convite/abrir', '/webhook/efrat/face/convite/enviar'];
-    const origemPermitidaFace = origemHeader => {
-      if (!origemHeader) return null;
-      if (opts.origensPublicoPermitidas) return opts.origensPublicoPermitidas.includes(origemHeader) ? origemHeader : null;
-      // e2e: qualquer porta local é uma "origem de teste" válida (§4.6 exige
-      // que a lista inclua as origens de teste, senão o e2e não roda).
-      return /^https?:\/\/127\.0\.0\.1:\d+$/.test(origemHeader) ? origemHeader : null;
-    };
-    const responderFace = (cod, obj, extras) => {
-      const origem = origemPermitidaFace(req.headers.origin);
-      const headers = Object.assign(
-        { 'Content-Type': 'application/json', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, Idempotency-Key' },
-        extras || {}
-      );
-      if (origem) headers['Access-Control-Allow-Origin'] = origem;
-      res.writeHead(cod, headers);
+      });
       res.end(JSON.stringify(obj));
     };
 
     if (req.method === 'OPTIONS') {
-      if (ROTAS_FACE_PUBLICA.includes(url.pathname)) {
-        const origem = origemPermitidaFace(req.headers.origin);
-        const headers = {
-          'Access-Control-Allow-Headers': 'Authorization, Content-Type, Idempotency-Key',
-          'Access-Control-Allow-Methods': 'POST, OPTIONS',
-          'Access-Control-Max-Age': '600'
-        };
-        if (origem) headers['Access-Control-Allow-Origin'] = origem;
-        res.writeHead(204, headers);
-        res.end();
-        return;
-      }
       res.writeHead(204, {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Authorization, Content-Type, Idempotency-Key',
@@ -522,71 +167,19 @@ export function criarServidor(opts = {}) {
 
     if (url.pathname.startsWith('/webhook/')) {
       if (estado.fora) { res.destroy(); return; }
+      let corpo = '';
+      for await (const c of req) corpo += c;
+      let body = {};
+      try { body = corpo ? JSON.parse(corpo) : {}; } catch (e) { /* body vazio */ }
 
-      // A ponte com node:http mora no nucleo (nucleo/http-node.js) e le o
-      // corpo UMA vez. `body`/`corpo` continuam existindo com o mesmo nome
-      // para o codigo antigo deste arquivo, que ainda serve 24 das 25 rotas.
-      const requisicao = await lerRequisicao(req, {
-        caminho: url.pathname.replace('/webhook', ''),
-        tokenDaQuery: url.searchParams.get('token') || '',
-        ip: ipDaRequisicao(req)
-      });
-      const body = requisicao.corpo;
-      const corpo = requisicao.corpoBruto;
-
-      // Rota servida pelo NUCLEO: o servidor falso so instrumenta (contadores
-      // e latencia simulada, que sao coisa de teste e nao de contrato) e
-      // entrega. Nao ha regra de negocio deste lado.
-      if (roteador.achar(requisicao.caminho)) {
-        if (requisicao.caminho === '/efrat/marcacoes') {
-          estado.chamadas.marcacoes++;
-          estado.lotesSimultaneos++;
-          estado.maxLotesSimultaneos = Math.max(estado.maxLotesSimultaneos, estado.lotesSimultaneos);
-          await new Promise(r => setTimeout(r, opts.latenciaMs || 60));
-        }
-        if (requisicao.caminho === '/efrat/carga') estado.chamadas.carga++;
-        if (requisicao.caminho === '/efrat/dispositivo/estado') estado.chamadas.estado++;
-        if (requisicao.caminho === '/efrat/dispositivo/registrar') estado.chamadas.registrar++;
-        try {
-          const resposta = await despachar(nucleo, roteador, requisicao);
-          // chamadas.rh: no bloco antigo so incrementava DEPOIS do gate
-          // usuario+chave passar (rh/sal nunca contava, nunca passava pelo
-          // gate). Aqui o equivalente e so contar quando a autenticacao nao
-          // rejeitou -- senao um 401 de credencial errada conta como chamada
-          // de RH, que o contador antigo nunca fez.
-          //
-          // PREMISSA que este `!== 401` carrega, e que nao e garantida por
-          // construcao (achado do Orquestrador, 2026-08-25): hoje nenhuma
-          // das tres rotas abaixo devolve 401 por motivo NENHUM alem de
-          // AUTH.RH rejeitar -- entao status!==401 e um proxy seguro de
-          // "autenticou". Se qualquer uma delas passar a devolver 401 por
-          // outra razao (ex.: sessao/token proprio no futuro), este contador
-          // passa a SUBCONTAR silenciosamente -- ele so erra pra menos, entao
-          // nao quebra teste nenhum, so mente. Se alguma das tres ganhar um
-          // 401 novo, confira este `if` antes de confiar no numero.
-          if (resposta.status !== 401
-              && ['/efrat/rh/aparelho/aprovar', '/efrat/rh/aparelhos', '/efrat/rh/face/cadastrar'].includes(requisicao.caminho)) {
-            estado.chamadas.rh = (estado.chamadas.rh || 0) + 1;
-          }
-          return responder(resposta.status, resposta.corpo, resposta.cabecalhos);
-        } finally {
-          if (requisicao.caminho === '/efrat/marcacoes') estado.lotesSimultaneos--;
-        }
-      }
-
-      // /efrat/dispositivo/registrar e /efrat/dispositivo/estado saem daqui:
-      // moram em nucleo/casos/aparelho.js, servidas pela tabela de rotas la
-      // em cima -- por isso nao aparecem mais nesta checagem de gate.
-      const rotaV3Autenticada = url.pathname === '/webhook/efrat/identificar'
+      const rotaRegistrar = url.pathname === '/webhook/efrat/dispositivo/registrar';
+      const rotaEstado = url.pathname === '/webhook/efrat/dispositivo/estado';
+      const rotaV3Autenticada = rotaEstado
+        || url.pathname === '/webhook/efrat/identificar'
         || url.pathname.startsWith('/webhook/efrat/gestor/');
-      // T-D30529/§4.8: as duas rotas do convite público são alcançáveis sem
-      // credencial prévia (o token é a credencial delas, checado dentro de
-      // cada rota) — não passam pelo gate de token/dispositivo/RH genérico.
-      const rotaConvitePublico = url.pathname === '/webhook/efrat/face/convite/abrir'
-        || url.pathname === '/webhook/efrat/face/convite/enviar';
       // RH conserva usuario + chave nesta rodada. Rotas v3 usam bearer proprio.
       const ehRh = url.pathname.startsWith('/webhook/efrat/rh/');
-      if (!ehRh && !rotaV3Autenticada && !rotaConvitePublico) {
+      if (!ehRh && !rotaRegistrar && !rotaV3Autenticada) {
         const token = body.token || url.searchParams.get('token');
         const dispositivo = body.dispositivo_id && dispositivoAutenticado(req, body.dispositivo_id);
         if (token !== estado.token && !dispositivo) {
@@ -596,13 +189,124 @@ export function criarServidor(opts = {}) {
         }
       }
 
-      // /efrat/dispositivo/registrar e /efrat/dispositivo/estado saem daqui:
-      // moram em nucleo/casos/aparelho.js, servidas pela tabela de rotas la
-      // em cima.
+      if (rotaRegistrar) {
+        estado.chamadas.registrar++;
+        const agora = Date.now();
+        const ip = req.socket.remoteAddress || 'desconhecido';
+        const janelaMs = opts.cadastroJanelaMs || 60_000;
+        const limite = opts.cadastroLimite || 10;
+        let contador = estado.limitesCadastro.get(ip);
+        if (!contador || agora - contador.inicio >= janelaMs) contador = { inicio: agora, total: 0 };
+        contador.total++;
+        estado.limitesCadastro.set(ip, contador);
+        if (contador.total > limite) {
+          res.setHeader('Retry-After', String(Math.max(1, Math.ceil((janelaMs - (agora - contador.inicio)) / 1000))));
+          return responder(429, erro('LIMITE_CADASTRO', 'limite de cadastro excedido'));
+        }
+        if (!body.dispositivo_id || !body.credencial_publica || !body.apelido || !body.ua) {
+          return responder(400, erro('CORPO_INVALIDO', 'campos obrigatorios ausentes'));
+        }
+        const tokenLegado = bearer(req);
+        if (tokenLegado) {
+          if (tokenLegado !== estado.token) {
+            return responder(401, erro('TOKEN_LEGADO_INVALIDO', 'token legado invalido'));
+          }
+          if (estado.tokenLegadoConsumido) {
+            return responder(409, erro('TOKEN_LEGADO_CONSUMIDO', 'token legado ja migrado'));
+          }
+          const migrado = {
+            dispositivo_id: body.dispositivo_id, credencial_hash: body.credencial_publica,
+            estado: 'ativo', codigo_curto: null, apelido: body.apelido, ua: body.ua,
+            geo: body.geo || null, tentativas: 1, local_id: 'local-piloto',
+            equipes_ids: ['eq-1'], configuracao_versao: 1,
+            aprovado_por: 'migracao-v3', aprovado_em: new Date().toISOString()
+          };
+          estado.dispositivos.set(body.dispositivo_id, migrado);
+          estado.tokenLegadoConsumido = true;
+          return responder(200, {
+            ok: true, estado: 'ativo', migrado: true,
+            dispositivo_id: body.dispositivo_id, request_id: requestId()
+          });
+        }
+        const existente = estado.dispositivos.get(body.dispositivo_id);
+        if (existente) {
+          if (existente.credencial_hash !== body.credencial_publica) {
+            return responder(409, erro('DISPOSITIVO_CONFLITO', 'dispositivo ja cadastrado'));
+          }
+          return responder(202, {
+            ok: true, estado: existente.estado, dispositivo_id: body.dispositivo_id,
+            codigo_curto: existente.codigo_curto, consultar_apos_s: 10, request_id: requestId()
+          });
+        }
+        const codigo = novoCodigoUnico();
+        if (!codigo) return responder(503, erro('CODIGO_INDISPONIVEL', 'nao foi possivel gerar codigo'));
+        const dispositivo = {
+          dispositivo_id: body.dispositivo_id, credencial_hash: body.credencial_publica,
+          estado: 'pendente', codigo_curto: codigo, apelido: body.apelido, ua: body.ua,
+          geo: body.geo || null, tentativas: 1, local_id: null, equipes_ids: [],
+          configuracao_versao: 0, aprovado_por: null, aprovado_em: null
+        };
+        estado.dispositivos.set(body.dispositivo_id, dispositivo);
+        estado.codigosPendentes.set(codigo, body.dispositivo_id);
+        return responder(202, {
+          ok: true, estado: 'pendente', dispositivo_id: body.dispositivo_id,
+          codigo_curto: codigo, consultar_apos_s: 10, request_id: requestId()
+        });
+      }
 
-      // /efrat/carga saiu daqui: mora em nucleo/casos/dispositivo.js, servida
-      // pela tabela de rotas la em cima. O ramo anonimo (sem dispositivo_id)
-      // nao migrou -- ver a nota na propria rota nova sobre a ambiguidade 2.
+      if (rotaEstado) {
+        estado.chamadas.estado++;
+        const dispositivo = dispositivoAutenticado(req, body.dispositivo_id);
+        if (!dispositivo) return responder(401, erro('CREDENCIAL_INVALIDA', 'credencial invalida'));
+        if (dispositivo.estado === 'pendente') {
+          return responder(200, {
+            ok: true, estado: 'pendente', codigo_curto: dispositivo.codigo_curto,
+            consultar_apos_s: 15, request_id: requestId()
+          });
+        }
+        if (dispositivo.estado !== 'ativo') {
+          return responder(200, { ok: true, estado: dispositivo.estado, request_id: requestId() });
+        }
+        return responder(200, {
+          ok: true, estado: 'ativo',
+          dispositivo: {
+            dispositivo_id: dispositivo.dispositivo_id, apelido: dispositivo.apelido,
+            equipes_ids: dispositivo.equipes_ids,
+            configuracao_versao: dispositivo.configuracao_versao
+          },
+          request_id: requestId()
+        });
+      }
+
+      if (url.pathname === '/webhook/efrat/carga') {
+        estado.chamadas.carga++;
+        if (body.dispositivo_id) {
+          const dispositivo = dispositivoAutenticado(req, body.dispositivo_id);
+          if (!dispositivo) return responder(401, erro('CREDENCIAL_INVALIDA', 'credencial invalida'));
+          if (dispositivo.estado === 'pendente') {
+            return responder(403, erro('DISPOSITIVO_PENDENTE', 'dispositivo aguarda aprovacao'));
+          }
+          if (dispositivo.estado !== 'ativo') {
+            return responder(403, erro('DISPOSITIVO_INATIVO', 'dispositivo inativo'));
+          }
+          if (!dispositivo.equipes_ids.length) {
+            return responder(403, erro('DISPOSITIVO_SEM_ESCOPO', 'dispositivo sem equipes'));
+          }
+          return responder(200, {
+            ok: true, versao: dispositivo.configuracao_versao,
+            gerado_em: new Date().toISOString(),
+            escopo: { equipes_ids: [...dispositivo.equipes_ids] },
+            pessoas: pessoas
+              .filter(p => !estado.inativos.has(p.pessoa_id) && dispositivo.equipes_ids.includes(p.equipe_id))
+              .map(p => ({
+                pessoa_id: p.pessoa_id, nome: p.nome, equipe_id: p.equipe_id, papel: p.papel,
+                template: { versao: p.versao, vetores: p.vetores }, miniatura: p.miniatura
+              })),
+            removidos_ids: [], request_id: requestId()
+          });
+        }
+        return responder(200, carga());
+      }
 
       if (url.pathname === '/webhook/efrat/identificar') {
         estado.chamadas.identificar++;
@@ -740,14 +444,45 @@ export function criarServidor(opts = {}) {
         return responder(202, resposta);
       }
 
-      // /efrat/marcacoes saiu daqui: mora em nucleo/casos/marcacao.js, servida
-      // pela tabela de rotas la em cima. A dedup por id_cliente deixou de ser
-      // um `Map.has` seguido de um `Map.set` e passou a ser UMA operacao com
-      // indice unico (repositorio.inserirMarcacaoSeAusente) -- que num Map da
-      // no mesmo e num banco e a diferenca entre ter e nao ter ponto duplicado.
+      if (url.pathname === '/webhook/efrat/marcacoes') {
+        estado.chamadas.marcacoes++;
+        estado.lotesSimultaneos++;
+        estado.maxLotesSimultaneos = Math.max(estado.maxLotesSimultaneos, estado.lotesSimultaneos);
+        await new Promise(r => setTimeout(r, opts.latenciaMs || 60));
+        const resultados = [];
+        for (const m of (body.marcacoes || [])) {
+          if (!m || !m.id_cliente || !m.pessoa_id || !m.marcado_em) {
+            resultados.push({ id_cliente: m && m.id_cliente, status: 'rejeitado', motivo: 'campos obrigatorios ausentes' });
+          } else if (estado.marcacoes.has(m.id_cliente)) {
+            resultados.push({ id_cliente: m.id_cliente, status: 'duplicado', motivo: null });
+          } else if (estado.inativos.has(m.pessoa_id) || !pessoas.some(p => p.pessoa_id === m.pessoa_id)) {
+            resultados.push({ id_cliente: m.id_cliente, status: 'rejeitado', motivo: 'colaborador inativo ou inexistente' });
+          } else {
+            // Mesma regra do workflow real: gestor, manual, veredito diferente
+            // de aceito ou relogio fora de 2 min vao para a mesa do RH.
+            const p = pessoas.find(x => x.pessoa_id === m.pessoa_id);
+            const deriva = m.deriva_relogio_ms == null ? 0 : Number(m.deriva_relogio_ms);
+            const revisar = m.veredito !== 'aceito' || m.origem === 'manual'
+              || (p && p.papel === 'gestor') || Math.abs(deriva) > 120000;
+            estado.marcacoes.set(m.id_cliente, Object.assign({}, m, {
+              requer_revisao: !!revisar,
+              foto_auditoria: revisar ? (m.foto_auditoria || '') : ''
+            }));
+            resultados.push({ id_cliente: m.id_cliente, status: 'aceito', motivo: null });
+          }
+        }
+        estado.lotesSimultaneos--;
+        const conta = s => resultados.filter(x => x.status === s).length;
+        return responder(200, {
+          ok: true, servidor_hora: new Date().toISOString(),
+          resumo: { aceitas: conta('aceito'), duplicadas: conta('duplicado'), rejeitadas: conta('rejeitado') },
+          resultados
+        });
+      }
 
-      // /efrat/rh/sal saiu daqui: mora em nucleo/casos/rh.js, servida pela
-      // tabela de rotas la em cima.
+      if (url.pathname === '/webhook/efrat/rh/sal') {
+        return responder(200, { ok: true, sal: rhUsuario.sal, iteracoes: rhUsuario.iteracoes });
+      }
 
       if (url.pathname.startsWith('/webhook/efrat/rh/')) {
         if (body.usuario !== rhUsuario.usuario || body.chave !== rhUsuario.chave) {
@@ -761,201 +496,33 @@ export function criarServidor(opts = {}) {
             requer_revisao: !!m.requer_revisao,
             marcado_dia: String(m.marcado_em).slice(0, 10)
           }));
-          // T-8188C6: telefone_compartilhado é derivado na leitura (§3.1),
-          // nunca gravado — calcula sobre a lista completa de pessoas ativas
-          // antes de montar a resposta.
-          const pessoasBase = pessoas.map(p => ({
-            pessoa_id: p.pessoa_id, matricula: p.matricula, nome: p.nome,
-            equipe_id: p.equipe_id, papel: p.papel, ativo: !estado.inativos.has(p.pessoa_id),
-            telefone: p.telefone || '', versao_cadastro: p.versao_cadastro,
-            equipes_geridas: '', tem_biometria: !!(p.vetores && p.vetores.length), miniatura: p.miniatura || null
-          }));
-          const compartilhados = telefonesCompartilhados(pessoasBase);
           return responder(200, {
             ok: true, usuario: { usuario: rhUsuario.usuario, nome: rhUsuario.nome },
             periodo_dias: body.dias || 30,
-            equipes: [...estado.equipes.values()].map(e => Object.assign({}, e)),
-            pessoas: pessoasBase.map(p => Object.assign({}, p, {
-              telefone_compartilhado: !!compartilhados[p.pessoa_id],
-              telefone_compartilhado_com: compartilhados[p.pessoa_id] || []
+            equipes: [
+              { equipe_id: 'eq-1', nome: 'Equipe Um', unidade: 'Unidade A', lat: 0, lng: 0, raio_m: 500, ativo: true },
+              { equipe_id: 'eq-2', nome: 'Equipe Dois', unidade: 'Unidade A', lat: 0, lng: 0, raio_m: 500, ativo: true }
+            ],
+            pessoas: pessoas.map(p => ({
+              pessoa_id: p.pessoa_id, matricula: p.matricula, nome: p.nome,
+              equipe_id: p.equipe_id, papel: p.papel, ativo: !estado.inativos.has(p.pessoa_id),
+              equipes_geridas: '', tem_biometria: true, miniatura: null
             })),
-            marcacoes: marcs,
-            // O decimal de coerência NUNCA sai daqui, de propósito (correção do
-            // Orquestrador sobre T-8ADD9C/js/rh.js): a faixa aceita (abaixo de
-            // 0,45) é ocupada por variação legítima de adorno (capacete, boné,
-            // máscara) até encostar no limiar — não há corte dentro dela que
-            // sirva de sinal, então não vira nem número nem booleano, só some.
-            // O valor cru continua persistido e volta nas rotas de ESCRITA
-            // (auditoria/recalibração) — só a leitura de /rh/dados o esconde.
-            recadastros: estado.recadastros.map(t => {
-              const { coerencia, ...semCoerencia } = t;
-              return semCoerencia;
-            }),
-            // T-C20AD3 (§1.2): a lista de aparelhos sai daqui, pra /efrat/rh/aparelhos
-            // — a aba muda enquanto o RH olha e precisa de refresh próprio, sem
-            // recarregar marcações/pessoas/equipes a cada 15s por 3 linhas.
-            // /rh/dados fica só com o contador pro badge.
-            aparelhos_pendentes: [...estado.dispositivos.values()].filter(d => d.estado === 'pendente').length,
+            marcacoes: marcs, recadastros: estado.recadastros,
             servidor_hora: new Date().toISOString()
           });
         }
         if (url.pathname.endsWith('/equipe')) {
-          const nome = body.nome != null ? String(body.nome).trim() : null;
-          const nomeValido = n => n && n.length >= 2 && n.length <= 60;
-
-          if (body.equipe_id) {
-            // atualizar (§2.3) — inclui inativar, que é um `ativo: false` neste corpo.
-            const equipe = estado.equipes.get(body.equipe_id);
-            if (!equipe) return responder(404, { ok: false, erro: 'equipe nao encontrada' });
-            if (nome != null && nome !== equipe.nome) {
-              if (!nomeValido(nome)) return responder(422, erro('NOME_INVALIDO', 'nome precisa ter entre 2 e 60 caracteres', 'nome'));
-              const duplicada = [...estado.equipes.values()]
-                .some(e => e.equipe_id !== equipe.equipe_id && e.ativo && e.nome.toLowerCase() === nome.toLowerCase());
-              if (duplicada) return responder(409, erro('EQUIPE_DUPLICADA', 'já existe uma equipe ativa com esse nome', 'nome'));
-              equipe.nome = nome;
-            }
-            if (body.unidade != null) equipe.unidade = String(body.unidade).trim();
-            if (body.ativo === false && equipe.ativo) {
-              const membrosAtivos = pessoas.filter(p => p.equipe_id === equipe.equipe_id && !estado.inativos.has(p.pessoa_id)).length;
-              if (membrosAtivos > 0) {
-                return responder(422, Object.assign(
-                  erro('EQUIPE_COM_MEMBROS', 'inative os membros antes de inativar a equipe'),
-                  { membros_ativos: membrosAtivos }));
-              }
-              equipe.ativo = false;
-              // Equipe inativa sai do escopo de todo aparelho que a tinha (§2.3).
-              for (const d of estado.dispositivos.values()) {
-                if (d.equipes_ids && d.equipes_ids.includes(equipe.equipe_id)) {
-                  d.equipes_ids = d.equipes_ids.filter(id => id !== equipe.equipe_id);
-                  d.configuracao_versao = (d.configuracao_versao || 0) + 1;
-                }
-              }
-            } else if (body.ativo === true) {
-              equipe.ativo = true;
-            }
-            return responder(200, { ok: true, equipe_id: equipe.equipe_id, nome: equipe.nome });
-          }
-
-          // criar
-          if (!nomeValido(nome)) {
-            return responder(422, erro(nome ? 'NOME_INVALIDO' : 'NOME_OBRIGATORIO',
-              nome ? 'nome precisa ter entre 2 e 60 caracteres' : 'nome da equipe é obrigatório', 'nome'));
-          }
-          const duplicada = [...estado.equipes.values()].some(e => e.ativo && e.nome.toLowerCase() === nome.toLowerCase());
-          if (duplicada) return responder(409, erro('EQUIPE_DUPLICADA', 'já existe uma equipe ativa com esse nome', 'nome'));
-          const novoId = 'eq-' + crypto.randomUUID().slice(0, 8);
-          estado.equipes.set(novoId, { equipe_id: novoId, nome, unidade: String(body.unidade || '').trim(), ativo: true });
-          estado.equipesCriadas.push(nome);
-          return responder(200, { ok: true, equipe_id: novoId, nome });
-        }
-        if (url.pathname.endsWith('/colaborador/inativar') || url.pathname.endsWith('/colaborador/reativar')) {
-          const reativando = url.pathname.endsWith('/reativar');
-          const idem = idempotente(body.idempotency_key, body, true);
-          if (idem.bloqueado) return responder(idem.bloqueado.status, idem.bloqueado.resposta);
-          if (idem.cache) return responder(idem.cache.status, idem.cache.resposta);
-
-          const pessoa = pessoas.find(p => p.pessoa_id === body.pessoa_id);
-          if (!pessoa) return responder(404, { ok: false, erro: 'pessoa nao encontrada' });
-          const estaInativa = estado.inativos.has(pessoa.pessoa_id);
-          const jaNoEstadoPedido = reativando ? !estaInativa : estaInativa;
-
-          if (!jaNoEstadoPedido) {
-            if (body.versao_cadastro !== pessoa.versao_cadastro) {
-              const resp = Object.assign(erro('CADASTRO_DESATUALIZADO', 'alguém alterou esta pessoa enquanto você decidia'),
-                { registro_atual: pessoaParaResposta(pessoa) });
-              return responder(409, resp);
-            }
-            if (reativando) {
-              // §3.3.5: reativar exige telefone válido no corpo — devolve sem biometria.
-              const r = validarTelefoneOuDuplicado(body, pessoa.pessoa_id);
-              if (!r.ok) return responder(r.status, r.corpo);
-              estado.inativos.delete(pessoa.pessoa_id);
-              pessoa.telefone = r.e164;
-              Object.assign(pessoa, r.autorizacao || {});
-              pessoa.inativado_em = null; pessoa.inativado_por = null; pessoa.motivo_inativacao = null;
-            } else {
-              const motivo = String(body.motivo || '').trim();
-              if (motivo.length < 10 || motivo.length > 500) {
-                return responder(422, erro('MOTIVO_INVALIDO', 'o motivo precisa ter entre 10 e 500 caracteres', 'motivo'));
-              }
-              estado.inativos.add(pessoa.pessoa_id);
-              pessoa.inativado_em = new Date().toISOString();
-              pessoa.inativado_por = rhUsuario.usuario;
-              pessoa.motivo_inativacao = motivo;
-              // Biometria descartada ao inativar (§3.3.4) — o histórico de ponto
-              // fica; o vetor/miniatura, não. Reativar exige cadastro novo.
-              pessoa.vetores = [];
-              pessoa.miniatura = '';
-            }
-            pessoa.versao_cadastro++;
-          }
-
-          const resposta = { ok: true, pessoa_id: pessoa.pessoa_id, ativo: !estado.inativos.has(pessoa.pessoa_id), versao_cadastro: pessoa.versao_cadastro };
-          gravarIdempotencia(body.idempotency_key, idem.hash, 200, resposta);
-          return responder(200, resposta);
+          if (!String(body.nome || '').trim()) return responder(422, { ok: false, erro: 'nome da equipe e obrigatorio' });
+          estado.equipesCriadas.push(body.nome);
+          return responder(200, { ok: true, equipe_id: 'eq-nova', nome: body.nome });
         }
         if (url.pathname.endsWith('/colaborador')) {
-          // Campos derivados/imutáveis nunca aceitos na escrita (§3.2).
-          if (body.ativo !== undefined) {
-            return responder(400, erro('CAMPO_NAO_EDITAVEL', 'ativo não é editável por aqui — use inativar/reativar', 'ativo'));
+          if (!String(body.nome || '').trim() || !String(body.matricula || '').trim()) {
+            return responder(422, { ok: false, erro: 'nome e matricula sao obrigatorios' });
           }
-          const derivado = ['tem_biometria', 'sem_equipe', 'miniatura', 'telefone_compartilhado', 'telefone_compartilhado_com']
-            .find(c => body[c] !== undefined);
-          if (derivado) return responder(400, erro('CAMPO_DERIVADO', derivado + ' é calculado, não pode ser gravado', derivado));
-
-          if (body.pessoa_id) {
-            // edição (§3.2)
-            const pessoa = pessoas.find(p => p.pessoa_id === body.pessoa_id);
-            if (!pessoa) return responder(404, { ok: false, erro: 'pessoa nao encontrada' });
-            if (body.versao_cadastro !== pessoa.versao_cadastro) {
-              const resp = Object.assign(erro('CADASTRO_DESATUALIZADO', 'alguém alterou esta pessoa enquanto você editava'),
-                { registro_atual: pessoaParaResposta(pessoa) });
-              return responder(409, resp);
-            }
-            const novaMatricula = body.matricula != null ? String(body.matricula).trim() : pessoa.matricula;
-            if (novaMatricula !== pessoa.matricula) {
-              const temMarcacao = [...estado.marcacoes.values()].some(m => m.pessoa_id === pessoa.pessoa_id);
-              if (temMarcacao) return responder(422, erro('MATRICULA_IMUTAVEL', 'matrícula não pode mudar depois da primeira marcação', 'matricula'));
-              if (!novaMatricula) return responder(422, { ok: false, erro: 'matricula e obrigatoria' });
-            }
-            const nome = body.nome != null ? String(body.nome).trim() : pessoa.nome;
-            if (!nome) return responder(422, { ok: false, erro: 'nome e obrigatorio' });
-
-            let telefoneFinal = pessoa.telefone;
-            let autorizacao = null;
-            if (body.telefone !== undefined) {
-              const r = validarTelefoneOuDuplicado(body, pessoa.pessoa_id);
-              if (!r.ok) return responder(r.status, r.corpo);
-              telefoneFinal = r.e164;
-              autorizacao = r.autorizacao;
-            }
-
-            pessoa.nome = nome;
-            pessoa.matricula = novaMatricula;
-            pessoa.telefone = telefoneFinal;
-            if (autorizacao) Object.assign(pessoa, autorizacao);
-            if (body.equipe_id !== undefined) pessoa.equipe_id = body.equipe_id;   // inclusive null: §2.1, sem equipe é estado válido
-            if (body.papel !== undefined) pessoa.papel = body.papel;
-            pessoa.versao_cadastro++;
-            return responder(200, { ok: true, pessoa_id: pessoa.pessoa_id, nome: pessoa.nome, versao_cadastro: pessoa.versao_cadastro });
-          }
-
-          // criação
-          const nome = String(body.nome || '').trim();
-          const matricula = String(body.matricula || '').trim();
-          if (!nome || !matricula) return responder(422, { ok: false, erro: 'nome e matricula sao obrigatorios' });
-          const r = validarTelefoneOuDuplicado(body, null);
-          if (!r.ok) return responder(r.status, r.corpo);
-          const novoId = 'p-' + crypto.randomUUID().slice(0, 8);
-          pessoas.push({
-            pessoa_id: novoId, nome, matricula, equipe_id: body.equipe_id || null, papel: body.papel || 'colaborador',
-            telefone: r.e164, versao: 0, vetores: [], miniatura: '', versao_cadastro: 1,
-            inativado_em: null, inativado_por: null, motivo_inativacao: null,
-            telefone_autorizado_por: null, telefone_autorizado_em: null, telefone_autorizacao_motivo: null,
-            ...(r.autorizacao || {})
-          });
-          estado.colaboradoresCriados.push(nome);
-          return responder(200, { ok: true, pessoa_id: novoId, nome });
+          estado.colaboradoresCriados.push(body.nome);
+          return responder(200, { ok: true, pessoa_id: body.pessoa_id || 'ps-novo', nome: body.nome });
         }
         if (url.pathname.endsWith('/decidir')) {
           if (!body.id) return responder(422, { ok: false, erro: 'id obrigatorio' });
@@ -968,354 +535,49 @@ export function criarServidor(opts = {}) {
           }
           return responder(200, { ok: true, alvo_tipo: body.tipo, alvo_id: body.id, acao: body.acao });
         }
-        // T-C20AD3 (docs/fase3-contrato.md §1.3-1.5): três rotas dedicadas no
-        // lugar do /aparelho+acao antigo. 'aprovar' é o único caminho que
-        // ATIVA um aparelho, e resolve SOMENTE pelo código digitado — nunca
-        // por dispositivo_id nem pendente_id. É a prova de posse física
-        // (docs/adr-acesso-v3.md): quem aprova tem que estar vendo a tela do
-        // aparelho, não só clicando num item de lista. 'recusar' resolve por
-        // pendente_id (defesa em profundidade de §1.1 regra 2 — a lista de
-        // pendentes não carrega nenhum identificador que ative nada).
-        // 'revogar' segue por dispositivo_id: já é ativo e visível, não tem
-        // segredo de posse para proteger.
-        // /efrat/rh/aparelho/aprovar saiu daqui: mora em
-        // nucleo/casos/aparelho.js, servida pela tabela de rotas la em cima.
-
-        if (url.pathname.endsWith('/aparelho/recusar')) {
-          const idem = idempotente(body.idempotency_key, body, true);
-          if (idem.bloqueado) return responder(idem.bloqueado.status, idem.bloqueado.resposta);
-          if (idem.cache) return responder(idem.cache.status, idem.cache.resposta);
-
-          const dispositivoId = estado.pendentesPorId.get(body.pendente_id);
-          const dispositivo = dispositivoId && estado.dispositivos.get(dispositivoId);
-          if (!dispositivo) return responder(404, erro('PENDENTE_NAO_ENCONTRADO', 'linha pendente não encontrada', 'pendente_id'));
-          if (dispositivo.estado === 'ativo') return responder(409, erro('APARELHO_JA_ATIVO', 'este aparelho já foi aprovado'));
-          // Idempotente por pendente_id: recusar duas vezes devolve o mesmo
-          // 200, mesmo sem idempotency_key novo — já era 'negado'.
-          if (dispositivo.estado !== 'negado') {
-            estado.codigosPendentes.delete(dispositivo.codigo_curto);
-            dispositivo.estado = 'negado';
-            dispositivo.recusado_por = rhUsuario.usuario;
-            dispositivo.recusado_em = new Date().toISOString();
-            dispositivo.motivo_decisao = String(body.motivo || '').trim() || null;
-          }
-          const resposta = { ok: true, dispositivo_id: dispositivo.dispositivo_id, estado: dispositivo.estado, request_id: requestId() };
-          gravarIdempotencia(body.idempotency_key, idem.hash, 200, resposta);
-          return responder(200, resposta);
-        }
-
-        if (url.pathname.endsWith('/aparelho/revogar')) {
-          const idem = idempotente(body.idempotency_key, body, true);
-          if (idem.bloqueado) return responder(idem.bloqueado.status, idem.bloqueado.resposta);
-          if (idem.cache) return responder(idem.cache.status, idem.cache.resposta);
-
-          const dispositivo = estado.dispositivos.get(body.dispositivo_id);
-          if (!dispositivo) return responder(404, erro('APARELHO_NAO_ENCONTRADO', 'aparelho não encontrado', 'dispositivo_id'));
-          if (dispositivo.estado !== 'ativo' && dispositivo.estado !== 'revogado') {
-            return responder(422, erro('APARELHO_NAO_ATIVO', 'aparelho não está ativo', 'dispositivo_id'));
-          }
-          if (dispositivo.estado !== 'revogado') {
-            dispositivo.estado = 'revogado';
-            dispositivo.equipes_ids = [];
-            // §1.5/§1.6: revogado_em é a âncora da janela de drenagem de 30
-            // dias e do teto de 500 marcações — sem ela /efrat/marcacoes não
-            // tem como decidir retido vs rejeitado por prazo.
-            dispositivo.revogado_em = new Date().toISOString();
-            dispositivo.revogado_por = rhUsuario.usuario;
-            dispositivo.motivo_decisao = String(body.motivo || '').trim() || null;
-            dispositivo.retidasPosRevogacao = 0;
-          }
-          const resposta = { ok: true, dispositivo_id: dispositivo.dispositivo_id, estado: dispositivo.estado, request_id: requestId() };
-          gravarIdempotencia(body.idempotency_key, idem.hash, 200, resposta);
-          return responder(200, resposta);
-        }
-
-        // /efrat/rh/aparelhos saiu daqui: mora em nucleo/casos/aparelho.js,
-        // servida pela tabela de rotas la em cima.
-        // /efrat/rh/face/cadastrar saiu daqui: mora em nucleo/casos/face.js,
-        // servida pela tabela de rotas la em cima.
-        if (url.pathname.endsWith('/face/convite')) {
-          // Emissão do link de uso único (§4.4/§4.5).
-          const idem = idempotente(body.idempotency_key, body, true);
-          if (idem.bloqueado) return responder(idem.bloqueado.status, idem.bloqueado.resposta);
-          if (idem.cache) return responder(idem.cache.status, idem.cache.resposta);
-
-          const pessoa = pessoas.find(p => p.pessoa_id === body.pessoa_id);
-          if (!pessoa) return responder(404, { ok: false, erro: 'pessoa nao encontrada' });
-          if (estado.inativos.has(pessoa.pessoa_id)) {
-            return responder(422, erro('PESSOA_INATIVA', 'pessoa inativa não recebe convite de face'));
-          }
-          if (!pessoa.telefone) {
-            return responder(422, erro('PESSOA_SEM_TELEFONE', 'pessoa sem telefone válido', 'telefone'));
-          }
-          const pessoasBase = pessoas.map(p => ({
-            pessoa_id: p.pessoa_id, ativo: !estado.inativos.has(p.pessoa_id), telefone: p.telefone || ''
-          }));
-          if (telefonesCompartilhados(pessoasBase)[pessoa.pessoa_id]) {
-            return responder(422, erro('TELEFONE_COMPARTILHADO_SEM_LINK',
-              'Este celular é de mais de uma pessoa, então o link não pode ser enviado — não há como saber quem vai ' +
-              'abrir. Cadastre o rosto aqui, pela câmera, ou envie três fotos.'));
-          }
-
-          // Um convite vivo por pessoa (§4.4): qualquer emitido/aberto anterior
-          // vira substituído — reemitir revoga o antigo sozinho.
-          const anteriores = convitesVivos(pessoa.pessoa_id);
-          for (const c of anteriores) c.estado = 'substituido';
-
-          const token = gerarTokenConvite();
-          const convite_id = 'cv-' + crypto.randomUUID().slice(0, 8);
-          const criadoEm = new Date().toISOString();
-          const expiraEm = new Date(Date.now() + EXPIRA_CONVITE_MS).toISOString();
-          const registro = {
-            convite_id, pessoa_id: pessoa.pessoa_id, token_hash: hashToken(token),
-            estado: 'emitido', canal: body.canal || 'copiar', criado_por: rhUsuario.usuario,
-            criado_em: criadoEm, expira_em: expiraEm, aberto_em: null, tentativas: 0,
-            consumido_em: null, revogado_por: null, revogado_em: null, substituido_por: null
-          };
-          estado.convites.set(convite_id, registro);
-          estado.tokenHashParaConvite.set(registro.token_hash, convite_id);
-          for (const c of anteriores) c.substituido_por = convite_id;
-
-          const mTel = /^\+55(\d{2})(\d{5})(\d{4})$/.exec(pessoa.telefone);
-          const telefoneMascarado = mTel ? '(' + mTel[1] + ') ' + mTel[2][0] + '****-' + mTel[3] : pessoa.telefone;
-          const resposta = Object.assign({
-            ok: true, convite_id, url: ORIGEM_PUBLICA + '/#c=' + token,
-            expira_em: expiraEm, telefone_mascarado: telefoneMascarado, request_id: requestId()
-          }, anteriores.length ? { substituiu: anteriores[0].convite_id } : {});
-          gravarIdempotencia(body.idempotency_key, idem.hash, 201, resposta);
-          return responder(201, resposta);
-        }
-        if (url.pathname.endsWith('/face/convites')) {
-          // Listagem — SEM token, sem URL, nunca (mesma regra do código curto).
-          return responder(200, {
-            ok: true,
-            convites: [...estado.convites.values()].map(c => ({
-              convite_id: c.convite_id, pessoa_id: c.pessoa_id, estado: estadoEfetivoConvite(c),
-              criado_em: c.criado_em, criado_por: c.criado_por, expira_em: c.expira_em,
-              aberto_em: c.aberto_em, tentativas: c.tentativas
-            }))
-          });
-        }
-        if (url.pathname.endsWith('/face/convite/revogar')) {
-          const idem = idempotente(body.idempotency_key, body, true);
-          if (idem.bloqueado) return responder(idem.bloqueado.status, idem.bloqueado.resposta);
-          if (idem.cache) return responder(idem.cache.status, idem.cache.resposta);
-          const c = estado.convites.get(body.convite_id);
-          if (!c) return responder(404, { ok: false, erro: 'convite nao encontrado' });
-          if (['emitido', 'aberto'].includes(estadoEfetivoConvite(c))) {
-            c.estado = 'revogado'; c.revogado_por = rhUsuario.usuario; c.revogado_em = new Date().toISOString();
-          }
-          const resposta = { ok: true, convite_id: c.convite_id, estado: c.estado };
-          gravarIdempotencia(body.idempotency_key, idem.hash, 200, resposta);
-          return responder(200, resposta);
-        }
         return responder(404, { ok: false, erro: 'rota rh desconhecida' });
-      }
-
-      // §4.8: as três rotas alcançáveis sem credencial prévia — esta e
-      // /face/convite/enviar são as duas de face; a terceira é
-      // dispositivo/registrar (T-87615C, outro cartão). Nas duas, volume e
-      // formato são checados ANTES de qualquer leitura de convite — um
-      // limitador que consulta o Map pra descobrir que deve recusar já pagou
-      // o custo que tentava evitar.
-      if (url.pathname === '/webhook/efrat/face/convite/abrir') {
-        if (corpo.length > 4096) return responderFace(413, erro('CORPO_GRANDE', 'corpo maior que o esperado'));
-        const retryAfter = limiteVolumeAnonimo(req);
-        if (retryAfter != null) {
-          return responderFace(429, erro('LIMITE_VOLUME', 'muitas tentativas, tente novamente em instantes'), { 'Retry-After': String(retryAfter) });
-        }
-
-        const c = convitePorToken(bearer(req));
-        const efetivo = c ? estadoEfetivoConvite(c) : null;
-        // Erro único pra inválido/expirado/revogado/substituído/inexistente
-        // (§4.4): distinguir os casos transforma a rota em oráculo.
-        if (!c || !['emitido', 'aberto', 'consumido'].includes(efetivo)) {
-          return responderFace(404, erro('CONVITE_INVALIDO', 'Este link não vale mais. Peça um novo ao RH.'));
-        }
-        if (efetivo === 'consumido') {
-          return responderFace(200, { ok: true, estado: 'consumido', request_id: requestId() });
-        }
-        // 1ª abertura grava aberto_em; aberturas seguintes não regravam nada
-        // e não encurtam a janela (§4.4).
-        if (efetivo === 'emitido') { c.estado = 'aberto'; c.aberto_em = new Date().toISOString(); }
-
-        const pessoa = pessoas.find(p => p.pessoa_id === c.pessoa_id);
-        return responderFace(200, {
-          ok: true, estado: 'aberto', primeiro_nome: (pessoa && pessoa.nome ? pessoa.nome.split(' ')[0] : ''),
-          fotos_exigidas: 3, coerencia_maxima: limiarAceiteCadastro,
-          expira_em: c.expira_em, request_id: requestId()
-        });
-      }
-
-      if (url.pathname === '/webhook/efrat/face/convite/enviar') {
-        // Teto explícito (§4.8): miniatura ≤ 64KB + exatamente 3 vetores de
-        // 128 números já limita o resto; a checagem grossa do corpo inteiro
-        // vem primeiro, antes de qualquer coisa que precise do token.
-        if (corpo.length > 200_000) return responderFace(413, erro('CORPO_GRANDE', 'corpo maior que o esperado'));
-        const retryAfter = limiteVolumeAnonimo(req);
-        if (retryAfter != null) {
-          return responderFace(429, erro('LIMITE_VOLUME', 'muitas tentativas, tente novamente em instantes'), { 'Retry-After': String(retryAfter) });
-        }
-
-        const c = convitePorToken(bearer(req));
-        const efetivo = c ? estadoEfetivoConvite(c) : null;
-        if (!c || !['emitido', 'aberto', 'consumido', 'bloqueado'].includes(efetivo)) {
-          return responderFace(404, erro('CONVITE_INVALIDO', 'Este link não vale mais. Peça um novo ao RH.'));
-        }
-
-        // Idempotency-Key ANTES dos estados terminais, de propósito: "mesma
-        // chave repete a resposta gravada" (§4.4) precisa valer mesmo depois
-        // que o PRÓPRIO envio bem-sucedido virou o convite pra 'consumido' —
-        // senão o retry do cliente (rede caiu na volta, ele tenta de novo)
-        // bate no 409 de "consumido" em vez de ver a resposta 200 de novo.
-        const idemKey = req.headers['idempotency-key'];
-        const idem = idempotente(idemKey, body, true);
-        if (idem.bloqueado) return responderFace(idem.bloqueado.status, idem.bloqueado.resposta);
-        if (idem.cache) return responderFace(idem.cache.status, idem.cache.resposta);
-
-        // bloqueado/consumido ganham código PRÓPRIO — ao contrário do grupo
-        // acima, aqui não há risco de oráculo: quem tem o token já passou
-        // por um estado real, não está adivinhando.
-        if (efetivo === 'bloqueado') {
-          return responderFace(429, erro('CONVITE_BLOQUEADO', 'Muitas tentativas recusadas. Peça um novo link ao RH.'));
-        }
-        if (efetivo === 'consumido') {
-          return responderFace(409, erro('CONVITE_CONSUMIDO', 'Já recebemos suas fotos. O RH vai conferir.'));
-        }
-
-        if (!body.modelo_id) return responderFace(400, erro('MODELO_AUSENTE', 'modelo_id é obrigatório nesta rota'));
-        if (typeof body.miniatura === 'string' && Buffer.byteLength(body.miniatura, 'utf8') > 64 * 1024) {
-          return responderFace(413, erro('CORPO_GRANDE', 'miniatura maior que o esperado'));
-        }
-
-        // Mesma função pura de sempre — se esta rota guardasse cópia própria
-        // da regra de coerência, o bug de T-8ADD9C só mudaria de lugar.
-        const avaliacao = avaliarLoteFace(body.vetores, limiarAceiteCadastro);
-        if (!avaliacao.ok) {
-          // Recusa é RETORNO, não consumo (§4.4): conta uma tentativa, não
-          // gasta o link. 5 recusas seguidas bloqueiam.
-          c.tentativas = (c.tentativas || 0) + 1;
-          if (c.tentativas >= LIMITE_ENVIOS_RECUSADOS) c.estado = 'bloqueado';
-          return responderFace(422, {
-            ok: false,
-            erro: { codigo: avaliacao.codigo, mensagem: avaliacao.mensagem, maior_distancia: avaliacao.maiorDistancia }
-          });
-        }
-
-        const modeloClassificado = classificarModelo(body.modelo_id, 'publica');
-        const pessoa = pessoas.find(p => p.pessoa_id === c.pessoa_id);
-        const versaoNova = ((pessoa && pessoa.versao) || 0) + 1;
-        const criadoEm = new Date().toISOString();
-        // Sempre pendente, inclusive no primeiro cadastro (§4.3) — ninguém do
-        // RH viu a captura acontecer, um humano confere antes de valer.
-        estado.recadastros.push({
-          template_id: 't-' + c.pessoa_id, pessoa_id: c.pessoa_id, versao: versaoNova,
-          coerencia: avaliacao.maiorDistancia, miniatura: body.miniatura || '',
-          vetores: body.vetores, origem: 'link', convite_id: c.convite_id, criado_em: criadoEm,
-          modelo_id: body.modelo_id, modelo_divergente: modeloClassificado.modelo_divergente,
-          modelo_desconhecido: modeloClassificado.modelo_desconhecido
-        });
-
-        c.estado = 'consumido';
-        c.consumido_em = criadoEm;
-
-        const resposta = {
-          ok: true, estado: 'recebido', template_estado: 'pendente',
-          coerencia: avaliacao.maiorDistancia, request_id: requestId()
-        };
-        gravarIdempotencia(idemKey, idem.hash, 200, resposta);
-        return responderFace(200, resposta);
       }
 
       if (url.pathname === '/webhook/efrat/cadastro') {
         estado.chamadas.cadastro++;
         const origem = body.origem === 'gestor' ? 'gestor' : 'rh';
-        // Coerência calculada aqui, a partir dos vetores recebidos — nunca a
-        // partir do campo `coerencia` que o corpo da requisição manda (T-8ADD9C:
-        // js/fila.js mandava um `0` fixo; um número que o cliente informa sobre
-        // si mesmo é um número que o cliente escolhe). Mesma função pura para
-        // qualquer caminho de cadastro (js/coerencia.js).
-        const avaliacao = avaliarLoteFace(body.vetores, limiarAceiteCadastro);
-        if (!avaliacao.ok) {
-          return responder(422, {
-            ok: false,
-            erro: {
-              codigo: avaliacao.codigo, mensagem: avaliacao.mensagem,
-              maior_distancia: avaliacao.maiorDistancia
-            }
+        if (!Array.isArray(body.vetores) || !body.vetores.length) {
+          return responder(422, { ok: false, erro: 'vetores vazios' });
+        }
+        const id = 'p-' + (body.matricula || Math.random().toString(36).slice(2));
+        if (origem === 'rh' && !pessoas.some(p => p.pessoa_id === id)) {
+          pessoas.push({
+            pessoa_id: id, nome: body.nome, matricula: body.matricula,
+            equipe_id: body.equipe_id, papel: 'colaborador', versao: 1,
+            vetores: body.vetores, miniatura: body.miniatura || ''
           });
         }
-        const id = body.pessoa_id || 'p-' + (body.matricula || Math.random().toString(36).slice(2));
-        const existente = pessoas.find(p => p.pessoa_id === id);
-        const versaoNova = existente ? (existente.versao || 1) + 1 : 1;
-        const criadoEm = new Date().toISOString();
-        // modelo_id tolerado ausente nesta rota antiga (§4.7, C2) — cliente
-        // velho (js/fila.js de campo) não quebra por não mandar. Se vier, é
-        // classificado e o resultado grava junto (nunca recusa por causa dele).
-        const modeloClassificado = body.modelo_id ? classificarModelo(body.modelo_id, 'app') : null;
-        const camposModelo = modeloClassificado
-          ? { modelo_id: body.modelo_id, modelo_divergente: modeloClassificado.modelo_divergente,
-              modelo_desconhecido: modeloClassificado.modelo_desconhecido }
-          : {};
-        // Procedência do template (docs/fase3-seguranca.md § 5.1a): origem,
-        // coerência calculada e instante já dá para gravar agora. Autor (qual
-        // pessoa do RH) depende de identidade do RH chegar nesta rota — hoje só
-        // chega dispositivo_id (o aparelho, não quem está logado); registrado
-        // como limite do contrato atual, para o T-65D806 fechar.
-        if (origem === 'rh' && !existente) {
-          pessoas.push(Object.assign({
-            pessoa_id: id, nome: body.nome, matricula: body.matricula,
-            equipe_id: body.equipe_id, papel: 'colaborador', versao: versaoNova,
-            vetores: body.vetores, miniatura: body.miniatura || '',
-            origem, coerencia: avaliacao.maiorDistancia, criado_em: criadoEm
-          }, camposModelo));
-        } else if (origem !== 'rh') {
-          // Caminho pendente (gestor hoje; upload/link entram aqui quando
-          // existirem — T-D30529): não sobrescreve template vigente (§ 1.3a).
-          // A coerência grava aqui para auditoria/recalibração (§4.7), mas NÃO
-          // trafega na resposta de /rh/dados — a serialização de lá é quem
-          // filtra (docs/fase3-contrato.md § 4.3 + critério 14).
-          estado.recadastros.push(Object.assign({
-            template_id: 't-' + id, pessoa_id: id, versao: versaoNova,
-            coerencia: avaliacao.maiorDistancia, miniatura: body.miniatura || '',
-            vetores: body.vetores, origem, criado_em: criadoEm
-          }, camposModelo));
-        }
-        return responder(200, Object.assign({
-          ok: true, pessoa_id: id, template_id: 't-' + id, versao: versaoNova,
-          status: origem === 'rh' ? 'ativo' : 'pendente', coerencia: avaliacao.maiorDistancia
-        }, camposModelo));
+        return responder(200, {
+          ok: true, pessoa_id: id, template_id: 't-' + id, versao: 1,
+          status: origem === 'rh' ? 'ativo' : 'pendente'
+        });
       }
       return responder(404, { ok: false, erro: 'rota desconhecida' });
     }
 
     // estáticos
-    const p = url.pathname === '/' ? '/index.html' : url.pathname;
-    let arq = path.join(RAIZ, decodeURIComponent(p));
-    if (!arq.startsWith(RAIZ)) { res.writeHead(404); res.end('nao encontrado'); return; }
-    // Indice de diretorio: /cadastro serve cadastro/index.html, que e como a
-    // Vercel resolve o link publico com cleanUrls ligado.
-    if (fs.existsSync(arq) && fs.statSync(arq).isDirectory()) arq = path.join(arq, 'index.html');
-    else if (!fs.existsSync(arq) && fs.existsSync(arq + '/index.html')) arq = path.join(arq, 'index.html');
-    if (!fs.existsSync(arq) || fs.statSync(arq).isDirectory()) {
+    let p = url.pathname === '/' ? '/index.html' : url.pathname;
+    const arq = path.join(RAIZ, decodeURIComponent(p));
+    if (!arq.startsWith(RAIZ) || !fs.existsSync(arq) || fs.statSync(arq).isDirectory()) {
       res.writeHead(404); res.end('nao encontrado'); return;
     }
-    const headers = Object.assign(
-      { 'Content-Type': TIPOS[path.extname(arq)] || 'application/octet-stream' },
-      headersPara(p)
-    );
-    if (p === '/js/config.js') {
-      const corpo = configLocal('http://' + (req.headers.host || '127.0.0.1')) + fs.readFileSync(arq, 'utf8');
-      headers['Content-Length'] = Buffer.byteLength(corpo);
-      res.writeHead(200, headers);
-      res.end(corpo);
-      return;
-    }
+    const csp = extrairCspDeHeaders();
+    const headers = { 'Content-Type': TIPOS[path.extname(arq)] || 'application/octet-stream' };
+    if (csp) headers['Content-Security-Policy'] = csp;
+    headers['Permissions-Policy'] = 'camera=(self)';
+    headers['X-Content-Type-Options'] = 'nosniff';
+    headers['Referrer-Policy'] = 'same-origin';
+    headers['X-Frame-Options'] = 'DENY';
     res.writeHead(200, headers);
     fs.createReadStream(arq).pipe(res);
   });
 
-  return { servidor, estado, pessoas };
+  return { servidor, estado, pessoas, carga };
 }
 
 export function subir(opts = {}) {
@@ -1323,64 +585,6 @@ export function subir(opts = {}) {
   return new Promise(res => {
     servidor.listen(0, '127.0.0.1', () => {
       res({ url: 'http://127.0.0.1:' + servidor.address().port, servidor, estado, pessoas });
-    });
-  });
-}
-
-// T-D30529/§4.6: segundo listener, servindo SOMENTE o fecho da página
-// pública. Porta diferente é origem diferente pro navegador — o mesmo
-// isolamento de produção (subdomínio) reproduzido localmente, sem precisar
-// de DNS: só a fiação do domínio real espera o cliente (§4.6, "como se testa
-// isso sem DNS").
-//
-// Simula o build da Vercel (publico/copiar-assets.sh): js/face.js,
-// js/regras.js e js/ui.js vêm do app (fonte única, nunca segunda cópia
-// commitada); vendor/face-api.js e models/* também. O resto — index.html,
-// js/config-face.js, js/api-face.js, js/pagina.js — é a própria publico/.
-// modelo.js entra além do fecho original do contrato: js/face.js importa
-// calcularModeloId de lá (T-8ADD9C § 4.7) — dependência transitiva que o
-// diagrama de §4.6 não previu quando foi escrito, antes do carimbo existir.
-const FECHO_COPIADO_DO_APP = new Set(['face.js', 'regras.js', 'ui.js', 'modelo.js']);
-
-export function criarServidorPublico(opts = {}) {
-  const PUBLICO = path.join(RAIZ, 'publico');
-  const servidor = http.createServer((req, res) => {
-    const url = new URL(req.url, 'http://localhost');
-    const p = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
-
-    let arq;
-    if (p === '/vendor/face-api.js') arq = path.join(RAIZ, 'vendor', 'face-api.js');
-    else if (p.startsWith('/models/')) arq = path.join(RAIZ, p);
-    else if (p.startsWith('/js/') && FECHO_COPIADO_DO_APP.has(p.slice(4))) arq = path.join(RAIZ, 'js', p.slice(4));
-    else arq = path.join(PUBLICO, p);
-
-    if ((!arq.startsWith(RAIZ)) || !fs.existsSync(arq) || fs.statSync(arq).isDirectory()) {
-      res.writeHead(404); res.end('nao encontrado'); return;
-    }
-    const headers = Object.assign(
-      { 'Content-Type': TIPOS[path.extname(arq)] || 'application/octet-stream' },
-      headersPublicoPara(p)
-    );
-    // T-B1D7F6-like, aplicado aqui: publico/vercel.json trava connect-src no
-    // host de PRODUÇÃO (n8n.samasc.com.br). Em teste a API é o primeiro
-    // listener, noutra porta — sem isto o navegador bloqueia a chamada por
-    // CSP e o e2e falha por um motivo que não é o que está sob teste.
-    // Produção nunca passa `apiOrigemTeste`, então o CSP real não muda.
-    if (opts.apiOrigemTeste && headers['Content-Security-Policy']) {
-      headers['Content-Security-Policy'] = headers['Content-Security-Policy']
-        .replace(/connect-src[^;]*/, m => m + ' ' + opts.apiOrigemTeste);
-    }
-    res.writeHead(200, headers);
-    fs.createReadStream(arq).pipe(res);
-  });
-  return servidor;
-}
-
-export function subirPublico(opts = {}) {
-  const servidor = criarServidorPublico(opts);
-  return new Promise(res => {
-    servidor.listen(0, '127.0.0.1', () => {
-      res({ url: 'http://127.0.0.1:' + servidor.address().port, servidor });
     });
   });
 }

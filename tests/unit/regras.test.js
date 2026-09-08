@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  tipoDaVez, vereditoPorDistancia, ranquear, precisaRevisao, emCooldown, decisaoCooldown,
-  itensParaRemover, itensRecusados, agoraCorrigido, calcularDeriva, cargaValida, euclidiana, dia,
+  tipoDaVez, vereditoPorDistancia, ranquear, precisaRevisao, emCooldown,
+  itensParaRemover, agoraCorrigido, calcularDeriva, cargaValida, euclidiana, dia,
   indicadores, espelho, gestorDeveMarcar,
-  presencaPorEquipe, statusPresenca, serieDiaria, pendenciasPorMotivo, LIMIAR_PRESENCA,
-  normalizarTelefone, telefonesCompartilhados, retidasPorAparelho
-} from '../../js/regras.js';
+  presencaPorEquipe, statusPresenca, serieDiaria, pendenciasPorMotivo, LIMIAR_PRESENCA
+, pontosDoDia, exceptionsDoDia, TIPOS_EXCECAO,
+  jornadaDaEquipe, horaEntradaDaEquipe, horasEntradaPorEquipe, csvDe,
+  materializarDias, alertasDePlanejamento } from '../../js/regras.js';
 
 const CFG = { limiarAceite: 0.45, limiarCinza: 0.58 };
 
@@ -70,45 +71,6 @@ test('cooldown impede marcacao repetida da mesma pessoa', () => {
   assert.equal(emCooldown('a', doDia, agora, 10000), false);
 });
 
-/**
- * Achado de produção (cliente testando): reconhecer de novo quem acabou de
- * marcar aqui, ainda na frente da câmera, virava a mensagem "já marcou agora
- * há pouco" — o sistema acusando falha em quem tinha acabado de ter sucesso.
- * decisaoCooldown() é a lógica que separa esse caso (silencioso) do caso em
- * que o aviso continua útil (saiu e voltou depois, ainda em cooldown).
- */
-test('decisaoCooldown: fora do cooldown geral segue fluxo normal (null), independente de presenca', () => {
-  const agora = Date.parse('2026-08-14T09:00:00Z');
-  const doDia = [{ pessoa_id: 'a', marcado_em: '2026-08-14T08:58:00Z' }]; // 120s atrás
-  assert.equal(decisaoCooldown('a', doDia, agora, 60000, true), null);
-  assert.equal(decisaoCooldown('a', doDia, agora, 60000, false), null);
-});
-
-test('decisaoCooldown: em cooldown e continua na frente desde que marcou aqui e "nada"', () => {
-  const agora = Date.parse('2026-08-14T09:00:00Z');
-  const doDia = [{ pessoa_id: 'a', marcado_em: '2026-08-14T08:59:57Z' }]; // 3s atrás
-  assert.equal(decisaoCooldown('a', doDia, agora, 60000, true), 'nada');
-});
-
-test('decisaoCooldown: em cooldown mas NAO continua na frente desde que marcou aqui e "mensagem" (saiu e voltou, ou chegou ja em cooldown de outro aparelho)', () => {
-  const agora = Date.parse('2026-08-14T09:00:00Z');
-  // mesmo poucos segundos atras: nao e o TEMPO que decide, e a presenca continua.
-  const doDia = [{ pessoa_id: 'a', marcado_em: '2026-08-14T08:59:57Z' }];
-  assert.equal(decisaoCooldown('a', doDia, agora, 60000, false), 'mensagem');
-});
-
-test('decisaoCooldown: mesmo muito tempo depois, presenca continua ainda e "nada" — nao e prazo, e presenca', () => {
-  const agora = Date.parse('2026-08-14T09:00:00Z');
-  const doDia = [{ pessoa_id: 'a', marcado_em: '2026-08-14T08:59:05Z' }]; // 55s atras, ainda dentro do cooldown de 60s
-  assert.equal(decisaoCooldown('a', doDia, agora, 60000, true), 'nada');
-});
-
-test('decisaoCooldown: pessoa diferente da que esta em cooldown segue fluxo normal (null)', () => {
-  const agora = Date.parse('2026-08-14T09:00:00Z');
-  const doDia = [{ pessoa_id: 'a', marcado_em: '2026-08-14T08:59:57Z' }];
-  assert.equal(decisaoCooldown('b', doDia, agora, 60000, true), null);
-});
-
 test('so sai da fila o que o servidor confirmou', () => {
   const res = [
     { id_cliente: '1', status: 'aceito' },
@@ -122,72 +84,6 @@ test('so sai da fila o que o servidor confirmou', () => {
 
 test('duplicado sai da fila: servidor ja tem o registro', () => {
   assert.deepEqual(itensParaRemover([{ id_cliente: 'x', status: 'duplicado' }]), ['x']);
-});
-
-// T-D00CE0 (§1.6 do contrato): retido sai da fila igual aceito/duplicado —
-// o servidor já tem o registro, só não conta como ponto até o RH decidir.
-test('retido sai da fila igual aceito e duplicado: o servidor ja tem o registro', () => {
-  const res = [
-    { id_cliente: '1', status: 'aceito' },
-    { id_cliente: '2', status: 'retido' },
-    { id_cliente: '3', status: 'rejeitado' }
-  ];
-  assert.deepEqual(itensParaRemover(res), ['1', '2']);
-});
-
-test('itensRecusados: so rejeitado entra, e tambem sai da fila de envio', () => {
-  const res = [
-    { id_cliente: '1', status: 'aceito' },
-    { id_cliente: '2', status: 'duplicado' },
-    { id_cliente: '3', status: 'retido' },
-    { id_cliente: '4', status: 'rejeitado' }
-  ];
-  assert.deepEqual(itensRecusados(res), ['4']);
-  assert.deepEqual(itensRecusados([]), []);
-  assert.deepEqual(itensRecusados(null), []);
-});
-
-/* ------------------------------------------------------- retidasPorAparelho */
-
-test('retidasPorAparelho: agrupa por aparelho, conta e acha a faixa de batida', () => {
-  const marcacoes = [
-    {
-      pendente: true, motivo_codigo: 'aparelho_revogado', aparelho_dispositivo_id: 'd1',
-      aparelho_apelido: 'Tablet Norte', aparelho_revogado_em: '2026-08-20T18:00:00Z',
-      marcado_em: '2026-08-20T07:02:00Z', recebido_em: '2026-08-21T14:20:00Z'
-    },
-    {
-      pendente: true, motivo_codigo: 'aparelho_revogado', aparelho_dispositivo_id: 'd1',
-      aparelho_apelido: 'Tablet Norte', aparelho_revogado_em: '2026-08-20T18:00:00Z',
-      marcado_em: '2026-08-20T17:40:00Z', recebido_em: '2026-08-21T14:19:00Z'
-    }
-  ];
-  const grupos = retidasPorAparelho(marcacoes);
-  assert.equal(grupos.length, 1);
-  assert.equal(grupos[0].dispositivo_id, 'd1');
-  assert.equal(grupos[0].apelido, 'Tablet Norte');
-  assert.equal(grupos[0].total, 2);
-  assert.equal(grupos[0].batida_min, '2026-08-20T07:02:00Z');
-  assert.equal(grupos[0].batida_max, '2026-08-20T17:40:00Z');
-  assert.equal(grupos[0].recebido_max, '2026-08-21T14:20:00Z');
-});
-
-test('retidasPorAparelho: ignora pessoa_inativa_no_envio e nao-pendente', () => {
-  const grupos = retidasPorAparelho([
-    { pendente: true, motivo_codigo: 'pessoa_inativa_no_envio', aparelho_dispositivo_id: 'd1' },
-    { pendente: false, motivo_codigo: 'aparelho_revogado', aparelho_dispositivo_id: 'd1' }
-  ]);
-  assert.deepEqual(grupos, []);
-});
-
-test('retidasPorAparelho: dois aparelhos viram dois grupos, ordenados do maior pro menor', () => {
-  const marcacoes = [
-    { pendente: true, motivo_codigo: 'aparelho_revogado', aparelho_dispositivo_id: 'pequeno', marcado_em: 'x' },
-    { pendente: true, motivo_codigo: 'aparelho_revogado', aparelho_dispositivo_id: 'grande', marcado_em: 'x' },
-    { pendente: true, motivo_codigo: 'aparelho_revogado', aparelho_dispositivo_id: 'grande', marcado_em: 'x' }
-  ];
-  const grupos = retidasPorAparelho(marcacoes);
-  assert.deepEqual(grupos.map(g => g.dispositivo_id), ['grande', 'pequeno']);
 });
 
 test('calcularDeriva desconta metade da ida e volta', () => {
@@ -434,114 +330,258 @@ test('pendenciasPorMotivo soma recadastros e ignora nao-pendentes', () => {
   assert.equal(por.recadastro, 1);
 });
 
-/* ------------------------------------------------------- normalizarTelefone */
-
-test('normalizarTelefone: 11 digitos BR vira +55 e-164', () => {
-  const r = normalizarTelefone('67998765432');
-  assert.equal(r.ok, true);
-  assert.equal(r.e164, '+5567998765432');
-  assert.equal(r.estrangeiro, false);
+test('pontosDoDia: dia vazio → próximo é entrada manhã (índice 0)', () => {
+  const r = pontosDoDia([]);
+  assert.equal(r.proximo, 0);
+  assert.equal(r.completo, false);
+  assert.equal(r.slots[0].rotulo, 'Entrada manhã');
+  assert.equal(r.slots.filter(s => s.batido).length, 0);
+});
+test('pontosDoDia: 2 marcações → próximo é entrada tarde (índice 2)', () => {
+  const ms = [
+    { marcado_em: '2026-09-01T08:00:00Z' },
+    { marcado_em: '2026-09-01T12:00:00Z' }
+  ];
+  const r = pontosDoDia(ms);
+  assert.equal(r.proximo, 2);
+  assert.equal(r.slots[0].batido, true);
+  assert.equal(r.slots[1].batido, true);
+  assert.equal(r.slots[2].batido, false);
+});
+test('pontosDoDia: 4 marcações → dia completo, sem próximo', () => {
+  const ms = ['08:00','12:00','13:00','17:00'].map(h => ({ marcado_em: '2026-09-01T'+h+':00Z' }));
+  const r = pontosDoDia(ms);
+  assert.equal(r.completo, true);
+  assert.equal(r.proximo, null);
+});
+test('pontosDoDia: ordena por horário mesmo se vier fora de ordem', () => {
+  const ms = [
+    { marcado_em: '2026-09-01T12:00:00Z' },
+    { marcado_em: '2026-09-01T08:00:00Z' }
+  ];
+  const r = pontosDoDia(ms);
+  assert.equal(r.slots[0].marcacao.marcado_em, '2026-09-01T08:00:00Z');
 });
 
-test('normalizarTelefone: mascara bonita normaliza igual ao digitos puros', () => {
-  const r = normalizarTelefone('(67) 99876-5432');
-  assert.equal(r.ok, true);
-  assert.equal(r.e164, '+5567998765432');
+
+/* --------------------------------------- fila de exceções do RH (v2) */
+
+const XHOJE = '2026-08-14';
+const XPESSOAS = [
+  { pessoa_id: 'a', nome: 'Ana', equipe_id: 'e1', ativo: true },
+  { pessoa_id: 'b', nome: 'Bruno', equipe_id: 'e1', ativo: true },
+  { pessoa_id: 'c', nome: 'Carla', equipe_id: 'e1', ativo: true },
+  { pessoa_id: 'd', nome: 'Dario', equipe_id: 'e1', ativo: false }   // inativo: nunca cobra
+];
+const XALOC = [
+  { colaborador_id: 'a', equipe_id: 'e1', cerca_lat: -20, cerca_lng: -54, cerca_raio_m: 200 },
+  { colaborador_id: 'b', equipe_id: 'e1', cerca_lat: -20, cerca_lng: -54, cerca_raio_m: 200 },
+  { colaborador_id: 'c', equipe_id: 'e1', cerca_lat: -20, cerca_lng: -54, cerca_raio_m: 200 },
+  { colaborador_id: 'd', equipe_id: 'e1', cerca_lat: -20, cerca_lng: -54, cerca_raio_m: 200 }
+];
+// Ana: marcação fora da cerca (crítico). Bruno: manual pendente. Carla: nada (sem entrada).
+const XMARCS = [
+  { id_cliente: 'm1', pessoa_id: 'a', equipe_id: 'e1', marcado_dia: XHOJE, marcado_em: XHOJE + 'T08:14:00Z',
+    pendente: true, dentro_cerca: false, origem: 'biometria', veredito: 'aceito' },
+  { id_cliente: 'm2', pessoa_id: 'b', equipe_id: 'e1', marcado_dia: XHOJE, marcado_em: XHOJE + 'T07:03:00Z',
+    pendente: true, dentro_cerca: true, origem: 'manual', veredito: 'aceito' }
+];
+const AGORA = XHOJE + 'T09:00:00Z';   // já passou das 08:00
+
+test('exceptionsDoDia classifica fora da cerca como crítico', () => {
+  const x = exceptionsDoDia(XMARCS, XPESSOAS, XALOC, XHOJE, AGORA, '08:00');
+  const ana = x.find(i => i.pessoa_id === 'a');
+  assert.equal(ana.tipo, 'fora_da_cerca');
+  assert.equal(ana.severidade, 'critico');
+  assert.equal(ana.alvo.tipo, 'marcacao');
+  assert.equal(ana.alvo.id, 'm1');
 });
 
-test('normalizarTelefone: 13 digitos comecando em 55 e o mesmo numero', () => {
-  const r = normalizarTelefone('5567998765432');
-  assert.equal(r.ok, true);
-  assert.equal(r.e164, '+5567998765432');
+test('exceptionsDoDia reconhece registro manual pendente', () => {
+  const x = exceptionsDoDia(XMARCS, XPESSOAS, XALOC, XHOJE, AGORA, '08:00');
+  const bruno = x.find(i => i.pessoa_id === 'b');
+  assert.equal(bruno.tipo, 'registro_manual');
+  assert.equal(bruno.severidade, 'atencao');
 });
 
-test('normalizarTelefone: com + na frente tambem aceita BR', () => {
-  const r = normalizarTelefone('+5567998765432');
-  assert.equal(r.ok, true);
-  assert.equal(r.e164, '+5567998765432');
+test('exceptionsDoDia deriva "sem entrada" de quem alocou mas não marcou', () => {
+  const x = exceptionsDoDia(XMARCS, XPESSOAS, XALOC, XHOJE, AGORA, '08:00');
+  const carla = x.find(i => i.pessoa_id === 'c');
+  assert.equal(carla.tipo, 'sem_entrada');
+  assert.equal(carla.marcacao, null);
+  assert.equal(carla.alvo.tipo, 'sem_entrada');
+  assert.equal(carla.alvo.id, 'c');
 });
 
-test('normalizarTelefone: fixo de 10 digitos e TELEFONE_NAO_MOVEL', () => {
-  const r = normalizarTelefone('6733224455');
-  assert.equal(r.ok, false);
-  assert.equal(r.codigo, 'TELEFONE_NAO_MOVEL');
+test('exceptionsDoDia não cobra "sem entrada" de pessoa inativa', () => {
+  const x = exceptionsDoDia(XMARCS, XPESSOAS, XALOC, XHOJE, AGORA, '08:00');
+  assert.equal(x.some(i => i.pessoa_id === 'd'), false);
 });
 
-test('normalizarTelefone: fixo de 12 digitos comecando em 55 tambem e TELEFONE_NAO_MOVEL', () => {
-  const r = normalizarTelefone('556733224455');
-  assert.equal(r.codigo, 'TELEFONE_NAO_MOVEL');
+test('exceptionsDoDia: antes da hora de entrada não cobra ausência', () => {
+  const cedo = XHOJE + 'T06:30:00Z';   // antes das 08:00
+  const x = exceptionsDoDia(XMARCS, XPESSOAS, XALOC, XHOJE, cedo, '08:00');
+  assert.equal(x.some(i => i.tipo === 'sem_entrada'), false);
+  // mas as exceções ancoradas em marcação continuam valendo
+  assert.equal(x.some(i => i.tipo === 'fora_da_cerca'), true);
 });
 
-test('normalizarTelefone: celular BR sem o 9 na frente do numero e nao-movel', () => {
-  const r = normalizarTelefone('67888765432'); // DDD 67 + 8 (sem 9) + 8 digitos
-  assert.equal(r.codigo, 'TELEFONE_NAO_MOVEL');
+test('exceptionsDoDia: quem apareceu não vira "sem entrada" mesmo sem bater todos os pontos', () => {
+  // Bruno tem marcação hoje (manual) — não pode aparecer também como sem_entrada
+  const x = exceptionsDoDia(XMARCS, XPESSOAS, XALOC, XHOJE, AGORA, '08:00');
+  assert.equal(x.filter(i => i.pessoa_id === 'b').length, 1);
+  assert.equal(x.find(i => i.pessoa_id === 'b').tipo, 'registro_manual');
 });
 
-test('normalizarTelefone: ausente ou vazio e TELEFONE_OBRIGATORIO', () => {
-  assert.equal(normalizarTelefone('').codigo, 'TELEFONE_OBRIGATORIO');
-  assert.equal(normalizarTelefone(null).codigo, 'TELEFONE_OBRIGATORIO');
-  assert.equal(normalizarTelefone(undefined).codigo, 'TELEFONE_OBRIGATORIO');
+test('exceptionsDoDia ordena crítico antes de atenção', () => {
+  const x = exceptionsDoDia(XMARCS, XPESSOAS, XALOC, XHOJE, AGORA, '08:00');
+  assert.equal(x[0].severidade, 'critico');   // Ana (fora da cerca) primeiro
+  assert.equal(x[0].pessoa_id, 'a');
 });
 
-test('normalizarTelefone: DDD com zero ou fora de 11-99 e TELEFONE_INVALIDO', () => {
-  assert.equal(normalizarTelefone('07998765432').codigo, 'TELEFONE_INVALIDO');   // ddd 07
-  assert.equal(normalizarTelefone('10998765432').codigo, 'TELEFONE_INVALIDO');   // ddd 10, fora de 11-99
+test('exceptionsDoDia: marcação não-pendente não vira exceção', () => {
+  const marcs = [{ id_cliente: 'ok', pessoa_id: 'a', equipe_id: 'e1', marcado_dia: XHOJE,
+    marcado_em: XHOJE + 'T08:00:00Z', pendente: false, dentro_cerca: true, origem: 'biometria', veredito: 'aceito' }];
+  const x = exceptionsDoDia(marcs, XPESSOAS, [XALOC[0]], XHOJE, AGORA, '08:00');
+  // Ana marcou e está ok → nem exceção de marcação, nem sem_entrada
+  assert.equal(x.some(i => i.pessoa_id === 'a'), false);
 });
 
-test('normalizarTelefone: tamanho estranho ou letra sobrando e TELEFONE_INVALIDO', () => {
-  assert.equal(normalizarTelefone('123').codigo, 'TELEFONE_INVALIDO');
-  assert.equal(normalizarTelefone('6799876543299999').codigo, 'TELEFONE_INVALIDO');
-  assert.equal(normalizarTelefone('6799876abc2').codigo, 'TELEFONE_INVALIDO');
+test('exceptionsDoDia: hora-limite por equipe (jornada) atrasa a cobrança', () => {
+  // Carla é da e1; se a jornada da e1 começa 09:30, às 09:00 ainda não cobra ausência.
+  const porEq = { e1: '09:30' };
+  const x = exceptionsDoDia([], XPESSOAS, [XALOC[2]], XHOJE, AGORA, '08:00', porEq);
+  assert.equal(x.some(i => i.tipo === 'sem_entrada'), false);
+  // já às 10:00 passa a cobrar
+  const x2 = exceptionsDoDia([], XPESSOAS, [XALOC[2]], XHOJE, XHOJE + 'T10:00:00Z', '08:00', porEq);
+  assert.equal(x2.some(i => i.pessoa_id === 'c' && i.tipo === 'sem_entrada'), true);
 });
 
-test('normalizarTelefone: numero estrangeiro com + e pais diferente de 55 e aceito e marcado', () => {
-  const r = normalizarTelefone('+12025551234');
-  assert.equal(r.ok, true);
-  assert.equal(r.e164, '+12025551234');
-  assert.equal(r.estrangeiro, true);
+
+/* --------------------------------------- jornada + CSV (v2.1) */
+
+const JEQUIPES = [
+  { equipe_id: 'e1', nome: 'Um', jornada_id: 'j1' },
+  { equipe_id: 'e2', nome: 'Dois', jornada_id: null }
+];
+const JORNADAS = [{ jornada_id: 'j1', nome: 'Comercial', entrada: '08:00', saida: '18:00' }];
+
+test('jornadaDaEquipe usa a jornada associada', () => {
+  assert.equal(jornadaDaEquipe('e1', JEQUIPES, JORNADAS, '07:00–17:00'), '08:00–18:00');
+});
+test('jornadaDaEquipe cai no default quando a equipe não tem jornada', () => {
+  assert.equal(jornadaDaEquipe('e2', JEQUIPES, JORNADAS, '07:00–17:00'), '07:00–17:00');
+});
+test('horaEntradaDaEquipe devolve a entrada da jornada ou o padrão', () => {
+  assert.equal(horaEntradaDaEquipe('e1', JEQUIPES, JORNADAS, '08:00'), '08:00');
+  assert.equal(horaEntradaDaEquipe('e2', JEQUIPES, JORNADAS, '06:30'), '06:30');
+});
+test('horasEntradaPorEquipe mapeia só equipes com jornada', () => {
+  const m = horasEntradaPorEquipe(JEQUIPES, JORNADAS);
+  assert.deepEqual(m, { e1: '08:00' });
+});
+test('csvDe escapa separador, aspas e quebra de linha', () => {
+  const csv = csvDe(['Nome', 'Obs'], [['Ana; Souza', 'diz "oi"'], ['linha\nquebrada', 'ok']]);
+  const linhas = csv.split('\r\n');
+  assert.equal(linhas[0], 'Nome;Obs');
+  assert.equal(linhas[1], '"Ana; Souza";"diz ""oi"""');
+  assert.equal(linhas[2], '"linha\nquebrada";ok');
 });
 
-test('normalizarTelefone: estrangeiro fora de 8-15 digitos e TELEFONE_INVALIDO', () => {
-  assert.equal(normalizarTelefone('+1234').codigo, 'TELEFONE_INVALIDO');
+
+/* --------------------------------------- planejamento recorrente (v3) */
+
+// 2026-09-09 é uma quarta-feira. Semana: seg 07, ter 08, qua 09, qui 10, sex 11, sáb 12, dom 13.
+const PHOJE = '2026-09-09';
+
+test('materializarDias inclui só dias úteis dentro da vigência', () => {
+  const plano = { dias_semana: [1, 2, 3, 4, 5], vigencia_inicio: '2026-09-07', vigencia_fim: '2026-09-13' };
+  const dias = materializarDias(plano, PHOJE, 90);
+  // de hoje (qua 09) até dom 13, úteis = qua/qui/sex; sáb e dom ficam de fora
+  assert.deepEqual(dias, ['2026-09-09', '2026-09-10', '2026-09-11']);
 });
 
-/* --------------------------------------------------- telefonesCompartilhados */
-
-test('telefonesCompartilhados: duas pessoas ativas com o mesmo numero se apontam', () => {
-  const mapa = telefonesCompartilhados([
-    { pessoa_id: 'p1', nome: 'Ana', ativo: true, telefone: '+5567998765432' },
-    { pessoa_id: 'p2', nome: 'Bruno', ativo: true, telefone: '+5567998765432' },
-    { pessoa_id: 'p3', nome: 'Carla', ativo: true, telefone: '+5567911112222' }
-  ]);
-  assert.deepEqual(mapa.p1, [{ pessoa_id: 'p2', nome: 'Bruno' }]);
-  assert.deepEqual(mapa.p2, [{ pessoa_id: 'p1', nome: 'Ana' }]);
-  assert.equal(mapa.p3, undefined);
+test('materializarDias nunca gera dias no passado', () => {
+  const plano = { dias_semana: [1, 2, 3, 4, 5], vigencia_inicio: '2026-09-01', vigencia_fim: '2026-09-11' };
+  const dias = materializarDias(plano, PHOJE, 90);
+  assert.equal(dias[0], '2026-09-09');       // começa em hoje, não no início da vigência (07)
+  assert.ok(dias.every(d => d >= PHOJE));
 });
 
-test('telefonesCompartilhados: pessoa inativa nao conta pro compartilhamento', () => {
-  const mapa = telefonesCompartilhados([
-    { pessoa_id: 'p1', nome: 'Ana', ativo: true, telefone: '+5567998765432' },
-    { pessoa_id: 'p2', nome: 'Bruno', ativo: false, telefone: '+5567998765432' }
-  ]);
-  assert.equal(mapa.p1, undefined);
-  assert.equal(mapa.p2, undefined);
+test('materializarDias com vigência sem fim respeita o horizonte', () => {
+  const plano = { dias_semana: [1, 2, 3, 4, 5], vigencia_inicio: '2026-09-09', vigencia_fim: null };
+  const dias = materializarDias(plano, PHOJE, 7);   // 7 dias de horizonte: qua..qua seguinte
+  // úteis em [09..16]: qua09, qui10, sex11, seg14, ter15, qua16
+  assert.deepEqual(dias, ['2026-09-09', '2026-09-10', '2026-09-11', '2026-09-14', '2026-09-15', '2026-09-16']);
 });
 
-test('telefonesCompartilhados: tres pessoas no mesmo numero aparecem uma pras outras duas', () => {
-  const mapa = telefonesCompartilhados([
-    { pessoa_id: 'p1', nome: 'Ana', ativo: true, telefone: '+5567998765432' },
-    { pessoa_id: 'p2', nome: 'Bruno', ativo: true, telefone: '+5567998765432' },
-    { pessoa_id: 'p3', nome: 'Carla', ativo: true, telefone: '+5567998765432' }
-  ]);
-  assert.equal(mapa.p1.length, 2);
-  assert.equal(mapa.p2.length, 2);
-  assert.equal(mapa.p3.length, 2);
+test('materializarDias com vigência já vencida devolve vazio', () => {
+  const plano = { dias_semana: [1, 2, 3, 4, 5], vigencia_inicio: '2026-08-01', vigencia_fim: '2026-08-31' };
+  assert.deepEqual(materializarDias(plano, PHOJE, 90), []);
 });
 
-test('telefonesCompartilhados: pessoa sem telefone nunca entra no mapa', () => {
-  const mapa = telefonesCompartilhados([
-    { pessoa_id: 'p1', nome: 'Ana', ativo: true, telefone: '' },
-    { pessoa_id: 'p2', nome: 'Bruno', ativo: true, telefone: '' }
-  ]);
-  assert.deepEqual(mapa, {});
+test('materializarDias respeita dias_semana custom (inclui sábado)', () => {
+  const plano = { dias_semana: [6], vigencia_inicio: '2026-09-09', vigencia_fim: '2026-09-20' };
+  const dias = materializarDias(plano, PHOJE, 90);
+  // sábados em [09..20]: 12 e 19
+  assert.deepEqual(dias, ['2026-09-12', '2026-09-19']);
+});
+
+const ALPESSOAS = [
+  { pessoa_id: 'a', nome: 'Ana', equipe_id: 'e1', ativo: true },
+  { pessoa_id: 'b', nome: 'Bruno', equipe_id: 'e1', ativo: true },
+  { pessoa_id: 'c', nome: 'Carla', equipe_id: 'e2', ativo: true },
+  { pessoa_id: 'd', nome: 'Dario', equipe_id: 'e2', ativo: false }
+];
+const ALEQUIPES = [{ equipe_id: 'e1', nome: 'Um' }, { equipe_id: 'e2', nome: 'Dois' }];
+
+test('alertasDePlanejamento: pessoa em 2 equipes no mesmo dia é crítico', () => {
+  const alocs = [
+    { dia: PHOJE, colaborador_id: 'a', equipe_id: 'e1' },
+    { dia: PHOJE, colaborador_id: 'a', equipe_id: 'e2' },   // conflito!
+    { dia: PHOJE, colaborador_id: 'b', equipe_id: 'e1' }
+  ];
+  const al = alertasDePlanejamento([], alocs, ALPESSOAS, ALEQUIPES, PHOJE, 14, 3);
+  const conf = al.find(x => x.tipo === 'pessoa_em_2_equipes');
+  assert.ok(conf);
+  assert.equal(conf.severidade, 'critico');
+  assert.equal(conf.pessoa_id, 'a');
+});
+
+test('alertasDePlanejamento: cerca sem gente', () => {
+  const planos = [{ plano_id: 'p1', equipe_id: 'e1', colaboradores: [], ativo: true, vigencia_fim: null }];
+  const al = alertasDePlanejamento(planos, [], ALPESSOAS, ALEQUIPES, PHOJE, 14, 3);
+  assert.ok(al.some(x => x.tipo === 'cerca_sem_gente' && x.equipe_id === 'e1'));
+});
+
+test('alertasDePlanejamento: plano só com gente inativa também conta como sem gente', () => {
+  const planos = [{ plano_id: 'p1', equipe_id: 'e2', colaboradores: ['d'], ativo: true, vigencia_fim: null }];
+  const al = alertasDePlanejamento(planos, [], ALPESSOAS, ALEQUIPES, PHOJE, 14, 3);
+  assert.ok(al.some(x => x.tipo === 'cerca_sem_gente'));
+});
+
+test('alertasDePlanejamento: colaborador ativo sem nenhuma alocação futura', () => {
+  const alocs = [{ dia: PHOJE, colaborador_id: 'a', equipe_id: 'e1' }];   // só Ana tem plano
+  const al = alertasDePlanejamento([], alocs, ALPESSOAS, ALEQUIPES, PHOJE, 14, 3);
+  const semPlano = al.filter(x => x.tipo === 'ativo_sem_plano').map(x => x.pessoa_id).sort();
+  assert.deepEqual(semPlano, ['b', 'c']);      // Dario é inativo, não conta; Ana tem plano
+});
+
+test('alertasDePlanejamento: plano vencendo dentro da janela; fora não alerta', () => {
+  const planos = [
+    { plano_id: 'p1', equipe_id: 'e1', colaboradores: ['a'], ativo: true, vigencia_fim: '2026-09-11' }, // +2 dias
+    { plano_id: 'p2', equipe_id: 'e2', colaboradores: ['c'], ativo: true, vigencia_fim: '2026-10-30' }  // longe
+  ];
+  const al = alertasDePlanejamento(planos, [], ALPESSOAS, ALEQUIPES, PHOJE, 14, 3);
+  const venc = al.filter(x => x.tipo === 'plano_vencendo').map(x => x.alvo.id);
+  assert.deepEqual(venc, ['p1']);
+});
+
+test('alertasDePlanejamento: itens têm o mesmo shape das exceções (id, tipo, severidade, alvo)', () => {
+  const al = alertasDePlanejamento(
+    [{ plano_id: 'p1', equipe_id: 'e1', colaboradores: [], ativo: true, vigencia_fim: null }],
+    [], ALPESSOAS, ALEQUIPES, PHOJE, 14, 3);
+  const x = al[0];
+  assert.ok(x.id && x.tipo && x.severidade && x.alvo && 'pessoa_id' in x && 'equipe_id' in x);
+  assert.equal(x.hora, '');
 });

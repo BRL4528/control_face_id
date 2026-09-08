@@ -8,6 +8,34 @@ export function tipoDaVez(marcacoesDoDiaDaPessoa) {
   return validas.length % 2 === 0 ? 'entrada' : 'saida';
 }
 
+/**
+ * Os 4 pontos padrão do dia: manhã (entrada/saída) e tarde (entrada/saída).
+ * A sequência é automática — a 1ª marcação do dia é a entrada da manhã, a 2ª a
+ * saída da manhã, e assim por diante. Recebe as marcações do dia (qualquer
+ * ordem) e devolve os 4 slots preenchidos na ordem cronológica, mais o índice
+ * do próximo a bater (0..3) ou null se o dia está completo.
+ */
+export const SLOTS_DIA = [
+  { chave: 'entrada_manha', rotulo: 'Entrada manhã', tipo: 'entrada', periodo: 'manha' },
+  { chave: 'saida_manha',   rotulo: 'Saída manhã',   tipo: 'saida',   periodo: 'manha' },
+  { chave: 'entrada_tarde', rotulo: 'Entrada tarde', tipo: 'entrada', periodo: 'tarde' },
+  { chave: 'saida_tarde',   rotulo: 'Saída tarde',   tipo: 'saida',   periodo: 'tarde' }
+];
+
+export function pontosDoDia(marcacoesDoDia) {
+  const ordenadas = (marcacoesDoDia || [])
+    .filter(m => m && m.marcado_em)
+    .slice()
+    .sort((a, b) => String(a.marcado_em).localeCompare(String(b.marcado_em)));
+  const slots = SLOTS_DIA.map((s, i) => ({
+    ...s,
+    marcacao: ordenadas[i] || null,
+    batido: !!ordenadas[i]
+  }));
+  const proximo = ordenadas.length < 4 ? ordenadas.length : null;
+  return { slots, proximo, completo: proximo === null, extras: ordenadas.slice(4) };
+}
+
 /** Veredito a partir da distância e dos limiares configurados. */
 export function vereditoPorDistancia(dist, cfg) {
   if (dist == null || !isFinite(dist)) return 'revisar';
@@ -48,91 +76,14 @@ export function emCooldown(pessoaId, marcacoesDoDia, agoraMs, cooldownMs) {
 }
 
 /**
- * O que fazer quando alguém em cooldown é reconhecido de novo — achado de
- * produção (cliente testou e reclamou): a tela de ponto reabre a câmera
- * sozinha depois do comprovante, e se a pessoa não saiu da frente, o mesmo
- * rosto é reconhecido bem ali e caía direto na mensagem de cooldown — o
- * sistema "acusava falha" em quem tinha acabado de ter sucesso.
- *
- * `null` = não está em cooldown, segue o fluxo normal de confirmação.
- * `'nada'` = está em cooldown E é a mesma pessoa que nunca saiu da frente da
- * câmera desde que marcou aqui — no-op silencioso, sem mensagem nenhuma.
- * `'mensagem'` = está em cooldown por outro motivo (saiu e voltou depois,
- * chegou já em cooldown por marcação de outro aparelho, etc.) — aviso
- * continua útil aqui.
- *
- * `continuaNaFrenteDesdeQueMarcouAqui` é um BOOLEANO, não um prazo: "acabou
- * de marcar" não tem duração fixa — dura o tempo que a pessoa ficar parada
- * ali, e só isso, então quem decide é presença contínua (rastreada por quem
- * chama, a partir do sinal de rosto detectado), nunca um relógio. Um prazo
- * fixo resolveria só o primeiro re-reconhecimento e voltaria a incomodar
- * assim que o prazo vencesse com a pessoa ainda parada na frente — pior que
- * o defeito original, porque pareceria corrigido no teste rápido.
- */
-export function decisaoCooldown(pessoaId, marcacoesDoDia, agoraMs, cooldownMs, continuaNaFrenteDesdeQueMarcouAqui) {
-  if (!emCooldown(pessoaId, marcacoesDoDia, agoraMs, cooldownMs)) return null;
-  return continuaNaFrenteDesdeQueMarcouAqui ? 'nada' : 'mensagem';
-}
-
-/**
  * Quais itens saem da fila local depois da resposta do servidor.
  * `aceito` e `duplicado` significam que o servidor tem o registro — some.
- * `retido` também sai daqui: o servidor já gravou (§1.6), só falta revisão
- * do RH — retentar localmente reenviaria pra sempre um item que o servidor
- * não vai aceitar de novo. `rejeitado` é tratado à parte, por `itensRecusados`.
+ * `rejeitado` fica retido: é problema que precisa de gente.
  */
 export function itensParaRemover(resultados) {
   return (resultados || [])
-    .filter(r => r && (r.status === 'aceito' || r.status === 'duplicado' || r.status === 'retido'))
+    .filter(r => r && (r.status === 'aceito' || r.status === 'duplicado'))
     .map(r => r.id_cliente);
-}
-
-/**
- * `rejeitado` também sai da fila de envio — retentar um lote fabricado ou de
- * pessoa desconhecida nunca vira aceito — mas não é ponto: vai para uma
- * coleção própria (§1.6/§3.3 do contrato), visível, nunca reenviada e nunca
- * apagada sozinha. Separado de `itensParaRemover` porque os dois arquivam em
- * lugares diferentes (enviadas vs. recusadas).
- */
-export function itensRecusados(resultados) {
-  return (resultados || [])
-    .filter(r => r && r.status === 'rejeitado')
-    .map(r => r.id_cliente);
-}
-
-/**
- * Marcações retidas por aparelho revogado, agrupadas para a mesa do RH —
- * §1.6 do contrato: "Tablet obra norte · revogado em 20/08 18:00 · 14
- * marcações recebidas em 21/08 14:20, batidas entre 20/08 07:02 e
- * 20/08 17:40". Sem a contagem visível o RH não percebe inflação da fila
- * mesmo quando cada linha isolada parece plausível (ameacas-v3.md § Novo 3).
- * Só agrupa `motivo_codigo === 'aparelho_revogado'` — outros motivos
- * (pessoa inativa, por exemplo) são problema de pessoa, não de aparelho, e
- * continuam na lista normal de pendências, um item por vez.
- */
-export function retidasPorAparelho(marcacoes) {
-  const grupos = {};
-  for (const m of (marcacoes || [])) {
-    if (!m || !m.pendente || m.motivo_codigo !== 'aparelho_revogado') continue;
-    const id = m.aparelho_dispositivo_id || 'desconhecido';
-    if (!grupos[id]) {
-      grupos[id] = {
-        dispositivo_id: id, apelido: m.aparelho_apelido || id,
-        revogado_em: m.aparelho_revogado_em || null, itens: []
-      };
-    }
-    grupos[id].itens.push(m);
-  }
-  return Object.values(grupos).map(g => {
-    const batidas = g.itens.map(m => m.marcado_em).filter(Boolean).sort();
-    const recebidas = g.itens.map(m => m.recebido_em).filter(Boolean).sort();
-    return Object.assign(g, {
-      total: g.itens.length,
-      batida_min: batidas[0] || null,
-      batida_max: batidas[batidas.length - 1] || null,
-      recebido_max: recebidas[recebidas.length - 1] || null
-    });
-  }).sort((a, b) => b.total - a.total);
 }
 
 /** Hora do aparelho corrigida pela diferença medida contra o servidor. */
@@ -316,81 +267,6 @@ export function serieDiaria(marcacoes, dias, hoje) {
 }
 
 /**
- * Chave de comparação de unidade (§2.4/§8-A): "Unidade A", "unidade a" e
- * "Unidade  A" têm de resolver pra mesma unidade. Só pra COMPARAR — o valor
- * exibido/gravado é sempre o texto original de alguma equipe, nunca esta
- * chave normalizada.
- */
-export function normalizarUnidade(bruto) {
-  return String(bruto || '').trim().replace(/\s+/g, ' ').toLowerCase();
-}
-
-/* ------------------------------------------------------------ colaborador */
-
-const TELEFONE_INVALIDO = { ok: false, codigo: 'TELEFONE_INVALIDO', mensagem: 'Telefone inválido', campo: 'telefone' };
-const TELEFONE_NAO_MOVEL = {
-  ok: false, codigo: 'TELEFONE_NAO_MOVEL', campo: 'telefone',
-  mensagem: 'Precisa ser um celular: é por ele que a gente manda o link do cadastro de face.'
-};
-
-// DDD (2 dígitos) + 9 dígitos do celular, sem o +55.
-function validarCelularBr(onze) {
-  if (onze.length !== 11) return TELEFONE_INVALIDO;
-  const ddd = onze.slice(0, 2);
-  if (ddd.includes('0') || Number(ddd) < 11 || Number(ddd) > 99) return TELEFONE_INVALIDO;
-  if (onze[2] !== '9') return TELEFONE_NAO_MOVEL;
-  return { ok: true, e164: '+55' + onze, estrangeiro: false };
-}
-
-/**
- * Normaliza um telefone bruto para E.164 e classifica o resultado — contrato
- * docs/fase3-contrato.md § 3.1. Compartilhada entre servidor e tela: as duas
- * pontas têm de concordar sobre o que é um celular válido, senão o cliente
- * aceita o que o servidor recusa (ou vice-versa) e alguém descobre tarde.
- */
-export function normalizarTelefone(bruto) {
-  const limpo = String(bruto == null ? '' : bruto).replace(/[\s\-.()]/g, '');
-  if (!limpo) return { ok: false, codigo: 'TELEFONE_OBRIGATORIO', mensagem: 'Telefone é obrigatório', campo: 'telefone' };
-
-  if (limpo.startsWith('+')) {
-    const digitos = limpo.slice(1);
-    if (!/^\d+$/.test(digitos)) return TELEFONE_INVALIDO;
-    if (digitos.startsWith('55')) return validarCelularBr(digitos.slice(2));
-    if (digitos.length < 8 || digitos.length > 15) return TELEFONE_INVALIDO;
-    return { ok: true, e164: '+' + digitos, estrangeiro: true };
-  }
-
-  if (!/^\d+$/.test(limpo)) return TELEFONE_INVALIDO;
-  if (limpo.length === 11) return validarCelularBr(limpo);
-  if (limpo.length === 13 && limpo.startsWith('55')) return validarCelularBr(limpo.slice(2));
-  if (limpo.length === 10 || (limpo.length === 12 && limpo.startsWith('55'))) return TELEFONE_NAO_MOVEL;
-  return TELEFONE_INVALIDO;
-}
-
-/**
- * Quem mais, entre pessoas ATIVAS, usa o mesmo telefone — derivado na leitura,
- * nunca persistido (§3.1): o estado se cura sozinho quando alguém troca de
- * número ou é inativado, sem ninguém precisar desfazer nada.
- * Devolve um mapa `pessoa_id -> [{pessoa_id, nome}, …]` só para quem compartilha;
- * pessoa sem par não entra no mapa.
- */
-export function telefonesCompartilhados(pessoas) {
-  const porTelefone = {};
-  for (const p of (pessoas || [])) {
-    if (!p || !p.ativo || !p.telefone) continue;
-    (porTelefone[p.telefone] = porTelefone[p.telefone] || []).push(p);
-  }
-  const mapa = {};
-  for (const grupo of Object.values(porTelefone)) {
-    if (grupo.length < 2) continue;
-    for (const p of grupo) {
-      mapa[p.pessoa_id] = grupo.filter(x => x.pessoa_id !== p.pessoa_id).map(x => ({ pessoa_id: x.pessoa_id, nome: x.nome }));
-    }
-  }
-  return mapa;
-}
-
-/**
  * Pendências agrupadas por motivo, para as barras. Uma mesma marcação pode
  * disparar mais de um motivo (manual E relógio fora): conta em cada um, então
  * a soma das barras pode passar do número de pendências. É de propósito — cada
@@ -417,84 +293,229 @@ export function pendenciasPorMotivo(marcacoes, recadastros, pessoas) {
   ].sort((a, b) => b.total - a.total);
 }
 
+/* ------------------------------------------ fila de exceções do RH (v2) */
+
+// Catálogo de tipos de exceção. severidade 'critico' pesa mais na ordenação e
+// pinta vermelho; 'atencao' é âmbar. `titulo` é o rótulo curto do card.
+export const TIPOS_EXCECAO = {
+  fora_da_cerca:   { rotulo: 'Registro fora da área', severidade: 'critico' },
+  sem_entrada:     { rotulo: 'Entrada não registrada', severidade: 'atencao' },
+  registro_manual: { rotulo: 'Registro manual sem biometria', severidade: 'atencao' },
+  zona_cinzenta:   { rotulo: 'Similaridade na zona cinzenta', severidade: 'atencao' },
+  // Alertas de PLANEJAMENTO (não são do dia; são de gestão da escala).
+  pessoa_em_2_equipes: { rotulo: 'Alocada em duas equipes no mesmo dia', severidade: 'critico' },
+  cerca_sem_gente:     { rotulo: 'Equipe com cerca e sem colaboradores', severidade: 'atencao' },
+  ativo_sem_plano:     { rotulo: 'Colaborador sem escala', severidade: 'atencao' },
+  plano_vencendo:      { rotulo: 'Escala vencendo', severidade: 'atencao' }
+};
+
+// Hora-limite padrão da entrada. Só usada para decidir quando cobrar "sem
+// entrada": antes disso, ausência é normal (o dia ainda não começou).
+export const HORA_ENTRADA_PADRAO = '08:00';
+
 /**
- * Yaw (giro horizontal da cabeça) a partir de três landmarks do rosto — só
- * `.x`, de propósito (T-5EC67B): pitch (queixo para baixo/cima) é rotação em
- * torno do eixo HORIZONTAL, então mexe em `.y`/`.z`, nunca em `.x`. Esta
- * função é matematicamente cega a pitch — não é limiar frouxo, é ausência de
- * métrica. Função pura (sem DOM) de propósito, para o QA poder afirmar isso
- * em unitário determinístico sem navegador.
+ * Fila unificada de exceções que o RH precisa tratar. Duas origens:
+ *
+ *   • MARCAÇÕES pendentes de hoje que destoam do plano — cada uma vira exceção
+ *     do tipo mais forte que dispara (fora da cerca > manual > zona cinzenta).
+ *     Trazem `id_cliente` para o RH aprovar/rejeitar via /rh/decidir.
+ *   • SEM ENTRADA — derivada: existe alocação para a pessoa hoje, já passou da
+ *     hora de entrada, e ela não tem NENHUMA marcação hoje. Não há marcação para
+ *     anexar; o RH resolve lançando um ponto manual (/rh/lancar-ponto). Some da
+ *     fila sozinha quando a pessoa aparece.
+ *
+ * Pura e testável: recebe `agoraISO` (relógio do servidor) e `horaEntrada` em
+ * vez de ler o relógio. `hoje` é 'YYYY-MM-DD'. Retorna ordenado por severidade
+ * (crítico primeiro) e, dentro disso, por horário.
  */
-export function yaw(landmarks) {
-  const p = landmarks.positions;
-  const le = p[36], re = p[45], nariz = p[30];
-  const meio = (le.x + re.x) / 2;
-  const vao = Math.abs(re.x - le.x) || 1;
-  return (nariz.x - meio) / vao;
+export function exceptionsDoDia(marcacoes, pessoas, alocacoesHoje, hoje, agoraISO, horaEntrada, horaPorEquipe) {
+  const ativos = {};
+  for (const p of (pessoas || [])) ativos[p.pessoa_id] = p;
+  const porEquipe = horaPorEquipe || {};   // equipe_id -> 'HH:MM' (jornada real); senão cai no default
+  const itens = [];
+
+  // 1) Exceções ancoradas numa marcação pendente de hoje.
+  const marcadasHoje = {};   // pessoa_id -> tem alguma marcação hoje?
+  for (const m of (marcacoes || [])) {
+    if (!m || m.marcado_dia !== hoje) continue;
+    marcadasHoje[m.pessoa_id] = true;
+    if (!m.pendente) continue;
+    let tipo = null;
+    if (m.dentro_cerca === false) tipo = 'fora_da_cerca';
+    else if (m.origem === 'manual') tipo = 'registro_manual';
+    else if (m.veredito === 'revisar') tipo = 'zona_cinzenta';
+    else continue;   // pendente por outro motivo sutil não vira card próprio
+    itens.push({
+      id: 'm:' + m.id_cliente,
+      tipo, severidade: TIPOS_EXCECAO[tipo].severidade, rotulo: TIPOS_EXCECAO[tipo].rotulo,
+      pessoa_id: m.pessoa_id, equipe_id: m.equipe_id,
+      hora: String(m.marcado_em).slice(11, 16),
+      marcacao: m, alocacao: null, alvo: { tipo: 'marcacao', id: m.id_cliente }
+    });
+  }
+
+  // 2) "Sem entrada" — derivada da alocação, só depois da hora-limite. A hora
+  //    limite é a da jornada da equipe (se houver); senão o default da empresa.
+  const agora16 = String(agoraISO || '').slice(0, 16);
+  for (const a of (alocacoesHoje || [])) {
+    const p = ativos[a.colaborador_id];
+    if (!p || !p.ativo) continue;
+    if (marcadasHoje[a.colaborador_id]) continue;   // apareceu: não é exceção
+    const limiteHora = porEquipe[a.equipe_id] || horaEntrada || HORA_ENTRADA_PADRAO;
+    if (agora16 < (hoje + 'T' + limiteHora)) continue;   // ainda não passou da hora dessa equipe
+    itens.push({
+      id: 's:' + a.colaborador_id,
+      tipo: 'sem_entrada', severidade: TIPOS_EXCECAO.sem_entrada.severidade,
+      rotulo: TIPOS_EXCECAO.sem_entrada.rotulo,
+      pessoa_id: a.colaborador_id, equipe_id: a.equipe_id,
+      hora: limiteHora,
+      marcacao: null, alocacao: a, alvo: { tipo: 'sem_entrada', id: a.colaborador_id }
+    });
+  }
+
+  const peso = { critico: 0, atencao: 1 };
+  return itens.sort((x, y) =>
+    (peso[x.severidade] - peso[y.severidade]) || String(x.hora).localeCompare(String(y.hora)));
+}
+
+/* ------------------------------------------------ jornada + relatórios */
+
+/**
+ * Jornada de uma equipe como texto "HH:MM–HH:MM". Resolve pela jornada associada
+ * (equipe.jornada_id → jornadas), senão pelo default da empresa (config.jornadaPadrao),
+ * senão o padrão fixo. Pura: recebe as listas, não lê estado global.
+ */
+export function jornadaDaEquipe(equipeId, equipes, jornadas, jornadaPadrao) {
+  const eq = (equipes || []).find(e => e.equipe_id === equipeId);
+  const j = eq && eq.jornada_id ? (jornadas || []).find(x => x.jornada_id === eq.jornada_id) : null;
+  if (j) return j.entrada + '–' + j.saida;
+  return jornadaPadrao || '07:00–17:00';
+}
+
+/** Hora de entrada (HH:MM) da jornada da equipe, p/ a exceção "sem entrada". */
+export function horaEntradaDaEquipe(equipeId, equipes, jornadas, horaPadrao) {
+  const eq = (equipes || []).find(e => e.equipe_id === equipeId);
+  const j = eq && eq.jornada_id ? (jornadas || []).find(x => x.jornada_id === eq.jornada_id) : null;
+  return (j && j.entrada) || horaPadrao || HORA_ENTRADA_PADRAO;
+}
+
+/** Mapa equipe_id → hora de entrada, para alimentar exceptionsDoDia. */
+export function horasEntradaPorEquipe(equipes, jornadas) {
+  const m = {};
+  for (const e of (equipes || [])) {
+    const j = e.jornada_id ? (jornadas || []).find(x => x.jornada_id === e.jornada_id) : null;
+    if (j && j.entrada) m[e.equipe_id] = j.entrada;
+  }
+  return m;
+}
+
+/** Serializa linhas (array de arrays) em CSV com aspas seguras. */
+export function csvDe(cabecalho, linhas) {
+  const escape = v => {
+    const s = v == null ? '' : String(v);
+    return /[",\n;]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const todas = [cabecalho].concat(linhas || []);
+  return todas.map(l => l.map(escape).join(';')).join('\r\n');
+}
+
+/* --------------------------------------- planejamento recorrente (v3) */
+
+const UM_DIA_MS = 86400000;
+function isoDia(ms) { return new Date(ms).toISOString().slice(0, 10); }
+// ISO weekday: 1=segunda … 7=domingo. Usa UTC (meio-dia) para não escorregar de fuso.
+function isoWeekday(diaISO) {
+  const d = new Date(diaISO + 'T12:00:00Z').getUTCDay();   // 0=dom … 6=sáb
+  return d === 0 ? 7 : d;
 }
 
 /**
- * Sinal de pitch de UMA foto, adimensional e sem constante antropométrica
- * própria — razão entre dois segmentos verticais do MESMO rosto (olho→nariz
- * sobre nariz→queixo). Não tem zero natural (ninguém está "de frente" com
- * razão 0) e não serve sozinho: varia por anatomia (T-5EC67B, medido pelo QA
- * — duas pessoas de frente, mesma pose real, razões 0,6154 e 0,2778). Só
- * ganha sentido em DIFERENÇA contra outra foto da mesma pessoa — é por isso
- * que só `avaliarPoseLote` é exportada, nunca esta função sozinha.
+ * Dias (YYYY-MM-DD) que um plano recorrente deve materializar a partir de HOJE.
+ * Nunca gera passado (início = max(vigência_inicio, hoje)). Fim = min(vigência_fim
+ * ?? hoje+horizonte, hoje+horizonte); horizonte-teto evita materializar plano
+ * indefinido pra sempre. Só inclui dias cujo weekday ISO está em dias_semana.
+ * Pura: `hoje` e `horizonteDias` entram como parâmetro.
  */
-function pitchRelativo(landmarks) {
-  const p = landmarks.positions;
-  const le = p[36], re = p[45], nariz = p[30], queixo = p[8];
-  const meioY = (le.y + re.y) / 2;
-  const superior = nariz.y - meioY;
-  const inferior = queixo.y - nariz.y;
-  return superior / inferior;
+export function materializarDias(plano, hoje, horizonteDias) {
+  const dias = new Set((plano.dias_semana && plano.dias_semana.length ? plano.dias_semana : [1, 2, 3, 4, 5]).map(Number));
+  const hojeMs = Date.parse(hoje + 'T00:00:00Z');
+  const horizonteMs = hojeMs + (Math.max(1, horizonteDias || 90)) * UM_DIA_MS;
+  const inicioMs = Math.max(hojeMs, Date.parse(plano.vigencia_inicio + 'T00:00:00Z'));
+  const fimMs = Math.min(
+    horizonteMs,
+    plano.vigencia_fim ? Date.parse(plano.vigencia_fim + 'T00:00:00Z') : horizonteMs);
+  const out = [];
+  for (let ms = inicioMs; ms <= fimMs; ms += UM_DIA_MS) {
+    const d = isoDia(ms);
+    if (dias.has(isoWeekday(d))) out.push(d);
+  }
+  return out;
 }
 
 /**
- * SÓ RODA NO CLIENTE — não mande landmarks ao servidor para chamar esta
- * função lá. Três razões, e a 2ª decide:
- * 1. os landmarks já estão no cliente no instante da captura; mandá-los ao
- *    servidor para ele devolver o que o cliente já pode calcular muda o
- *    formato de quatro arquivos (face.js, rh.js, pagina.js, servidor) sem
- *    ganhar nada;
- * 2. geometria facial é dado novo a transmitir — o produto promete "nenhuma
- *    imagem armazenada, só o template", e hoje só descritor sai do aparelho.
- *    Landmark não é imagem, mas é geometria de rosto de uma pessoa
- *    específica, e o que trafega pode ser logado — ampliar isso para rodar
- *    um gate de QUALIDADE é desproporcional;
- * 3. NÃO é o mesmo caso da coerência de vetores (T-8ADD9C), que teve de ir
- *    pro servidor porque o cliente podia MENTIR com consequência PERMANENTE
- *    (template de duas pessoas gravado). Aqui, burlar só deixa passar uma
- *    foto de queixo baixo DA PESSOA CERTA — a coerência no servidor continua
- *    pegando o caso grave (pessoa errada). Gate de qualidade contornável é
- *    aceitável; gate de identidade contornável não era. Não repita a lição
- *    de um onde ela não vale.
- *
- * Consistência de pose ENTRE as fotos de um lote de cadastro (T-5EC67B) — não
- * pitch absoluto. Um gate absoluto de pitch em 2D exigiria assumir uma razão
- * antropométrica pra saber o que conta como "de frente", e essa razão varia
- * por anatomia, ancestralidade e idade: assumi-la no GATE (que nem tenta,
- * diferente do matcher que manda pra revisão) produz recusa concentrada em
- * quem foge da razão assumida — viés demográfico documentado em
- * docs/validacao-biometrica.md:101 (NIST NISTIR 8429). Por isso o gate
- * absoluto não entra; fica a cegueira uniforme, que é o defeito justo.
- *
- * O que SOBRA sem constante: a DIFERENÇA de `pitchRelativo` entre fotos da
- * MESMA pessoa cancela o deslocamento anatômico (offset), mas não a
- * SENSIBILIDADE — medido: mesma variação de pose lê ~1,65x mais forte numa
- * anatomia que noutra. O resíduo cai do lado PERMISSIVO (zero é exato pra
- * qualquer anatomia, então pose consistente nunca é recusada; o que varia é
- * quanto desvio REAL algumas pessoas precisam pra reprovar) — é a direção
- * suportável num portão de cadastro: falso aceite vira template um pouco
- * pior, que a coerência e a fila humana ainda pegam; falso rejeite tranca a
- * pessoa fora, todo dia, sem ela ter feito nada de errado.
- *
- * `maxInconsistenciaPose` mora na config, não aqui: não há medição de pitch
- * de mesma pessoa em população real pra cravar o corte.
+ * Alertas de PLANEJAMENTO (gestão da escala, não operação do dia). Mesmo shape de
+ * exceptionsDoDia para reusar a fila/detalhe do RH. Pura:
+ *   - planos: linhas de plano_alocacao ativas ({plano_id, equipe_id, colaboradores[], vigencia_fim, ...})
+ *   - alocacoes: janela de alocações materializadas ({dia, colaborador_id, equipe_id, ...})
+ *   - pessoas, equipes: para nome e filtro de ativos
+ *   - hoje 'YYYY-MM-DD', horizonteDias (janela útil de "sem plano"), diasVencendo (ex.: 3)
  */
-export function avaliarPoseLote(landmarksPorFoto, cfg) {
-  const leituras = landmarksPorFoto.map(pitchRelativo);
-  const inconsistencia = Math.max(...leituras) - Math.min(...leituras);
-  return { inconsistencia, ok: inconsistencia < cfg.maxInconsistenciaPose };
+export function alertasDePlanejamento(planos, alocacoes, pessoas, equipes, hoje, horizonteDias, diasVencendo) {
+  const ativos = {};
+  for (const p of (pessoas || [])) if (p && p.ativo) ativos[p.pessoa_id] = p;
+  const itens = [];
+
+  // 1) Pessoa em 2+ equipes no MESMO dia (conflito de escala). Um alerta por (pessoa, dia).
+  const porPessoaDia = {};   // "dia|pessoa" -> Set(equipe_id)
+  for (const a of (alocacoes || [])) {
+    const dia = String(a.dia).slice(0, 10);
+    if (dia < hoje) continue;                      // só futuro/hoje
+    if (!ativos[a.colaborador_id]) continue;
+    const k = dia + '|' + a.colaborador_id;
+    (porPessoaDia[k] = porPessoaDia[k] || new Set()).add(a.equipe_id);
+  }
+  for (const k of Object.keys(porPessoaDia)) {
+    if (porPessoaDia[k].size <= 1) continue;
+    const [dia, pessoaId] = k.split('|');
+    itens.push(alerta('pessoa_em_2_equipes', 'c2:' + k, pessoaId, [...porPessoaDia[k]][0],
+      { tipo: 'colaborador', id: pessoaId, dia }));
+  }
+
+  // 2) Plano ativo com cerca mas sem nenhum colaborador ativo.
+  for (const pl of (planos || [])) {
+    if (pl.ativo === false) continue;
+    const temGente = (pl.colaboradores || []).some(id => ativos[id]);
+    if (!temGente) itens.push(alerta('cerca_sem_gente', 'cs:' + pl.plano_id, null, pl.equipe_id,
+      { tipo: 'plano', id: pl.plano_id }));
+  }
+
+  // 3) Colaborador ativo sem NENHUMA alocação de hoje em diante (sem planejamento).
+  const temFuturo = new Set();
+  for (const a of (alocacoes || [])) if (String(a.dia).slice(0, 10) >= hoje) temFuturo.add(a.colaborador_id);
+  for (const id of Object.keys(ativos)) {
+    if (!temFuturo.has(id)) itens.push(alerta('ativo_sem_plano', 'sp:' + id, id, ativos[id].equipe_id || null,
+      { tipo: 'colaborador', id }));
+  }
+
+  // 4) Plano vencendo: vigência_fim entre hoje e hoje+diasVencendo.
+  const limite = isoDia(Date.parse(hoje + 'T00:00:00Z') + (Math.max(0, diasVencendo || 3)) * UM_DIA_MS);
+  for (const pl of (planos || [])) {
+    if (pl.ativo === false || !pl.vigencia_fim) continue;
+    const fim = String(pl.vigencia_fim).slice(0, 10);
+    if (fim >= hoje && fim <= limite) itens.push(alerta('plano_vencendo', 'pv:' + pl.plano_id, null, pl.equipe_id,
+      { tipo: 'plano', id: pl.plano_id, vigencia_fim: fim }));
+  }
+
+  const peso = { critico: 0, atencao: 1 };
+  return itens.sort((x, y) =>
+    (peso[x.severidade] - peso[y.severidade]) || String(x.rotulo).localeCompare(String(y.rotulo)));
+}
+
+function alerta(tipo, id, pessoaId, equipeId, alvo) {
+  const t = TIPOS_EXCECAO[tipo] || { rotulo: tipo, severidade: 'atencao' };
+  return {
+    id, tipo, severidade: t.severidade, rotulo: t.rotulo,
+    pessoa_id: pessoaId, equipe_id: equipeId, hora: '',
+    marcacao: null, alocacao: null, alvo, planejamento: true
+  };
 }

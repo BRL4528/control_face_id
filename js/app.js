@@ -1,382 +1,259 @@
-// Porta de entrada e roteamento.
+// Porta de entrada e roteamento — v4 (produto).
 //
-// v3 (docs/adr-acesso-v3.md): o aparelho não pede token. No primeiro acesso
-// ele gera sua própria identidade (UUID + credencial de 256 bits) e pede
-// liberação ao RH; a credencial nunca aparece na tela. Duas portas separadas
-// continuam de propósito: quem bate ponto nunca vê administração, e o RH
-// nunca precisa do aparelho do campo.
+// O celular é do colaborador. No primeiro acesso ele PAREIA (informa a matrícula
+// uma vez + captura a face que o RH já cadastrou) e gera a credencial de 256
+// bits, guardada só no IndexedDB. Depois disso o app abre direto no ponto: olhar
+// para a câmera, piscar, pronto. Zero senha no dia a dia.
+//
+// Duas portas continuam separadas: quem bate ponto nunca vê administração, e o
+// RH entra por usuário+senha (independente do pareamento do aparelho).
 import { Store } from './store.js';
-import { Api, ApiRh, ApiGestor } from './api.js';
+import { Api, ApiRh } from './api.js';
 import { Face } from './face.js';
-import { Fila } from './fila.js';
+import { Ponto } from './ponto.js';
 import { Rh } from './rh.js';
-import { Gestor } from './gestor.js';
 import { $, mostrar, toast } from './ui.js';
 
 const cfg = () => window.EFRAT_CFG;
-// `emRh` (T-E3DBD4): true do momento em que "Acessar RH" é tocado até sair —
-// suspende o poll de fundo de verificarDispositivo() pra ele não arrancar a
-// tela do RH debaixo do usuário no meio do login/painel.
-const S = { dispositivo: null, deriva: 0, persistido: false, pollTimer: null, emRh: false };
+const S = { dispositivo: null, carga: null };
 
 /* --------------------------------------------- identidade do aparelho */
 
-// UUID + credencial de 256 bits, gerados uma vez e guardados no IndexedDB
-// (docs/adr-acesso-v3.md). A credencial é segredo de máquina — nunca aparece
-// na interface, só viaja como Authorization: Bearer. `hashCredencial` tem
-// que produzir exatamente o que `crypto.createHash('sha256').update(String(v))
-// .digest('base64url')` produz no Node, senão a comparação do servidor nunca bate.
-// Não fica em js/cripto.js de propósito: aquele arquivo é só a derivação de
-// senha do RH e ninguém mexe nele nesta rodada.
 function base64Url(bytes) {
-  let bin = '';
-  for (const b of bytes) bin += String.fromCharCode(b);
+  let bin = ''; for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
-function gerarDispositivoId() { return crypto.randomUUID(); }
 function gerarCredencial() { return base64Url(crypto.getRandomValues(new Uint8Array(32))); }
-async function hashCredencial(credencial) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(credencial));
-  return base64Url(new Uint8Array(digest));
+
+/** Já pareado? Devolve { dispositivo_id, credencial, colaborador } ou null. */
+async function identidadeSalva() {
+  const id = await Store.get('dispositivo_id');
+  const cred = await Store.get('credencial');
+  const col = await Store.get('colaborador');
+  if (id && cred && col) return { dispositivo_id: id, credencial: cred, colaborador: col };
+  return null;
 }
 
-/* ------------------------------------------------------------- porta */
+/* --------------------------------------------------------- porta */
 
 function statusPorta(txt, classe) {
   $('portaStatus').textContent = txt || '';
   $('portaStatus').className = 'nota ' + (classe || '');
 }
 
-/**
- * T-D00CE0 (§1.6): recusada nunca mais é reenviada nem some sozinha — "visível"
- * é parte da regra, não só o "nunca reenviada". Recusada tem prioridade sobre
- * fila pendente porque é o caso que exige gente, não só tempo: a fila pendente
- * se resolve sozinha na próxima sincronização, a recusada nunca vai se resolver
- * sozinha.
- */
-async function statusFila() {
-  const [fila, recusadas] = await Promise.all([Store.fila(), Store.recusadas()]);
-  if (recusadas.length) {
-    statusPorta(recusadas.length + ' marcação(ões) recusada(s) pelo servidor — fale com o RH.', 'badfg');
-  } else if (fila.length) {
-    statusPorta(fila.length + ' marcação(ões) esperando envio.', 'warnfg');
-  } else {
-    statusPorta('');
-  }
-}
-
 async function irParaPorta() {
   mostrar('porta');
-  limparCodigoAguardando();
-  $('btnPonto').disabled = !Face.pronto;
-  if (!Face.pronto) statusPorta('Carregando o reconhecimento…');
-  else await statusFila();
-  if (navigator.onLine) sincronizarFundo();
+  // Aviso de navegador embutido tem prioridade e persiste — sem câmera, nada
+  // funciona, então essa mensagem não pode ser sobrescrita pelo status normal.
+  if (S.navegadorEmbutido) { avisarNavegadorEmbutido(); $('btnPonto').disabled = false; return; }
+  const pareado = !!S.dispositivo;
+  $('btnPonto').textContent = pareado ? 'REGISTRAR PONTO' : 'ATIVAR MEU PONTO';
+  // O botão NUNCA fica preso: sempre dá pra tocar. Se o reconhecimento ainda
+  // não carregou, o próprio fluxo do toque espera/avisa — antes o botão morto
+  // deixava a pessoa presa no celular quando o modelo demorava a baixar.
+  $('btnPonto').disabled = false;
+  let fila = [];
+  try { fila = await Store.fila(); } catch (e) { /* storage bloqueado — segue */ }
+  if (!Face.pronto) statusPorta('Preparando o reconhecimento… já pode tocar.');
+  else if (!pareado) statusPorta('Primeira vez? Toque para ativar seu ponto.');
+  else if (fila.length) statusPorta(fila.length + ' marcação(ões) esperando envio.', 'warnfg');
+  else statusPorta('Olá, ' + S.dispositivo.colaborador.nome.split(' ')[0] + '.');
+  if (pareado && navigator.onLine) sincronizarFundo();
 }
 
 async function sincronizarFundo() {
   if (!S.dispositivo) return;
-  await Api.sincronizar(S.dispositivo.dispositivo_id, S.dispositivo.credencial);
-  if (!$('porta').classList.contains('hide')) await statusFila();
+  await Api.sincronizar(S.dispositivo.credencial);
+  const fila = await Store.fila();
+  if (!$('porta').classList.contains('hide')) {
+    statusPorta(fila.length ? fila.length + ' marcação(ões) esperando envio.' : '', fila.length ? 'warnfg' : '');
+  }
 }
 
-/* --------------------------------------------------- identidade v3 */
+/* ------------------------------------------------- pareamento inicial */
 
-/**
- * Garante que o aparelho tem UUID + credencial no IndexedDB, cadastrando no
- * servidor se ainda não tiver. Migra um token legado (v2) uma única vez,
- * conforme docs/adr-acesso-v3.md — sem perder marcação ainda não enviada se
- * a migração falhar.
- */
-async function assegurarIdentidade() {
-  const idExistente = await Store.get('dispositivo_id');
-  const credencialExistente = await Store.get('credencial');
-  if (idExistente && credencialExistente) {
-    return { dispositivo_id: idExistente, credencial: credencialExistente };
-  }
-
-  const dispositivoId = gerarDispositivoId();
-  const credencial = gerarCredencial();
-  const dados = {
-    dispositivo_id: dispositivoId,
-    credencial_publica: await hashCredencial(credencial),
-    apelido: 'Aparelho ' + dispositivoId.slice(0, 8),
-    ua: navigator.userAgent
-  };
-
-  const tokenLegado = await Store.get('token');
-  let r = await Api.registrarDispositivo(dados, tokenLegado || undefined);
-
-  const codigoErro = r.json && r.json.erro && r.json.erro.codigo;
-  const migracaoFalhou = tokenLegado &&
-    ['TOKEN_LEGADO_INVALIDO', 'TOKEN_LEGADO_CONSUMIDO', 'JANELA_MIGRACAO_ENCERRADA'].includes(codigoErro);
-  if (migracaoFalhou) {
-    if (codigoErro === 'TOKEN_LEGADO_CONSUMIDO') {
-      toast('Este token já foi migrado em outro aparelho. Aguardando nova liberação do RH.', 'warn');
-    }
-    await Store.set('token', null);
-    r = await Api.registrarDispositivo(dados, undefined);
-  }
-
-  if (!r.json || !r.json.ok) return null;   // sem rede ou falha — tenta de novo depois
-
-  await Store.set('dispositivo_id', dispositivoId);
-  await Store.set('credencial', credencial);
-
-  if (r.json.migrado) {
-    // só apaga o token legado depois de confirmar que a credencial nova
-    // já carrega de verdade — falha aqui e o próximo boot tenta migrar de novo.
-    const c = await Api.carga(dispositivoId, credencial);
-    if (c.ok) await Store.set('token', null);
-  }
-
-  return { dispositivo_id: dispositivoId, credencial };
+function abrirPareamento() {
+  mostrar('pareamento');
+  setTimeout(() => $('pareEmpresa') && $('pareEmpresa').focus(), 100);
+  $('btnParear').onclick = executarPareamento;
 }
 
-// O código curto nasce nesta tela — critério de aceite do Revisor
-// (docs/plano-v3.md § Critérios de aceite da tela do colaborador, item 3):
-// só pode existir no textContent do elemento visível, nunca em log,
-// querystring ou atributo fora dele. Por isso ele é limpo do DOM em toda
-// transição de estado, mesmo quando a tela vira `.hide` — hide não apaga.
-function limparCodigoAguardando() {
-  $('aguardandoCodigo').textContent = '';
-  $('aguardandoCodigo').classList.add('hide');
-}
-
-function mostrarAguardando(codigo) {
-  mostrar('aguardando');
-  if (codigo) {
-    $('aguardandoCodigo').textContent = codigo;
-    $('aguardandoCodigo').classList.remove('hide');
-  } else {
-    limparCodigoAguardando();
-  }
-  $('aguardandoTexto').textContent = codigo
-    ? 'Mostre este código para quem cuida do RH — é só isso, você não precisa fazer mais nada agora.'
-    : 'Quem cuida do RH ainda não liberou este aparelho.';
-}
-
-function mostrarBloqueado(msg) {
-  mostrar('aguardando');
-  limparCodigoAguardando();
-  $('aguardandoTexto').textContent = msg;
-}
-
-/**
- * Máquina de estado do cadastro do aparelho. Faz polling de
- * /efrat/dispositivo/estado no intervalo que o SERVIDOR manda
- * (`consultar_apos_s`), nunca num intervalo fixo escolhido aqui. A porta
- * fica bloqueada até o estado virar "ativo".
- *
- * Critério de aceite (item 5): offline e pendente falham FECHADO. Sem rede
- * não vira sinônimo de aprovado — só reaproveita a carga em cache se este
- * aparelho já tiver sido confirmado `ativo` alguma vez (persistido em
- * `ultimo_estado`); sem esse registro, sem rede mantém bloqueado.
- *
- * `forcado` (T-E3DBD4): quem sai do RH chama assim, de propósito, pra
- * reativar o poll e redescobrir a tela certa sem presumir #porta — o
- * aparelho pode ter continuado pendente o tempo todo. Sem `forcado`, uma
- * consulta agendada de antes de entrar no RH (`S.emRh`) não arranca a tela
- * do usuário no meio do login/painel; ela só reagenda, silenciosa, e quem
- * sai do RH retoma o poll de verdade.
- */
-async function verificarDispositivo(forcado) {
-  clearTimeout(S.pollTimer);
-  if (forcado) S.emRh = false;
-  if (S.emRh) return;
-
-  const ident = S.dispositivo || await assegurarIdentidade();
-  if (!ident) {
-    mostrarBloqueado('Sem conexão para cadastrar este aparelho.');
-    S.pollTimer = setTimeout(verificarDispositivo, 8000);
-    return;
-  }
-  S.dispositivo = ident;
-
-  const r = await Api.estadoDispositivo(ident.dispositivo_id, ident.credencial);
-  if (!r.ok || !r.json || !r.json.ok) {
-    const ultimoEstado = await Store.get('ultimo_estado');
-    if (ultimoEstado === 'ativo') {
-      S.dispositivo.info = await Store.get('dispositivo_info');
-      await irParaPorta();
-    } else {
-      mostrarBloqueado('Sem conexão para confirmar a liberação deste aparelho.');
-    }
-    S.pollTimer = setTimeout(verificarDispositivo, 15000);
-    return;
-  }
-
-  const info = r.json;
-  await Store.set('ultimo_estado', info.estado);
-
-  if (info.estado === 'ativo') {
-    await Store.set('dispositivo_info', info.dispositivo);
-    S.dispositivo.info = info.dispositivo;
+async function executarPareamento() {
+  const empresa_id = ($('pareEmpresa').value || '').trim();
+  const matricula = ($('pareMatricula').value || '').trim();
+  if (!empresa_id || !matricula) { toast('Informe empresa e matrícula', 'warn'); return; }
+  $('btnParear').disabled = true; $('btnParear').textContent = 'Ativando…';
+  try {
+    const dispositivo_id = crypto.randomUUID();
+    const credencial = gerarCredencial();
+    const r = await Api.parear({ empresa_id, matricula, dispositivo_id, credencial,
+      apelido: 'Celular de ' + matricula, ua: navigator.userAgent });
+    if (!r.ok) { toast(r.erro || 'Falha ao ativar', 'bad'); return; }
+    await Store.set('dispositivo_id', dispositivo_id);
+    await Store.set('credencial', credencial);
+    await Store.set('empresa_id', empresa_id);
+    await Store.set('colaborador', r.colaborador);
+    S.dispositivo = { dispositivo_id, credencial, colaborador: r.colaborador };
+    toast('Ponto ativado. Bem-vindo, ' + r.colaborador.nome.split(' ')[0] + '!', 'ok');
     await irParaPorta();
-    return;
+  } finally {
+    $('btnParear').disabled = false; $('btnParear').textContent = 'Ativar';
   }
-  if (info.estado === 'pendente') {
-    mostrarAguardando(info.codigo_curto);
-    S.pollTimer = setTimeout(verificarDispositivo, (info.consultar_apos_s || 15) * 1000);
-    return;
-  }
-  // 'negado' (T-87615C: RH ganhou o botão "Recusar" e este ramo virou
-  // alcançável de verdade) precisa de mensagem própria — "ainda não liberou"
-  // seria enganoso pra quem já foi recusado, não só esquecido na fila.
-  mostrarBloqueado(
-    info.estado === 'revogado' ? 'Este aparelho teve o acesso revogado. Fale com quem cuida do RH.' :
-    info.estado === 'negado' ? 'Este aparelho não foi liberado. Fale com quem cuida do RH.' :
-    'Quem cuida do RH ainda não liberou este aparelho.');
-  S.pollTimer = setTimeout(verificarDispositivo, 30000);
 }
 
 /* ------------------------------------------------- registrar ponto */
 
-async function abrirFila() {
-  if (!S.dispositivo) { toast('Aparelho ainda não liberado', 'warn'); return; }
+// Espera o reconhecimento ficar pronto, com teto de tempo. No celular o modelo
+// (6 MB) pode demorar; em vez de um botão morto, mostramos progresso e só
+// desistimos após o timeout, com mensagem clara.
+async function esperarFace(timeoutMs) {
+  if (Face.pronto) return true;
+  const ate = Date.now() + (timeoutMs || 25000);
+  while (!Face.pronto && Date.now() < ate) {
+    if (Face.falhou) return false;
+    await new Promise(r => setTimeout(r, 300));
+  }
+  return Face.pronto;
+}
+
+async function abrirPonto() {
+  if (!S.dispositivo) return abrirPareamento();
   $('btnPonto').disabled = true;
   try {
-    // Checagem antes de liberar a câmera (critério de aceite item 5): havendo
-    // rede, reconfirma o estado agora — nunca abre com base só no que a
-    // sessão lembrava de antes. Sem rede, segue com a confiança já
-    // estabelecida no boot (offline-first é o requisito do produto).
-    if (navigator.onLine) {
-      const re = await Api.estadoDispositivo(S.dispositivo.dispositivo_id, S.dispositivo.credencial);
-      if (re.ok && re.json && re.json.ok && re.json.estado !== 'ativo') {
-        await verificarDispositivo();
+    if (!Face.pronto) {
+      statusPorta('Carregando o reconhecimento facial (pode levar alguns segundos no celular)…');
+      const ok = await esperarFace(25000);
+      if (!ok) {
+        statusPorta('Não consegui carregar o reconhecimento. Verifique a conexão e toque de novo.', 'badfg');
         return;
       }
+      statusPorta('');
     }
-
-    let carga = await Store.get('carga');
+    let template = await Store.get('template');
+    let alocacao = await Store.get('alocacao');
     let deriva = (await Store.get('deriva')) || 0;
 
     if (navigator.onLine) {
-      const r = await Api.carga(S.dispositivo.dispositivo_id, S.dispositivo.credencial);
+      const r = await Api.cargaDia(S.dispositivo.credencial);
       if (r.ok) {
-        carga = r.carga; deriva = r.deriva;
-        await Store.set('carga', carga);
+        template = r.template; alocacao = r.alocacao; deriva = r.deriva;
+        await Store.set('template', template);
+        await Store.set('alocacao', alocacao);
         await Store.set('deriva', deriva);
-      } else if (!carga) {
-        toast(r.erro || 'Não consegui carregar a equipe', 'bad');
-        return;
+      } else if (r.status === 401) {
+        toast('Este aparelho foi desvinculado. Ative de novo.', 'warn');
+        await desparear(); return abrirPareamento();
+      } else if (!template) {
+        toast(r.erro || 'Não consegui carregar seus dados', 'bad'); return;
       } else {
-        toast('Sem rede — usando a carga salva', 'warn');
+        toast('Sem rede — usando os dados salvos', 'warn');
       }
     }
-
-    if (!carga || !(carga.pessoas || []).length) {
-      toast('Ninguém cadastrado ainda. Conecte à internet uma vez.', 'bad');
-      return;
-    }
-    if (Math.abs(deriva) > 120000) {
-      toast('Relógio do aparelho está ' + Math.round(deriva / 60000) + ' min fora', 'warn');
-    }
-
-    await Fila.abrir(S.dispositivo, carga, deriva, irParaPorta);
+    if (!template) { toast('Seu cadastro facial ainda não foi feito. Procure o RH.', 'bad'); return; }
+    await Ponto.abrir(S.dispositivo, { template, alocacao, deriva }, irParaPorta);
   } finally {
     $('btnPonto').disabled = false;
   }
 }
 
+async function desparear() {
+  await Store.set('dispositivo_id', null);
+  await Store.set('credencial', null);
+  await Store.set('colaborador', null);
+  S.dispositivo = null;
+}
+
 /* -------------------------------------------------------- acesso RH */
 
 function abrirLoginRh() {
-  // T-E3DBD4: alcançável com o aparelho pendente. Suspende o poll de fundo
-  // até sair — ver o comentário de verificarDispositivo().
-  S.emRh = true;
-  // T-87615C: o código só prova posse física enquanto ninguém além de quem
-  // está vendo a tela do aparelho pode lê-lo — inclusive se essa mesma tela
-  // apertar "Sou do RH". #aguardando fica escondido daqui pra frente, mas
-  // hide não apaga: sem isso o código continuaria no HTML da página.
-  limparCodigoAguardando();
   mostrar('loginRh');
   $('rhSenha').value = '';
-  // SEM setTimeout aqui de propósito — já existiu um, e ele é o tipo de
-  // defeito que não dá erro, dá mensagem errada. mostrar('loginRh') acima já
-  // deixou o campo visível, então o focus() não precisa esperar nada; um
-  // atraso arbitrário só abre uma janela onde o refoco pode disparar NO MEIO
-  // de alguém preenchendo os campos (Playwright, um RH digitando rápido, ou
-  // um gerenciador de senha preenchendo os dois quase juntos) e roubar o
-  // foco de volta para #rhUsuario a meio da digitação — o texto que sobra
-  // cai no campo errado, e entrarRh() lê os dois campos, acha um vazio, e
-  // mostra "Informe usuário e senha" com a tela aparentando preenchida.
-  // Achado assim: #rhUsuario acabou com "rherrada" e #rhSenha vazio no DOM
-  // capturado no instante da falha.
-  $('rhUsuario').focus();
+  setTimeout(() => $('rhUsuario').focus(), 100);
 }
 
 async function entrarRh() {
   const u = $('rhUsuario').value.trim();
   const s = $('rhSenha').value;
   if (!u || !s) { toast('Informe usuário e senha', 'warn'); return; }
-  $('btnEntrarRh').disabled = true;
-  $('btnEntrarRh').textContent = 'Entrando…';
+  $('btnEntrarRh').disabled = true; $('btnEntrarRh').textContent = 'Entrando…';
   try {
     const r = await Rh.entrar(u, s);
     if (!r.ok) { toast(r.erro, 'bad'); return; }
-    // Sair do RH não presume #porta (T-E3DBD4) — redescobre a tela certa,
-    // porque o aparelho pode ter continuado pendente o tempo todo.
-    Rh.abrir(() => verificarDispositivo(true));
+    Rh.abrir(() => irParaPorta());
   } finally {
-    $('btnEntrarRh').disabled = false;
-    $('btnEntrarRh').textContent = 'Entrar';
+    $('btnEntrarRh').disabled = false; $('btnEntrarRh').textContent = 'Entrar';
   }
 }
 
 /* -------------------------------------------------------------- boot */
 
 async function boot() {
-  S.persistido = await Store.fixar();
-
-  $('btnPonto').onclick = abrirFila;
+  // ORDEM CRÍTICA: ligar os botões ANTES de qualquer await de storage. No
+  // navegador embutido do WhatsApp/Instagram o IndexedDB pode estar bloqueado e
+  // lançar — se isso acontecesse antes daqui, os botões ficavam sem onclick e a
+  // tela travava (só o botão, sem reação ao toque). Nada de storage bloqueia a
+  // interface agora.
+  $('btnPonto').onclick = abrirPonto;
   $('btnAcessar').onclick = abrirLoginRh;
+  $('btnAcessar').classList.remove('hide');
   $('btnEntrarRh').onclick = entrarRh;
   $('rhSenha').addEventListener('keydown', e => { if (e.key === 'Enter') entrarRh(); });
-  // Idem: cancelar o login não presume #porta (T-E3DBD4).
-  $('btnVoltarPorta').onclick = () => verificarDispositivo(true);
-  $('btnSairFila').onclick = () => Fila.sair();
+  $('btnVoltarPorta').onclick = () => irParaPorta();
+  $('btnVoltarPortaRh').onclick = () => irParaPorta();
+  $('btnSairFila').onclick = () => Ponto.sair();
+  // Handler do "Ativar" ligado no BOOT (não só em abrirPareamento) — assim o
+  // botão nunca fica órfão se a tela aparecer por outro caminho ou se o cache do
+  // SW misturar versões. Enter nos campos também ativa.
+  $('btnParear').onclick = executarPareamento;
+  $('pareMatricula').addEventListener('keydown', e => { if (e.key === 'Enter') executarPareamento(); });
 
-  window.addEventListener('online', () => { S.dispositivo ? sincronizarFundo() : verificarDispositivo(); });
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) return;
-    S.dispositivo ? sincronizarFundo() : verificarDispositivo();
-  });
-  setInterval(() => sincronizarFundo(), cfg().syncIntervalMs);
+  window.addEventListener('online', () => sincronizarFundo());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) sincronizarFundo(); });
 
-  // #porta não nasce mais visível (era a única das seis telas que nascia —
-  // achado do QA sobre offline.spec.js): sem este catch, uma exceção aqui
-  // (assegurarIdentidade()/Api.estadoDispositivo() fora do que
-  // verificarDispositivo() já trata) deixaria a tela em branco em vez da
-  // porta falsamente utilizável de antes — os dois erram fechado, mas só um
-  // diz ao usuário o que fazer.
-  let falhouIniciar = false;
-  try {
-    await verificarDispositivo();
-  } catch (e) {
-    mostrar('falhaBoot');
-    falhouIniciar = true;
-  }
+  // Storage é best-effort: se falhar, o app segue (não pareado) em vez de travar.
+  try { await Store.fixar(); } catch (e) { /* persist bloqueado — segue */ }
+  try { S.dispositivo = await identidadeSalva(); } catch (e) { S.dispositivo = null; }
 
-  if (!falhouIniciar) {
-    try {
-      await Face.carregar('./models');
-    } catch (e) {
-      statusPorta('Falha ao carregar o reconhecimento.', 'badfg');
-    }
-    if (S.dispositivo && S.dispositivo.info) await irParaPorta();
-  }
+  try { setInterval(() => sincronizarFundo(), cfg().syncIntervalMs); } catch (e) { /* ok */ }
 
-  // Registra mesmo se o boot falhou: é o que dá à próxima visita (depois de
-  // "feche e abra de novo") uma chance melhor de funcionar offline.
+  avisarNavegadorEmbutido();   // define S.navegadorEmbutido antes de pintar a porta
+  await irParaPorta();
+  if (!S.navegadorEmbutido) carregarFaceComRetry();   // sem câmera não adianta baixar modelo
+
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
 }
 
-// Superfície de teste: o E2E dirige o app por aqui em vez de depender de
-// tempo de câmera e de rosto real.
-window.__EFRAT = {
-  S, Store, Api, ApiRh, ApiGestor, Face, Fila, Rh, Gestor,
-  irParaPorta, abrirFila, sincronizarFundo, verificarDispositivo
-};
+// O navegador embutido do WhatsApp/Instagram/Facebook bloqueia a câmera e o
+// storage. Detecta e orienta a abrir no navegador de verdade (Safari/Chrome),
+// porque sem câmera o ponto facial simplesmente não funciona.
+function avisarNavegadorEmbutido() {
+  const ua = navigator.userAgent || '';
+  const embutido = /(FBAN|FBAV|Instagram|Line|WhatsApp|GSA)/i.test(ua) || /\bwv\b/.test(ua);
+  S.navegadorEmbutido = embutido;
+  if (embutido) {
+    statusPorta('⚠ Abra no navegador (Safari/Chrome) para a câmera funcionar. Toque no botão de compartilhar/⋯ e escolha "Abrir no navegador".', 'badfg');
+  }
+}
+
+// Rede de segurança final: se QUALQUER coisa no boot lançar, os botões básicos
+// ainda respondem. Sem isso, um erro inesperado deixa a tela morta.
+window.addEventListener('error', () => {
+  const b = document.getElementById('btnPonto');
+  if (b && !b.onclick) b.onclick = abrirPonto;
+});
+
+// Carrega o reconhecimento em segundo plano, com algumas tentativas. Uma falha
+// (rede ruim no celular) não é permanente: tenta de novo, e o toque no botão
+// espera via esperarFace(). Não derruba a tela.
+async function carregarFaceComRetry() {
+  for (let tentativa = 0; tentativa < 3 && !Face.pronto; tentativa++) {
+    try { await Face.carregar('./models'); }
+    catch (e) { Face.falhou = false; await new Promise(r => setTimeout(r, 1500 * (tentativa + 1))); }
+  }
+  await irParaPorta();
+}
+
+// Superfície de teste.
+window.__EFRAT = { S, Store, Api, ApiRh, Face, Ponto, Rh, irParaPorta, abrirPonto };
 
 boot();

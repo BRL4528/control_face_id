@@ -1,77 +1,29 @@
-// Configuração de runtime. Não passa por build, então pode ser editada
-// direto no servidor sem republicar o app.
+// Configuração de runtime. Não passa por build — editável direto no servidor.
 //
-// ATENÇÃO: apiBase está vinculado à política de CSP (connect-src em _headers e
-// vercel.json). Se trocar o domínio de apiBase, é OBRIGATÓRIO atualizar a CSP
-// nesses arquivos, caso contrário as chamadas de API serão bloqueadas.
-//
-// Nada aqui é segredo — num site estático tudo que entra no bundle é
-// público. O v3 não tem mais token digitado (docs/adr-acesso-v3.md): o
-// aparelho se autocadastra e a credencial de 256 bits fica só no IndexedDB
-// daquele celular, nunca aqui.
-// Object.assign preserva o que ja tiver sido definido antes deste arquivo — e
-// assim que o ambiente de teste, ou um deploy especifico, troca a apiBase sem
-// precisar editar nada.
-//
-// A ORDEM DOS ARGUMENTOS AQUI E LOAD-BEARING. O default de producao vai no
-// primeiro argumento e o window.EFRAT_CFG existente no ultimo, de proposito:
-// e assim que tests/e2e/servir.js sobrepoe a apiBase sem editar este arquivo.
-// Trocar por objeto literal ou inverter a ordem faz todo `npm run serve`
-// apontar para o n8n de PRODUCAO, sem erro nenhum na tela — a guarda de CI
-// pega (T-F1E72A), mas só depois. Decisão e motivo em docs/fase3-contrato.md
-// § Restrição de arquitetura, item 1.
+// v4 (produto): backend próprio na mesma origem (/api/*), servido pela Vercel.
+// Não há mais domínio externo de API; por isso a CSP usa connect-src 'self'.
+// Nada aqui é segredo: num site estático tudo que entra no bundle é público. A
+// credencial de 256 bits do celular e o token do RH vivem só no navegador.
 window.EFRAT_CFG = Object.assign({
-  // A API PRÓPRIA. Trocado do n8n em 25/08/2026, decisão do Orquestrador: as 8
-  // rotas do primeiro turno vivem aqui, e no n8n as três de aparelho nunca
-  // foram publicadas — apontar para lá faria `registrar` dar 404 e mandar todo
-  // mundo procurar no lugar errado.
-  //
-  // ISTO E A CSP VIAJAM JUNTOS, SEMPRE, NO MESMO DEPLOY. connect-src em
-  // _headers E em vercel.json já libera esta origem e o n8n ao mesmo tempo, de
-  // propósito: voltar é editar só esta linha, e volta que exige republicar CSP
-  // não é volta. Há guarda de CI conferindo que a apiBase EFETIVA (avaliada
-  // como o navegador avalia, não grepada) está no connect-src dos dois.
-  apiBase: 'https://control-face-id-api.vercel.app',
+  apiBase: '/api',
 
-  // Distância euclidiana entre descritores de 128 dimensões.
-  limiarAceite: 0.45,   // abaixo disso registra direto
-  limiarCinza: 0.58,    // entre os dois registra e sinaliza ao RH
+  // Reconhecimento facial 1:1: a distância do rosto capturado ao template do
+  // PRÓPRIO colaborador. Abaixo do limiar, confirma que é ele.
+  limiarAceite: 0.45,   // referência medida: mesma pessoa ~0.09, outra ~0.6+
+  limiarCinza: 0.58,    // entre os dois: registra e sinaliza ao RH
 
   // Qualidade mínima da captura.
-  minFace: 0.25,        // largura do rosto / largura do quadro
-  minSharp: 20,         // variância do laplaciano sobre o rosto em 160x160
-  minBright: 55,
-  maxBright: 215,
-  maxYaw: 0.30,
+  minFace: 0.25, minSharp: 20, minBright: 55, maxBright: 215, maxYaw: 0.30,
+  inputSize: 416, roiInputSize: 224,
+  autoCapturaCiclos: 2,
 
-  // 0,12 é juízo e não medição -- não há distribuição de pose de mesma pessoa
-  // em população real. Medido NESTE fixture, com este valor: um lote é recusado
-  // a partir de ~16 graus de desvio para uma anatomia e ~26 para outra. A regra
-  // é a mesma; a diferença é anatômica.
-  //
-  // O VIÉS CAI NO LADO PERMISSIVO: o zero é exato para qualquer anatomia, então
-  // ninguém em pose consistente é recusado. Algumas pessoas conseguem aprovar um
-  // lote um pouco mais inconsistente que outras -- template pior, não serviço
-  // negado.
-  //
-  // MEXER NESTE VALOR NÃO CORRIGE O VIÉS. Ele move os dois limites juntos e não
-  // fecha a distância entre eles; fechar exige outra FÓRMULA, não outro corte.
-  // Quem calibrar aqui está ajustando sensibilidade, não equidade.
-  maxInconsistenciaPose: 0.12,
+  // Liveness (prova de vida leve): pede uma piscada. Sem isso, foto na tela
+  // passa. Combinado com cerca + 1:1, torna a fraude impraticável sem hardware.
+  livenessAtivo: true,
+  livenessTimeoutMs: 6000,
 
-  inputSize: 416,       // resolução do detector no quadro inteiro
-  roiInputSize: 224,    // resolução do detector no recorte rastreado
-
-  autoCapturaCiclos: 2, // ciclos consecutivos com qualidade OK antes de disparar
-  falhasParaManual: 3,  // tentativas antes de oferecer registro manual
   cooldownMs: 60000,    // mesma pessoa não marca de novo dentro deste tempo
-  geoTimeoutMs: 3000,   // fila não pode parar esperando GPS
+  geoTimeoutMs: 8000,   // ponto não trava esperando GPS, mas a cerca precisa dele
   syncIntervalMs: 60000,
-  loteMax: 50,
-
-  // Painel do RH. Degraus de presença por equipe e limiar de alarme de
-  // registro manual (o mesmo do monitor diário em n8n).
-  limiarPresenca: { bom: 0.95, atencao: 0.85, serio: 0.70 },
-  alarmeManual: 20,     // taxa de registro manual (%) que acende o alerta
-  chartCdn: './vendor/chart.umd.min.js'
+  loteMax: 50
 }, window.EFRAT_CFG || {});
