@@ -229,7 +229,10 @@ e rodando. Ainda em aberto:
 2. No Ponto: cadastrar a **escala** (cerca, dias) das equipes que vieram do Bitrix.
    Só "Escritório Efrat" já tinha escala (foi adotada e ganhou os 2 cards da etapa).
 3. No Bitrix: resolver os contatos 3807 e 3811, cada um em dois cards (seção 8).
-4. Os 15 colaboradores demo (D001…D015) e equipes manuais continuam intocados —
-   desativar à mão quando não forem mais úteis.
+4. Dados demo: Configurações → **Zona de perigo** → "Ver o que seria apagado" →
+   digitar ZERAR. Apaga tudo (marcações inclusive, com o trigger de imutabilidade
+   desligado só dentro da transação) e mantém login, config, link e token; o
+   snapshot repovoa em até 5 min (`api/_lib/reset.js`, commit fd39541).
+   Alternativa mais branda: `scripts/limpar-demo.js` (só desativa quem não é do Bitrix).
 
 Dry run e primeira rodada real confirmaram: 21 etapas, 69 cards, 67 contatos, 2,6 s.
