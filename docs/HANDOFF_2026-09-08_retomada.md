@@ -34,7 +34,13 @@ nunca chegavam) e "hoje" no fuso da empresa; três furos de isolamento entre
 empresas fechados; Central com card da equipe clicável (painel do dia com
 ações); script `scripts/popular-demo.js` de dados de demonstração.
 
-## Próximo passo combinado: integração com Bitrix24 (Efrat)
+> **Atualização 09/09/2026:** a integração Bitrix mudou de escopo e já foi
+> implementada — só o pipeline "Gerenciamento de Equipe" (etapa = equipe, card =
+> colaborador). Tudo em `docs/INTEGRACAO_BITRIX_GERENCIAMENTO_EQUIPE.md`,
+> inclusive a correção do domínio do portal (`efrat.bitrix24.com.br`) e os passos
+> para ligar em produção. A seção abaixo ficou como registro histórico.
+
+## Próximo passo combinado: integração com Bitrix24 (Efrat) — SUBSTITUÍDO
 
 Levantamento feito no n8n (`n8n.samasc.com.br`, projeto pessoal do Bruno):
 
@@ -71,11 +77,10 @@ ativando o Console REST alguns minutos e listando `crm.contact.fields` e
 
 ## Como retomar o ambiente local
 
-- `vercel dev` não sobe (script `dev` recursivo). Usar um shim Node (estáticos +
-  `/api/*` → `import(api/<rota>.js)` com `req.query/req.body` e
-  `res.status().json()`), rodando com `node --env-file=.env.local`; o shim deve
-  servir `/e/*` como `index.html`. O launch.json fica em
-  `~/inova/samasc-web/.claude/launch.json` (entrada `control-face-id`, remover ao fim).
+- `vercel dev` não sobe (script `dev` recursivo). Desde 09/09 o shim está no repo:
+  `node --env-file=.env.local scripts/dev-local.js 4300` (estáticos + `/api/*`,
+  `/e/*` → index.html, rota reimportada a cada request). Para o preview do agente,
+  entrada `control-face-id` em `~/inova/samasc-web/.claude/launch.json` (remover ao fim).
 - Sessão do RH só em memória: mintar JWT com o segredo default de
   `api/_lib/auth.js` (`dev-inseguro-troque-em-producao`) a partir de `usuario_rh`
   e injetar via `await import('/js/rh.js')` → `Rh.token=…; Rh.dados=(await

@@ -5,9 +5,11 @@
 //   • sem acao (default): cria (sem equipe_id) ou renomeia (com equipe_id)
 //   • acao 'vincular'    { equipe_id, colaborador_id }: colaborador.equipe_padrao = equipe
 //   • acao 'desvincular' { colaborador_id }: equipe_padrao = NULL
-// O vínculo é a equipe PADRÃO da pessoa. Não mexe em escala nem em alocação já
-// gerada: quem entra na equipe depois precisa ser marcado na escala pelo RH.
+// O vínculo é a equipe PADRÃO da pessoa e, desde a integração com o Bitrix,
+// também a ESCALA: quem entra na equipe entra nos planos ativos dela (e sai dos
+// da anterior) de hoje em diante — mesmo efeito de mover o card no kanban.
 import { db, novoId } from '../_lib/db.js';
+import { realocarColaboradores } from '../_lib/escala.js';
 import { autenticarRh } from '../_lib/auth.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 
@@ -32,7 +34,9 @@ export default async function handler(req, res) {
     const r = await sql`UPDATE colaborador SET equipe_padrao=${equipeId}
                         WHERE id=${b.colaborador_id} AND empresa_id=${rh.empresa_id} RETURNING id`;
     if (!r[0]) return erro(res, 404, 'COLABORADOR_NAO_ENCONTRADO', 'colaborador não encontrado');
-    return ok(res, { colaborador_id: b.colaborador_id, equipe_id: equipeId });
+    const hoje = new Date().toISOString().slice(0, 10);
+    const esc = await realocarColaboradores(sql, rh.empresa_id, [{ colaborador_id: b.colaborador_id, equipe_id: equipeId }], hoje);
+    return ok(res, { colaborador_id: b.colaborador_id, equipe_id: equipeId, planos_ajustados: esc.planos_ajustados });
   }
 
   const nome = String(b.nome || '').trim();

@@ -1251,6 +1251,7 @@ export const Rh = {
         '<td><div class="cel-nome"><span class="av' + (semBio ? ' bad' : '') + '">' + esc(this.iniciais(p.nome)) + '</span>' +
           '<span><span class="n">' + esc(p.nome) +
             (p.papel === 'gestor' ? ' <span class="pill mut" style="padding:0 6px">gestor</span>' : '') +
+            (p.bitrix_contact_id ? ' <span class="pill mut" style="padding:0 6px" title="Sincronizado do Bitrix">Bitrix</span>' : '') +
             (p.ativo ? '' : ' <span class="pill mut" style="padding:0 6px">inativo</span>') + '</span>' +
           '<span class="m">Matrícula ' + esc(p.matricula) + '</span></span></div></td>' +
         '<td>' + esc(this.nomeEquipe(p.equipe_id)) + '</td>' +
@@ -1406,6 +1407,7 @@ export const Rh = {
     const opt = (val, txt, sel) => '<option value="' + val + '"' + (sel ? ' selected' : '') + '>' + esc(txt) + '</option>';
     $('areaNovo').innerHTML =
       '<div class="card"><h2>' + (editando ? 'Editar colaborador' : 'Novo colaborador') + '</h2>' +
+        (p.bitrix_contact_id ? '<p class="nota" style="margin:-4px 0 12px">Colaborador sincronizado do Bitrix: nome, equipe e status vêm do card no pipeline "Gerenciamento de Equipe". Aqui só o papel é editável.</p>' : '') +
         '<div class="form-grid">' +
           '<div><label class="lb2">Nome</label><input class="inp" id="pNome" value="' + esc(p.nome || '') + '"></div>' +
           '<div><label class="lb2">Matrícula</label><input class="inp" id="pMat" value="' + esc(p.matricula || '') + '"' +
@@ -1422,6 +1424,7 @@ export const Rh = {
           '<button class="act ghost" id="btnCancelarNovo">Cancelar</button></div>' +
       '</div>';
     $('btnCancelarNovo').onclick = () => { $('areaNovo').innerHTML = ''; };
+    if (p.bitrix_contact_id) ['pNome', 'pEquipe', 'pAtivo'].forEach(id => { const el = $(id); if (el) { el.disabled = true; el.title = 'Definido no Bitrix'; } });
     $('areaNovo').scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     $('btnNovaPessoa').onclick = async () => {
@@ -1649,14 +1652,16 @@ export const Rh = {
     const bloco = e => {
       const ms = membros(e.equipe_id);
       const aberta = this.equipeAberta === e.equipe_id;
-      const candidatos = pessoas.filter(p => p.equipe_id !== e.equipe_id);
+      // Quem vem do Bitrix não é vinculado à mão: a equipe dele é o card no kanban.
+      const candidatos = pessoas.filter(p => p.equipe_id !== e.equipe_id && !p.bitrix_contact_id);
       // Sem equipe primeiro: é quem mais provavelmente está sendo vinculado.
       candidatos.sort((a, b) => (!a.equipe_id === !b.equipe_id ? a.nome.localeCompare(b.nome) : (a.equipe_id ? 1 : -1)));
       const escalas = escalasDe(e.equipe_id);
       return '<div class="eq-bloco' + (aberta ? ' aberta' : '') + '">' +
         '<button class="linha-item eq-head" data-eqtoggle="' + esc(e.equipe_id) + '">' +
           '<span class="ponto ' + (e.ativo ? 'ok' : 'bad') + '"></span>' +
-          '<div style="flex:1;text-align:left"><div class="nm">' + esc(e.nome) + '</div>' +
+          '<div style="flex:1;text-align:left"><div class="nm">' + esc(e.nome) +
+            (e.bitrix_stage_id ? ' <span class="pill mut" style="padding:0 6px" title="Etapa do pipeline Gerenciamento de Equipe no Bitrix">Bitrix</span>' : '') + '</div>' +
           '<div class="mt">' + ms.length + ' pessoa(s)' + (escalas.length ? ' · ' + escalas.length + ' escala(s)' : '') + '</div></div>' +
           '<span class="eq-seta">' + (aberta ? '▾' : '▸') + '</span></button>' +
         (aberta ?
@@ -1664,14 +1669,18 @@ export const Rh = {
             (ms.length ? ms.map(p =>
               '<div class="eq-membro"><span class="av">' + esc(this.iniciais(p.nome)) + '</span>' +
                 '<div style="flex:1"><div class="nm">' + esc(p.nome) + '</div><div class="mt">Matrícula ' + esc(p.matricula) + (p.papel === 'gestor' ? ' · gestor' : '') + '</div></div>' +
-                '<button class="v2btn ghost mini" data-desv="' + esc(p.pessoa_id) + '">Remover da equipe</button></div>').join('')
+                (p.bitrix_contact_id
+                  ? '<span class="mt" title="A alocação desta pessoa é o card dela no Bitrix">via Bitrix</span>'
+                  : '<button class="v2btn ghost mini" data-desv="' + esc(p.pessoa_id) + '">Remover da equipe</button>') + '</div>').join('')
               : '<p class="nota" style="padding:8px 0">Nenhum colaborador nesta equipe.</p>') +
             '<div class="eq-vincular">' +
               '<select class="inp" data-vsel="' + esc(e.equipe_id) + '">' +
                 '<option value="">— escolha um colaborador para vincular —</option>' + candidatos.map(opcao).join('') + '</select>' +
               '<button class="v2btn" data-vinc="' + esc(e.equipe_id) + '">Vincular</button></div>' +
-            (escalas.length ? '<p class="nota" style="margin:8px 0 0">Quem entra na equipe agora não entra sozinho na escala já criada. Edite a escala ' +
-              escalas.map(pl => '"' + esc(pl.nome || e.nome) + '"').join(', ') + ' e marque o nome.</p>' : '') +
+            (e.bitrix_stage_id ? '<p class="nota" style="margin:8px 0 0">Equipe sincronizada do Bitrix: quem entra e sai é decidido movendo o card no kanban "Gerenciamento de Equipe". Vincular aqui vale só para quem não está no Bitrix.</p>' : '') +
+            (escalas.length ? '<p class="nota" style="margin:8px 0 0">Quem entra na equipe entra na escala ' +
+              escalas.map(pl => '"' + esc(pl.nome || e.nome) + '"').join(', ') + ' a partir de hoje (e sai da escala anterior).</p>'
+              : '<p class="nota" style="margin:8px 0 0">Esta equipe ainda não tem escala: crie uma em Escala para a cerca e os dias valerem para quem está nela.</p>') +
           '</div>' : '') +
       '</div>';
     };
@@ -2001,6 +2010,15 @@ export const Rh = {
           '<button class="v2btn ghost" id="btnWaLink">WhatsApp</button>' +
           '<button class="v2btn ghost" id="btnNovoLink" title="O link antigo para de funcionar; quem já ativou continua normal">Gerar novo</button></div></div>' +
 
+      '<div class="cfg-sec"><h2>Integração Bitrix24</h2>' +
+        '<p class="cap">O pipeline "Gerenciamento de Equipe" do Bitrix define as equipes e quem está em cada uma: cada etapa é uma equipe, cada card é um colaborador. O token abaixo autentica o robô (n8n) que envia o estado do pipeline a cada poucos minutos.</p>' +
+        this.htmlEstadoIntegracao() +
+        '<div id="areaTokenInteg">' + (this._tokenInteg ? this.htmlTokenNovo(this._tokenInteg) : '') + '</div>' +
+        '<div class="row2" style="margin-top:10px">' +
+          '<button class="v2btn" id="btnTokenInteg">' + (emp.integracao_ativa ? 'Gerar novo token' : 'Gerar token') + '</button>' +
+          (emp.integracao_ativa ? '<button class="v2btn ghost" id="btnRevogarInteg">Revogar</button>' : '') +
+        '</div></div>' +
+
       '<div class="cfg-sec"><h2>Empresa</h2>' +
         '<p class="cap">Nome exibido no painel e no pareamento do colaborador.</p>' +
         '<div class="form-grid">' +
@@ -2037,6 +2055,25 @@ export const Rh = {
       toast('Novo link gerado', 'ok');
       await this.recarregar();
     };
+    this._tokenInteg = null;   // mostrado uma vez; some no próximo repintar
+    const cp = $('cpTokenInteg');
+    if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText(cp.dataset.copiar); toast('Token copiado', 'ok'); } catch (e) { toast('Selecione e copie manualmente', 'warn'); } };
+    $('btnTokenInteg').onclick = async () => {
+      if (emp.integracao_ativa && !confirm('Gerar um novo token? O token atual deixa de funcionar na hora e o robô precisa ser atualizado.')) return;
+      const r = await ApiRh.config(this.token, { acao: 'novo_token_integracao' });
+      if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+      this._tokenInteg = r.dados.token;
+      toast('Token gerado — copie agora, ele não aparece de novo', 'ok');
+      await this.recarregar();
+    };
+    const rv = $('btnRevogarInteg');
+    if (rv) rv.onclick = async () => {
+      if (!confirm('Revogar o token? O robô do Bitrix para de sincronizar até um novo token ser gerado e configurado.')) return;
+      const r = await ApiRh.config(this.token, { acao: 'revogar_token_integracao' });
+      if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+      toast('Token revogado', 'ok');
+      await this.recarregar();
+    };
     $('btnSalvarEmp').onclick = async () => {
       const r = await ApiRh.config(this.token, { empresa_nome: $('cfNome').value.trim(), fuso: $('cfFuso').value.trim() });
       void 0;
@@ -2053,6 +2090,38 @@ export const Rh = {
         await this.recarregar();
       };
     });
+  },
+
+  /** Estado da última sincronização do Bitrix (gravado pela rota de integração). */
+  htmlEstadoIntegracao() {
+    const emp = this.dados.empresa || {};
+    const ib = (this.dados.config || {}).integracao_bitrix;
+    const pill = emp.integracao_ativa
+      ? '<span class="pill ok"><span class="dot"></span>Token ativo</span>'
+      : '<span class="pill mut"><span class="dot"></span>Sem token</span>';
+    if (!ib || !ib.ultima_sync) {
+      return '<p class="cap" style="margin:8px 0 0">' + pill + ' &nbsp; Nenhuma sincronização recebida ainda.</p>';
+    }
+    const r = ib.resumo || {}, eq = r.equipes || {}, co = r.colaboradores || {};
+    const q = new Date(ib.ultima_sync);
+    const quando = isNaN(q) ? esc(ib.ultima_sync) : q.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const avisos = (ib.avisos || []);
+    const descAviso = a => {
+      if (a.tipo === 'contato_em_mais_de_um_card') return 'Contato ' + esc(a.contato) + ' está em ' + (a.cards || []).length + ' cards (' + (a.cards || []).map(esc).join(', ') + ') — vale o aberto mais recente';
+      if (a.tipo === 'card_sem_contato') return 'Card ' + esc(a.card) + (a.titulo ? ' "' + esc(a.titulo) + '"' : '') + ' sem contato vinculado — ignorado';
+      if (a.tipo === 'matricula_em_uso_por_outro_contato') return esc(a.nome) + ' (contato ' + esc(a.contato) + ') não entrou: a matrícula já pertence a outra pessoa';
+      return esc(a.tipo) + (a.card ? ' · card ' + esc(a.card) : '') + (a.etapa ? ' · etapa ' + esc(a.etapa) : '');
+    };
+    return '<p class="cap" style="margin:8px 0 0">' + pill + ' &nbsp; Última sincronização ' + quando +
+        ' · ' + (r.cards_abertos ?? 0) + ' cards abertos · equipes: ' + (eq.criadas || 0) + ' criadas, ' + (eq.renomeadas || 0) + ' renomeadas, ' + (eq.desativadas || 0) + ' desativadas' +
+        ' · colaboradores: ' + (co.criados || 0) + ' criados, ' + (co.movidos || 0) + ' movidos, ' + (co.desativados || 0) + ' desativados, ' + (co.reativados || 0) + ' reativados</p>' +
+      (avisos.length ? '<div class="nota" style="margin-top:8px"><b>' + avisos.length + ' aviso(s) para resolver no Bitrix:</b><ul style="margin:6px 0 0 18px">' +
+        avisos.slice(0, 10).map(a => '<li>' + descAviso(a) + '</li>').join('') + (avisos.length > 10 ? '<li>…</li>' : '') + '</ul></div>' : '');
+  },
+  htmlTokenNovo(token) {
+    return '<div class="cod-linha" style="margin-top:10px"><div class="cod-info"><span class="lb">Token de integração (copie agora — não aparece de novo)</span>' +
+      '<div class="mono cod">' + esc(token) + '</div></div>' +
+      '<button class="act ghost mini" id="cpTokenInteg" data-copiar="' + esc(token) + '">Copiar</button></div>';
   },
 
   formNovoUsuario() {

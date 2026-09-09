@@ -20,9 +20,14 @@ export default async function handler(req, res) {
   const sql = db();
 
   const existentes = await sql`
-    SELECT id FROM colaborador WHERE empresa_id = ${rh.empresa_id} AND matricula = ${matricula} LIMIT 1`;
+    SELECT id, bitrix_contact_id FROM colaborador WHERE empresa_id = ${rh.empresa_id} AND matricula = ${matricula} LIMIT 1`;
 
   if (existentes[0]) {
+    // Sincronizado do Bitrix: nome, equipe e status vêm do kanban; aqui só o papel.
+    if (existentes[0].bitrix_contact_id) {
+      await sql`UPDATE colaborador SET papel=${papel} WHERE id = ${existentes[0].id}`;
+      return ok(res, { colaborador_id: existentes[0].id, atualizado: true, sincronizado_bitrix: true });
+    }
     await sql`UPDATE colaborador SET nome=${nome}, papel=${papel}, equipe_padrao=${equipeId},
               ativo=${b.ativo === false ? false : true} WHERE id = ${existentes[0].id}`;
     // Saiu da empresa ⇒ aparelho bloqueado (403 no app); voltou ⇒ libera.

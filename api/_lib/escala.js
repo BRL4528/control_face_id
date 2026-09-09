@@ -82,3 +82,34 @@ function diaISO(v) {
 export function normalizarPlano(p) {
   return Object.assign({}, p, { vigencia_inicio: diaISO(p.vigencia_inicio), vigencia_fim: diaISO(p.vigencia_fim) });
 }
+
+/**
+ * Realoca pessoas entre escalas quando a EQUIPE delas muda (tela Equipes ou
+ * integração Bitrix). `movimentos` = [{ colaborador_id, equipe_id|null }]: cada
+ * pessoa sai de todo plano ativo em que estava e entra nos planos ativos da
+ * equipe destino (null = fica fora de qualquer escala). Só os planos cujo
+ * conjunto de pessoas mudou são regravados — de `hoje` em diante, preservando
+ * ajustes manuais e o passado. Devolve { planos_ajustados }.
+ */
+export async function realocarColaboradores(sql, empresaId, movimentos, hoje) {
+  const movs = (movimentos || []).filter(m => m && m.colaborador_id);
+  if (!movs.length) return { planos_ajustados: 0 };
+  const destino = new Map(movs.map(m => [m.colaborador_id, m.equipe_id || null]));
+  const planos = await sql`
+    SELECT * FROM plano_alocacao
+    WHERE empresa_id=${empresaId} AND ativo=true AND (vigencia_fim IS NULL OR vigencia_fim >= ${hoje}::date)`;
+  let ajustados = 0;
+  for (const p of planos) {
+    const atual = (p.colaboradores || []).filter(Boolean);
+    const novo = atual.filter(c => !destino.has(c));
+    for (const [c, eq] of destino) if (eq && eq === p.equipe_id) novo.push(c);
+    const a = new Set(atual), n = new Set(novo);
+    if (a.size === n.size && [...n].every(c => a.has(c))) continue;
+    const [row] = await sql`
+      UPDATE plano_alocacao SET colaboradores=${novo}, atualizado_em=now()
+      WHERE id=${p.id} AND empresa_id=${empresaId} RETURNING *`;
+    if (row) await materializarPlano(sql, normalizarPlano(row), hoje, { recriar: true });
+    ajustados++;
+  }
+  return { planos_ajustados: ajustados };
+}

@@ -312,3 +312,17 @@ CREATE INDEX IF NOT EXISTS ix_disp_empresa_estado ON dispositivo (empresa_id, es
 ALTER TABLE marcacao ALTER COLUMN colaborador_id DROP NOT NULL;
 ALTER TABLE marcacao ADD COLUMN IF NOT EXISTS dispositivo_id text;
 CREATE INDEX IF NOT EXISTS ix_marc_disp_pendente ON marcacao (dispositivo_id) WHERE colaborador_id IS NULL;
+
+-- ═══════════════════════════════════════════════════════ integração Bitrix24
+--
+-- O pipeline "Gerenciamento de Equipe" do Bitrix é a fonte da alocação: cada
+-- etapa é uma equipe, cada card é um colaborador (ver docs/INTEGRACAO_BITRIX_
+-- GERENCIAMENTO_EQUIPE.md). Guardamos o id externo para renomear sem duplicar e
+-- para saber quem é "do Bitrix" (só leitura na tela) e quem foi criado à mão.
+ALTER TABLE equipe ADD COLUMN IF NOT EXISTS bitrix_stage_id text;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_equipe_bitrix_stage ON equipe (empresa_id, bitrix_stage_id) WHERE bitrix_stage_id IS NOT NULL;
+ALTER TABLE colaborador ADD COLUMN IF NOT EXISTS bitrix_contact_id text;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_colab_bitrix_contact ON colaborador (empresa_id, bitrix_contact_id) WHERE bitrix_contact_id IS NOT NULL;
+-- Token que autentica o robô (n8n) em /api/integracao/bitrix. Só o sha256 fica
+-- no banco, como a credencial do aparelho; o RH vê o token uma vez ao gerar.
+ALTER TABLE empresa ADD COLUMN IF NOT EXISTS integracao_token_hash text;

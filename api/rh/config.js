@@ -5,6 +5,8 @@ import { db } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 import { gerarLinkToken } from '../_lib/dispositivos.js';
+import { hashCredencial } from '../_lib/auth.js';
+import { randomBytes } from 'node:crypto';
 
 // Whitelist de parâmetros aceitos em config_empresa.dados, com coerção segura.
 const num = (v, lo, hi, def) => {
@@ -38,6 +40,18 @@ export default async function handler(req, res) {
     const token = gerarLinkToken();
     await sql`UPDATE empresa SET link_token=${token} WHERE id=${rh.empresa_id}`;
     return ok(res, { link_token: token });
+  }
+
+  // Token de integração (robô do Bitrix em /api/integracao/bitrix). Mostrado
+  // UMA vez; só o sha256 fica no banco. Gerar de novo invalida o anterior.
+  if (b.acao === 'novo_token_integracao') {
+    const token = 'pit_' + randomBytes(24).toString('base64url');
+    await sql`UPDATE empresa SET integracao_token_hash=${hashCredencial(token)} WHERE id=${rh.empresa_id}`;
+    return ok(res, { token });
+  }
+  if (b.acao === 'revogar_token_integracao') {
+    await sql`UPDATE empresa SET integracao_token_hash=NULL WHERE id=${rh.empresa_id}`;
+    return ok(res, { revogado: true });
   }
 
   // Dados da empresa (nome, fuso).

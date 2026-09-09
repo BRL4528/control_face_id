@@ -23,8 +23,8 @@ export default async function handler(req, res) {
   const sql = db();
 
   const [equipes, pessoas, marcacoes, alocacoes, locais, jornadas, empresaRow, configRow, usuariosRh, correcoes, planos, aparelhosPendentes] = await Promise.all([
-    sql`SELECT id AS equipe_id, nome, ativo, jornada_id, supervisor_id FROM equipe WHERE empresa_id = ${empresa} ORDER BY nome`,
-    sql`SELECT c.id AS pessoa_id, c.nome, c.matricula, c.papel, c.equipe_padrao AS equipe_id, c.ativo,
+    sql`SELECT id AS equipe_id, nome, ativo, jornada_id, supervisor_id, bitrix_stage_id FROM equipe WHERE empresa_id = ${empresa} ORDER BY nome`,
+    sql`SELECT c.id AS pessoa_id, c.nome, c.matricula, c.papel, c.equipe_padrao AS equipe_id, c.ativo, c.bitrix_contact_id,
                EXISTS(SELECT 1 FROM template_facial t WHERE t.colaborador_id = c.id AND t.estado='ativo') AS tem_biometria,
                (SELECT miniatura_url FROM template_facial t WHERE t.colaborador_id=c.id AND t.estado='ativo' ORDER BY versao DESC LIMIT 1) AS miniatura
         FROM colaborador c WHERE c.empresa_id = ${empresa} ORDER BY c.nome`,
@@ -47,7 +47,7 @@ export default async function handler(req, res) {
         WHERE empresa_id = ${empresa} AND ativo = true ORDER BY nome`,
     sql`SELECT id AS jornada_id, nome, to_char(entrada,'HH24:MI') AS entrada, to_char(saida,'HH24:MI') AS saida,
                tolerancia_min, ativa FROM jornada WHERE empresa_id = ${empresa} ORDER BY nome`,
-    sql`SELECT nome, fuso, link_token FROM empresa WHERE id = ${empresa} LIMIT 1`,
+    sql`SELECT nome, fuso, link_token, (integracao_token_hash IS NOT NULL) AS integracao_ativa FROM empresa WHERE id = ${empresa} LIMIT 1`,
     sql`SELECT dados FROM config_empresa WHERE empresa_id = ${empresa} LIMIT 1`,
     sql`SELECT id AS usuario_id, usuario, nome, ativo, trocar_senha,
                to_char(criado_em,'YYYY-MM-DD') AS criado_em FROM usuario_rh
