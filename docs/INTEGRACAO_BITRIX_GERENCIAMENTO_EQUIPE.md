@@ -9,9 +9,11 @@ WhatsApp via Elisia, retorno Ponto → Bitrix). O escopo agora é um só:
 > ponto; cada card é um colaborador alocado nessa equipe.** Mover o card no kanban
 > é o ato de realocar a pessoa. Sentido único: Bitrix → Ponto.
 
-Status: **aprovado e IMPLEMENTADO em 09/09/2026** (código no repo, não commitado;
-schema já aplicado no banco; workflow do n8n criado inativo). Falta o que está na
-seção 9.
+Status: **EM PRODUÇÃO desde 09/09/2026 03:15 UTC.** Commit `f79f150` em `main`,
+rota publicada na Vercel, workflow `LCzd196pI029cTF8` ativo (5 min). Primeira
+sincronização real: 18 equipes criadas (+ "Escritório Efrat" adotada pelo nome),
+67 colaboradores criados, 1 escala ajustada, 2 avisos de contato repetido. Pendências
+restantes na seção 9.
 
 ## 1. Mapeamento
 
@@ -217,23 +219,17 @@ kanban), `UF_CRM_1781033819427` Status (enumeration; bloqueios 305/307/57/61),
 `UF_CRM_1785428521471` CPF (double), `UF_CRM_1781038005918` Data de admissão.
 Não há campo "Código"/matrícula.
 
-## 9. Para ligar em produção (na ordem)
+## 9. Estado em produção e pendências
 
-1. **Revisar e commitar** o código do repo (`git status` lista os arquivos) e dar
-   push em `main` — o deploy da Vercel publica `/api/integracao/bitrix`.
-2. **No n8n**, três cliques que o agente não tem permissão para dar:
-   - `Efrat - Sync Colaborador Ativo (30min)` (`ifnZrWqRfT90p2pZ`): **Publicar** a
-     versão salva (filtro do tenant no domínio novo). Até isso a versão ativa usa
-     o domínio antigo e continua 0/0.
-   - `Efrat - Configurar tenant (one-off)` (`cBZF17pDWq9kpOPa`): **Executar** uma
-     vez. Grava `ponto_url`, `ponto_token` (já gerado em Configurações do Ponto,
-     hash no banco) e `ponto_stage_sem_equipe = C13:UC_ALOCAR` na linha da Efrat.
-   - `Efrat - Ponto ⇐ Bitrix (snapshot …)` (`LCzd196pI029cTF8`): executar uma vez à
-     mão e conferir a resposta (`status: 200`, resumo com 19 equipes criadas e 69
-     colaboradores); depois **Publicar**.
-3. No Ponto: cadastrar a **escala** (cerca, dias) de cada equipe que veio do
-   Bitrix — hoje só "Escritório Efrat" e "Obra 423" têm gente fora de "A alocar".
-4. No Bitrix: resolver os dois contatos em dois cards (seção 8).
+Feito em 09/09: deploy (`f79f150`), one-off do tenant executado, snapshot publicado
+e rodando. Ainda em aberto:
 
-Dry run já feito: o workflow montou 21 etapas, 69 cards e 67 contatos (2
-repetidos) em 2,6 s, sem erro de REST.
+1. **Publicar a versão nova do `Efrat - Sync Colaborador Ativo (30min)`**
+   (`ifnZrWqRfT90p2pZ`): a versão ativa ainda filtra pelo domínio antigo e roda 0/0.
+2. No Ponto: cadastrar a **escala** (cerca, dias) das equipes que vieram do Bitrix.
+   Só "Escritório Efrat" já tinha escala (foi adotada e ganhou os 2 cards da etapa).
+3. No Bitrix: resolver os contatos 3807 e 3811, cada um em dois cards (seção 8).
+4. Os 15 colaboradores demo (D001…D015) e equipes manuais continuam intocados —
+   desativar à mão quando não forem mais úteis.
+
+Dry run e primeira rodada real confirmaram: 21 etapas, 69 cards, 67 contatos, 2,6 s.
