@@ -2033,8 +2033,43 @@ export const Rh = {
           '<th>Usuário</th><th>Criado</th><th>Status</th><th></th></tr></thead><tbody>' +
           usuarios.map(linhaUsuario).join('') + '</tbody></table></div>' +
         '<div id="areaNovoUsuario"></div>' +
-        '<button class="v2btn" id="btnNovoUsuario">+ Novo usuário RH</button></div>';
+        '<button class="v2btn" id="btnNovoUsuario">+ Novo usuário RH</button></div>' +
 
+      '<div class="cfg-sec" style="border-color:#f0c4c0"><h2 style="color:var(--v2-vermelho)">Zona de perigo</h2>' +
+        '<p class="cap">Zerar os dados da empresa apaga marcações, correções, alocações, escalas, aparelhos, biometrias, colaboradores, equipes, locais e jornadas. Ficam: login e senha do RH, estes parâmetros, o link da empresa e o token de integração. Com a integração Bitrix ativa, equipes e colaboradores voltam na próxima sincronização (até 5 min), zerados; escalas e biometrias precisam ser refeitas.</p>' +
+        '<div id="areaZerar"><button class="v2btn danger" id="btnZerarPrevia">Ver o que seria apagado</button></div></div>';
+
+    $('btnZerarPrevia').onclick = async () => {
+      const btn = $('btnZerarPrevia'); btn.disabled = true;
+      const r = await ApiRh.config(this.token, { acao: 'zerar_empresa', previa: true });
+      btn.disabled = false;
+      if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+      const p = r.dados.previa || {};
+      const rot = { marcacao: 'marcações', correcao: 'correções', alocacao: 'alocações', plano_alocacao: 'escalas', dispositivo: 'aparelhos', template_facial: 'biometrias', colaborador: 'colaboradores', equipe: 'equipes', local: 'locais', jornada: 'jornadas' };
+      const total = Object.values(p).reduce((a, b) => a + (Number(b) || 0), 0);
+      $('areaZerar').innerHTML =
+        '<div class="tbl-wrap" style="margin-bottom:12px"><table class="adtable"><tbody>' +
+          Object.keys(rot).map(k => '<tr><td>' + rot[k] + '</td><td style="text-align:right;font-variant-numeric:tabular-nums">' + (p[k] ?? 0) + '</td></tr>').join('') +
+        '</tbody></table></div>' +
+        (total ? '<p class="cap">Digite <b>ZERAR</b> para confirmar. Não tem volta.</p>' +
+          '<div class="eq-vincular"><input class="inp" id="zerarConf" autocomplete="off" placeholder="ZERAR" style="margin:0;max-width:220px">' +
+          '<button class="v2btn danger" id="btnZerarExecutar" disabled>Zerar dados da empresa</button>' +
+          '<button class="v2btn ghost" id="btnZerarCancelar">Cancelar</button></div>'
+          : '<p class="cap">Não há nada para apagar.</p>');
+      const inp = $('zerarConf'), ex = $('btnZerarExecutar');
+      if (inp) inp.oninput = () => { ex.disabled = inp.value.trim() !== 'ZERAR'; };
+      const canc = $('btnZerarCancelar'); if (canc) canc.onclick = () => this.pintarConfig();
+      if (ex) ex.onclick = async () => {
+        if (!confirm('Última confirmação: apagar TODOS os dados operacionais da empresa ' + (emp.nome || '') + '? Login, configurações, link e token de integração ficam.')) return;
+        ex.disabled = true; ex.textContent = 'Zerando…';
+        const z = await ApiRh.config(this.token, { acao: 'zerar_empresa', confirmacao: inp.value.trim() });
+        if (!z.ok) { ex.disabled = false; ex.textContent = 'Zerar dados da empresa'; toast(z.erro || 'Falha ao zerar', 'bad'); return; }
+        const a = z.dados.apagado || {};
+        toast('Empresa zerada: ' + (a.colaborador || 0) + ' colaboradores, ' + (a.equipe || 0) + ' equipes, ' + (a.marcacao || 0) + ' marcações apagadas' + (z.dados.trigger_imutabilidade_ok ? '' : ' — ATENÇÃO: trigger de imutabilidade não religou'), z.dados.trigger_imutabilidade_ok ? 'ok' : 'bad');
+        this.equipeAberta = null;
+        await this.recarregar();
+      };
+    };
     $('btnSalvarCfg').onclick = async () => {
       const dados = {
         limiarAceite: Number($('cfLimiar').value), raioPadraoM: Number($('cfRaio').value),

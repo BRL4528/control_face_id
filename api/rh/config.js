@@ -7,6 +7,7 @@ import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 import { gerarLinkToken } from '../_lib/dispositivos.js';
 import { hashCredencial } from '../_lib/auth.js';
 import { randomBytes } from 'node:crypto';
+import { contarDados, zerarEmpresa } from '../_lib/reset.js';
 
 // Whitelist de parâmetros aceitos em config_empresa.dados, com coerção segura.
 const num = (v, lo, hi, def) => {
@@ -52,6 +53,17 @@ export default async function handler(req, res) {
   if (b.acao === 'revogar_token_integracao') {
     await sql`UPDATE empresa SET integracao_token_hash=NULL WHERE id=${rh.empresa_id}`;
     return ok(res, { revogado: true });
+  }
+
+  // Zona de perigo: zera os dados operacionais da empresa (mantém login, config,
+  // link e token de integração). Prévia devolve as contagens; executar exige a
+  // palavra ZERAR digitada. Detalhes e ordem em api/_lib/reset.js.
+  if (b.acao === 'zerar_empresa') {
+    if (b.previa) return ok(res, { previa: await contarDados(sql, rh.empresa_id) });
+    if (String(b.confirmacao || '').trim() !== 'ZERAR') return erro(res, 400, 'CONFIRMACAO_INVALIDA', 'digite ZERAR para confirmar');
+    const r = await zerarEmpresa(sql, rh.empresa_id);
+    console.warn('[zerar_empresa]', rh.empresa_id, 'por', rh.usuario, JSON.stringify(r.apagado));
+    return ok(res, r);
   }
 
   // Dados da empresa (nome, fuso).
