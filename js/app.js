@@ -325,6 +325,16 @@ async function boot() {
   try { setInterval(() => sincronizarFundo(), cfg().syncIntervalMs); } catch (e) { /* ok */ }
 
   avisarNavegadorEmbutido();   // define S.navegadorEmbutido antes de pintar a porta
+
+  // Sessão do RH guardada e ainda válida: volta direto ao painel. É uma tela de
+  // trabalho que fica aberta o dia todo; antes todo F5 caía no login. Token
+  // vencido ou recusado limpa a sessão e cai na porta, sem avisar nada.
+  if (await Rh.retomar()) {
+    Rh.abrir(() => irParaPorta());
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+    return;
+  }
+
   await irParaPorta();
   if (!S.navegadorEmbutido) carregarFaceComRetry();   // sem câmera não adianta baixar modelo
 

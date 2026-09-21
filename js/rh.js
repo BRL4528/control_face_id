@@ -6,6 +6,7 @@ import { PlanoEditor } from './plano.js';
 import { LocalEquipe } from './local-equipe.js';
 import { Face } from './face.js';
 import { derivar } from './cripto.js';
+import { Store } from './store.js';
 import {
   indicadores, espelho, euclidiana,
   presencaPorEquipe, serieDiaria, pendenciasPorMotivo,
@@ -57,7 +58,56 @@ export const Rh = {
     if (!d.ok) return { ok: false, erro: d.erro || 'falha ao carregar' };
     this.dados = d.dados;
     this.aplicarConfig();
+    await this.guardarSessao();
     return { ok: true };
+  },
+
+  /* --------------------------------------------------- sessão do RH
+   * O JWT vale 12 h (api/_lib/auth.js). Sem guardá-lo, todo F5 caía no login —
+   * o painel é uma tela de trabalho, fica aberta o dia todo e recarrega. Vive no
+   * mesmo IndexedDB do resto do app (Store, coleção 'cfg').
+   */
+
+  async guardarSessao() {
+    try {
+      await Store.set('sessao_rh', {
+        token: this.token, usuario: this.usuarioLogin, trocar_senha: this.precisaTrocarSenha
+      });
+    } catch (e) { /* storage bloqueado: só perde a retomada, o login segue */ }
+  },
+
+  async esquecerSessao() {
+    try { await Store.set('sessao_rh', null); } catch (e) { /* ok */ }
+  },
+
+  /** `exp` do JWT em ms, ou null se o token não disser. Sem verificar assinatura:
+   *  é só para não gastar uma chamada com token que já venceu — quem valida é a API. */
+  validadeDoToken(token) {
+    try {
+      const corpo = JSON.parse(atob(String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      return corpo.exp ? corpo.exp * 1000 : null;
+    } catch (e) { return null; }
+  },
+
+  /**
+   * Retoma a sessão guardada, se ainda valer. Devolve true quando o painel pode
+   * abrir direto. Qualquer falha (token vencido, senha trocada, API fora) limpa
+   * a sessão e devolve false — o boot segue para a porta normalmente.
+   */
+  async retomar() {
+    let ses = null;
+    try { ses = await Store.get('sessao_rh'); } catch (e) { return false; }
+    if (!ses || !ses.token) return false;
+    const exp = this.validadeDoToken(ses.token);
+    if (exp && exp <= Date.now()) { await this.esquecerSessao(); return false; }
+    const d = await ApiRh.dados(ses.token, this.dias);
+    if (!d.ok) { await this.esquecerSessao(); return false; }
+    this.token = ses.token;
+    this.usuarioLogin = ses.usuario || null;
+    this.precisaTrocarSenha = !!ses.trocar_senha;
+    this.dados = d.dados;
+    this.aplicarConfig();
+    return true;
   },
 
   /** Mescla a config da empresa (banco) sobre os defaults de EFRAT_CFG. */
@@ -68,6 +118,15 @@ export const Rh = {
 
   async recarregar() {
     const d = await ApiRh.dados(this.token, this.dias);
+    // Token venceu (12 h) com o painel aberto: sai limpo em vez de deixar a tela
+    // repetindo erro genérico a cada ação.
+    if (!d.ok && (d.status === 401 || d.codigo === 'SESSAO_INVALIDA')) {
+      toast('Sua sessão expirou. Entre de novo.', 'warn');
+      this.destruirGraficos(); this.token = null; this.dados = null;
+      await this.esquecerSessao();
+      if (this.aoSair) this.aoSair();
+      return;
+    }
     if (d.ok) { this.dados = d.dados; this.aplicarConfig(); }
     this.pintar();
   },
@@ -102,7 +161,11 @@ export const Rh = {
     });
     const atu = $('btnAtualizarRh');
     if (atu) atu.onclick = () => this.recarregar();
-    $('btnSairRh').onclick = () => { this.destruirGraficos(); this.token = null; this.dados = null; this.aoSair(); };
+    $('btnSairRh').onclick = async () => {
+      this.destruirGraficos(); this.token = null; this.dados = null;
+      await this.esquecerSessao();
+      this.aoSair();
+    };
     this.pintar();
   },
 
@@ -2280,6 +2343,7 @@ export const Rh = {
       if (!r.ok) { toast(r.erro || 'Falha ao trocar senha', 'bad'); return; }
       toast('Senha atualizada', 'ok');
       this.precisaTrocarSenha = false;
+      await this.guardarSessao();   // o F5 não pode voltar a pedir a troca
       this.abrir(this.aoSair);   // agora entra normalmente
     };
   }
