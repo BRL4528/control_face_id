@@ -23,6 +23,9 @@ const TITULOS = {
   pessoas: 'Colaboradores', equipes: 'Equipes',
   relatorios: 'Relatórios', auditoria: 'Auditoria', config: 'Configurações'
 };
+// Item fixo da lista de Equipes: quem está fora de qualquer equipe.
+const SEM_EQUIPE = '__sem_equipe__';
+
 const ABAS = ['painel', 'alocacao', 'planos', 'mapa', 'pendencias', 'pessoas', 'equipes',
   'registros', 'jornadas', 'relatorios', 'auditoria', 'config', 'stub'];
 
@@ -30,7 +33,8 @@ export const Rh = {
   token: null,       // JWT emitido por /rh/login
   dados: null,
   aba: 'painel',
-  equipeAberta: null,   // equipe expandida na tela Equipes
+  equipeAberta: null,   // equipe selecionada na tela Equipes
+  buscaEquipes: '',     // filtro por nome na lista de equipes
   stub: null,        // rótulo da tela "entra depois" quando aba === 'stub'
   pendSel: null,     // exceção selecionada no master-detail de pendências
   pendTab: 'abertas',
@@ -1723,115 +1727,209 @@ export const Rh = {
   /* --------------------------------------------------------- equipes */
 
   pintarEquipes() {
-    const eqs = (this.dados.equipes || []).slice().sort((a, b) => a.nome.localeCompare(b.nome));
-    const pessoas = (this.dados.pessoas || []).filter(p => p.ativo).slice().sort((a, b) => a.nome.localeCompare(b.nome));
-    const membros = eq => pessoas.filter(p => p.equipe_id === eq);
+    const d = this.dados;
+    const pessoas = (d.pessoas || []).filter(p => p.ativo).slice().sort((a, b) => a.nome.localeCompare(b.nome));
+    const locais = d.locais || [];
+    const localDe = e => locais.find(l => l.local_id === e.local_id) || null;
+    const membros = id => pessoas.filter(p => p.equipe_id === id);
+    const escalasDe = id => (d.planos || []).filter(pl => pl.equipe_id === id);
+    const eqs = (d.equipes || []).slice().sort((a, b) => a.nome.localeCompare(b.nome));
     const semEquipe = pessoas.filter(p => !p.equipe_id || !eqs.some(e => e.equipe_id === p.equipe_id));
-    const escalasDe = eq => (this.dados.planos || []).filter(pl => pl.equipe_id === eq);
-    const locais = (this.dados.locais || []).filter(l => l.ativo !== false);
-    const localDe = eq => locais.find(l => l.local_id === eq.local_id) || null;
-    const semLocal = eqs.filter(e => e.ativo && !e.local_id);
-    if (!this.equipeAberta && eqs[0]) this.equipeAberta = eqs[0].equipe_id;
 
-    const opcao = p => '<option value="' + p.pessoa_id + '">' + esc(p.nome) +
-      (p.equipe_id ? ' · ' + esc(this.nomeEquipe(p.equipe_id)) : ' · sem equipe') + '</option>';
+    // A fila de trabalho do RH: obra ativa, com gente ou não, ainda sem cerca.
+    const busca = (this.buscaEquipes || '').trim().toLowerCase();
+    const casa = e => !busca || e.nome.toLowerCase().includes(busca);
+    const precisam = eqs.filter(e => e.ativo && !e.local_id).filter(casa);
+    const prontas = eqs.filter(e => e.ativo && e.local_id).filter(casa);
+    const inativas = eqs.filter(e => !e.ativo).filter(casa);
 
-    const bloco = e => {
-      const ms = membros(e.equipe_id);
-      const aberta = this.equipeAberta === e.equipe_id;
-      // Quem vem do Bitrix não é vinculado à mão: a equipe dele é o card no kanban.
-      const candidatos = pessoas.filter(p => p.equipe_id !== e.equipe_id && !p.bitrix_contact_id);
-      // Sem equipe primeiro: é quem mais provavelmente está sendo vinculado.
-      candidatos.sort((a, b) => (!a.equipe_id === !b.equipe_id ? a.nome.localeCompare(b.nome) : (a.equipe_id ? 1 : -1)));
-      const escalas = escalasDe(e.equipe_id);
-      const loc = localDe(e);
-      return '<div class="eq-bloco' + (aberta ? ' aberta' : '') + '">' +
-        '<button class="linha-item eq-head" data-eqtoggle="' + esc(e.equipe_id) + '">' +
-          '<span class="ponto ' + (e.ativo ? 'ok' : 'bad') + '"></span>' +
-          '<div style="flex:1;text-align:left"><div class="nm">' + esc(e.nome) +
-            (e.bitrix_stage_id ? ' <span class="pill mut" style="padding:0 6px" title="Etapa do pipeline Gerenciamento de Equipe no Bitrix">Bitrix</span>' : '') +
-            (e.ativo && !e.local_id ? ' <span class="pill bad" style="padding:0 6px" title="Sem local, ninguém desta equipe tem cerca: o ponto cai em revisão">Sem local</span>' : '') + '</div>' +
-          '<div class="mt">' + ms.length + ' pessoa(s)' +
-            (loc ? ' · ' + esc(loc.nome) + ' · ' + loc.raio_m + 'm' : '') +
-            (escalas.length ? ' · ' + escalas.length + ' escala(s)' : '') + '</div></div>' +
-          '<span class="eq-seta">' + (aberta ? '▾' : '▸') + '</span></button>' +
-        (aberta ?
-          '<div class="eq-corpo">' +
-            (ms.length ? ms.map(p =>
-              '<div class="eq-membro"><span class="av">' + esc(this.iniciais(p.nome)) + '</span>' +
-                '<div style="flex:1"><div class="nm">' + esc(p.nome) + '</div><div class="mt">Matrícula ' + esc(p.matricula) + (p.papel === 'gestor' ? ' · gestor' : '') + '</div></div>' +
-                (p.bitrix_contact_id
-                  ? '<span class="mt" title="A alocação desta pessoa é o card dela no Bitrix">via Bitrix</span>'
-                  : '<button class="v2btn ghost mini" data-desv="' + esc(p.pessoa_id) + '">Remover da equipe</button>') + '</div>').join('')
-              : '<p class="nota" style="padding:8px 0">Nenhum colaborador nesta equipe.</p>') +
-            '<div class="eq-vincular">' +
-              '<select class="inp" data-vsel="' + esc(e.equipe_id) + '">' +
-                '<option value="">— escolha um colaborador para vincular —</option>' + candidatos.map(opcao).join('') + '</select>' +
-              '<button class="v2btn" data-vinc="' + esc(e.equipe_id) + '">Vincular</button></div>' +
-            '<div class="eq-vincular" style="margin-top:4px">' +
-              '<button class="v2btn' + (loc ? ' ghost' : '') + '" data-loc-eq="' + esc(e.equipe_id) + '">' +
-                (loc ? 'Trocar o local' : '📍 Definir local') + '</button>' +
-              '<span class="mt">' + (loc ? esc(loc.nome) + ' · raio ' + loc.raio_m + ' m' : 'Sem local, o ponto de quem está aqui cai em revisão') + '</span></div>' +
-            (e.bitrix_stage_id ? '<p class="nota" style="margin:8px 0 0">Equipe sincronizada do Bitrix: quem entra e sai é decidido movendo o card no kanban "Gerenciamento de Equipe". Vincular aqui vale só para quem não está no Bitrix.</p>' : '') +
-            (loc ? '<p class="nota" style="margin:8px 0 0">Quem está nesta equipe bate ponto em ' + esc(loc.nome) + ' (raio ' + loc.raio_m + ' m), todo dia, sem precisar de escala.</p>'
-                 : '<p class="nota" style="margin:8px 0 0"><b>Falta o local.</b> Toque em "Definir local" e solte o pino no mapa: a cerca passa a valer para todo mundo da equipe.</p>') +
-            (escalas.length ? '<p class="nota" style="margin:8px 0 0">' + escalas.length + ' escala(s) de exceção (' +
-              escalas.map(pl => '"' + esc(pl.nome || e.nome) + '"').join(', ') + '): nos dias dela, a cerca da escala ganha da do local.</p>' : '') +
-          '</div>' : '') +
-      '</div>';
+    // Seleção inicial: a primeira que precisa de local — é o que o RH veio fazer.
+    const visiveis = precisam.concat(prontas, inativas);
+    if (this.equipeAberta !== SEM_EQUIPE && !visiveis.some(e => e.equipe_id === this.equipeAberta)) {
+      this.equipeAberta = visiveis[0] ? visiveis[0].equipe_id : (semEquipe.length ? SEM_EQUIPE : null);
+    }
+
+    // O grupo já diz "precisam de local"; repetir o chip vermelho em cada linha
+    // só faz barulho. Chip só quando há algo a informar: a cerca configurada.
+    const item = e => {
+      const l = localDe(e);
+      const n = membros(e.equipe_id).length;
+      return '<button class="pend-item' + (this.equipeAberta === e.equipe_id ? ' on' : '') + '" data-eq="' + esc(e.equipe_id) + '">' +
+        '<div class="top">' +
+          '<span class="tit" style="margin:0">' + esc(e.nome) + '</span>' +
+          '<span class="hora">' + n + (n === 1 ? ' pessoa' : ' pessoas') + '</span>' +
+        '</div>' +
+        (l ? '<div style="margin-top:6px"><span class="eq-chip ok">📍 ' + esc(l.nome) + ' · ' + l.raio_m + ' m</span></div>' : '') +
+      '</button>';
     };
 
+    const grupo = (rot, lista) => lista.length
+      ? '<div class="eq-grupo">' + rot + ' <span>' + lista.length + '</span></div>' + lista.map(item).join('')
+      : '';
+
+    const itemSemEquipe = semEquipe.length
+      ? '<button class="pend-item' + (this.equipeAberta === SEM_EQUIPE ? ' on' : '') + '" data-eq="' + SEM_EQUIPE + '">' +
+          '<div class="top"><span class="eq-chip falta">Sem equipe</span>' +
+            '<span class="hora">' + semEquipe.length + (semEquipe.length === 1 ? ' pessoa' : ' pessoas') + '</span></div>' +
+          '<div class="tit">Fora de qualquer equipe</div>' +
+          '<div class="est">Sem equipe não há cerca: o ponto cai em revisão</div></button>'
+      : '';
+
     $('rh-equipes').innerHTML =
-      '<div class="pg-head"><div><h1 class="tit">Equipes</h1>' +
-        '<p class="sub">' + eqs.length + ' equipe(s) · ' + pessoas.length + ' colaborador(es) ativo(s)' +
-          (semEquipe.length ? ' · <b>' + semEquipe.length + ' sem equipe</b>' : '') +
-          (semLocal.length ? ' · <b>' + semLocal.length + ' sem local</b>' : '') + '</p></div></div>' +
-      '<div class="card"><h2>Nova equipe</h2>' +
-        '<div class="eq-vincular"><input type="text" id="eNome" placeholder="Nome da equipe" style="margin:0">' +
-        '<button class="v2btn" id="btnNovaEquipe">Criar equipe</button></div></div>' +
-      '<div class="card"><h2>Equipes e colaboradores</h2>' +
-        (eqs.length ? eqs.map(bloco).join('') : '<p class="nota">Nenhuma equipe.</p>') +
+      '<div class="pend2">' +
+        '<div class="pend-master">' +
+          '<div class="pend-master-head">' +
+            '<h1>Equipes</h1>' +
+            '<p>' + eqs.filter(e => e.ativo).length + ' ativas · ' + pessoas.length + ' colaboradores' +
+              (precisam.length ? ' · <b style="color:var(--v2-vermelho)">' + precisam.length + ' sem local</b>' : '') + '</p>' +
+            '<div class="eq-busca">' +
+              '<input class="inp" id="eqBusca" type="search" placeholder="🔍 Buscar obra…" value="' + esc(this.buscaEquipes || '') + '">' +
+              '<button class="v2btn ghost" id="btnNovaEquipe" title="Criar uma equipe que não vem do Bitrix">+</button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="pend-list" id="eqLista">' +
+            itemSemEquipe +
+            grupo('Precisam de local', precisam) +
+            grupo('Configuradas', prontas) +
+            grupo('Inativas', inativas) +
+            (visiveis.length || semEquipe.length ? ''
+              : '<div style="padding:40px 22px;text-align:center;color:#64748b">Nenhuma equipe encontrada.</div>') +
+          '</div>' +
+        '</div>' +
+        '<div class="pend-detail" id="eqDetalhe">' + this.htmlDetalheEquipe() + '</div>' +
       '</div>' +
       '<div id="eqLocalModal" class="modal-back hide"><div class="modal"><div class="modal-head">' +
         '<h2 id="eqLocalTit">Local da equipe</h2><button class="modal-x" id="eqLocalX">✕</button></div>' +
         '<div id="equipeLocalEditor" class="modal-body"></div></div></div>';
 
+    const bus = $('eqBusca');
+    bus.oninput = () => { this.buscaEquipes = bus.value; this.pintarEquipes(); $('eqBusca').focus(); };
     $('btnNovaEquipe').onclick = async () => {
-      const nome = $('eNome').value.trim();
-      if (!nome) { toast('Dê um nome à equipe', 'warn'); return; }
-      const r = await ApiRh.equipe(this.token, { nome });
+      const nome = prompt('Nome da nova equipe:');
+      if (!nome || !nome.trim()) return;
+      const r = await ApiRh.equipe(this.token, { nome: nome.trim() });
       if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
       this.equipeAberta = r.dados.equipe_id;
       toast('Equipe criada', 'ok');
       await this.recarregar();
     };
-    $('eNome').onkeydown = e => { if (e.key === 'Enter') $('btnNovaEquipe').click(); };
-    $('rh-equipes').querySelectorAll('[data-eqtoggle]').forEach(b => {
-      b.onclick = () => { this.equipeAberta = this.equipeAberta === b.dataset.eqtoggle ? null : b.dataset.eqtoggle; this.pintarEquipes(); };
-    });
-    $('rh-equipes').querySelectorAll('[data-vinc]').forEach(b => {
-      b.onclick = async () => {
-        const sel = $('rh-equipes').querySelector('[data-vsel="' + b.dataset.vinc + '"]');
-        const id = sel.value;
-        if (!id) { toast('Escolha um colaborador', 'warn'); return; }
-        const p = pessoas.find(x => x.pessoa_id === id);
-        b.disabled = true;
-        const r = await ApiRh.equipe(this.token, { acao: 'vincular', equipe_id: b.dataset.vinc, colaborador_id: id });
-        b.disabled = false;
-        if (!r.ok) { toast(r.erro || 'Falha ao vincular', 'bad'); return; }
-        toast((p ? p.nome : 'Colaborador') + ' agora é da equipe ' + this.nomeEquipe(b.dataset.vinc), 'ok');
-        await this.recarregar();
-      };
-    });
-    $('rh-equipes').querySelectorAll('[data-loc-eq]').forEach(b => {
-      b.onclick = () => this.abrirLocalDaEquipe(eqs.find(e => e.equipe_id === b.dataset.locEq));
+    $('eqLista').querySelectorAll('[data-eq]').forEach(b => {
+      b.onclick = () => { this.equipeAberta = b.dataset.eq; this.pintarEquipes(); };
     });
     $('eqLocalX').onclick = () => $('eqLocalModal').classList.add('hide');
     $('eqLocalModal').onclick = e => { if (e.target.id === 'eqLocalModal') $('eqLocalModal').classList.add('hide'); };
-    $('rh-equipes').querySelectorAll('[data-desv]').forEach(b => {
+    this.ligarAcoesEquipe();
+  },
+
+  /** Painel direito: a obra selecionada — cerca, jornada, escala e quem está nela. */
+  htmlDetalheEquipe() {
+    const d = this.dados;
+    const pessoas = (d.pessoas || []).filter(p => p.ativo).slice().sort((a, b) => a.nome.localeCompare(b.nome));
+    const semEquipe = pessoas.filter(p => !p.equipe_id || !(d.equipes || []).some(e => e.equipe_id === p.equipe_id));
+
+    if (this.equipeAberta === SEM_EQUIPE) {
+      return '<div class="cab"><div style="flex:1"><h1>Fora de qualquer equipe</h1>' +
+          '<p class="sub" style="margin:4px 0 0">Sem equipe não há cerca nem jornada: o ponto dessas pessoas cai em revisão. ' +
+          'Quem veio do Bitrix se resolve movendo o card no kanban.</p></div></div>' +
+        '<div class="fatos"><h2 style="margin:0 0 11px;font-size:14px">' +
+          semEquipe.length + (semEquipe.length === 1 ? ' colaborador' : ' colaboradores') + '</h2>' +
+          (semEquipe.map(p => this.htmlMembro(p, true)).join('') || '<p class="nota">Ninguém fora de equipe. ✓</p>') +
+        '</div>';
+    }
+
+    const e = (d.equipes || []).find(x => x.equipe_id === this.equipeAberta);
+    if (!e) return '<div class="pend-vazio"><div><div style="font-size:22px">🏗</div>' +
+      '<div style="margin-top:8px;font-weight:500">Escolha uma equipe</div>' +
+      '<div style="font-size:12.5px;margin-top:3px">A lista ao lado mostra as obras e quem está em cada uma.</div></div></div>';
+
+    const loc = (d.locais || []).find(l => l.local_id === e.local_id) || null;
+    const ms = pessoas.filter(p => p.equipe_id === e.equipe_id);
+    const escalas = (d.planos || []).filter(pl => pl.equipe_id === e.equipe_id);
+    const jornada = this.jornadaDe(e.equipe_id);
+    const jNome = (d.jornadas || []).find(j => j.jornada_id === e.jornada_id);
+    const sup = e.supervisor_id ? this.pessoaDe(e.supervisor_id) : null;
+    // Quem vem do Bitrix não é vinculado à mão: a equipe dele é o card no kanban.
+    const candidatos = pessoas.filter(p => p.equipe_id !== e.equipe_id && !p.bitrix_contact_id)
+      .sort((a, b) => (!a.equipe_id === !b.equipe_id ? a.nome.localeCompare(b.nome) : (a.equipe_id ? 1 : -1)));
+
+    const fato = (k, v, acao) => '<div><div class="k">' + k + '</div><div class="v">' + v + '</div>' +
+      (acao ? '<div style="margin-top:7px">' + acao + '</div>' : '') + '</div>';
+
+    return '<div class="cab"><div style="flex:1;min-width:240px">' +
+        '<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">' +
+          '<h1>' + esc(e.nome) + '</h1>' +
+          (e.bitrix_stage_id ? '<span class="pill mut" style="padding:0 7px">Bitrix</span>' : '') +
+          (e.ativo ? '' : '<span class="pill bad" style="padding:0 7px">Inativa</span>') +
+          (e.ativo && !loc ? '<span class="pill bad" style="padding:0 7px">Sem local</span>' : '') +
+        '</div>' +
+        '<p class="sub" style="margin:4px 0 0">' +
+          (loc ? 'Quem está nesta equipe bate ponto em <b>' + esc(loc.nome) + '</b> (raio ' + loc.raio_m + ' m), todo dia, sem precisar de escala.'
+               : 'Enquanto não tiver local, o ponto de quem está aqui cai em revisão.') +
+        '</p></div></div>' +
+
+      '<div class="fatos"><div class="g eq-g">' +
+        fato('Local (cerca)', loc ? esc(loc.nome) + ' · ' + loc.raio_m + ' m' : '<span style="color:var(--v2-vermelho)">Não definido</span>',
+          '<button class="v2btn' + (loc ? ' ghost' : '') + ' mini" id="eqDefinirLocal">' + (loc ? 'Trocar o local' : '📍 Definir local') + '</button>') +
+        fato('Jornada', esc(jornada) + (jNome ? ' · ' + esc(jNome.nome) : ' · padrão da empresa'),
+          '<button class="v2btn ghost mini" id="eqIrJornadas">Alterar</button>') +
+        fato('Escala', escalas.length
+          ? escalas.map(pl => esc(pl.nome || e.nome)).join(', ')
+          : '<span style="color:var(--v2-mut2)">nenhuma — usa o local</span>',
+          '<button class="v2btn ghost mini" id="eqIrEscala">' + (escalas.length ? 'Ver' : 'Criar') + '</button>') +
+        fato('Supervisor', sup ? esc(sup.nome) : '<span style="color:var(--v2-mut2)">—</span>') +
+      '</div></div>' +
+
+      '<div class="fatos">' +
+        '<h2 style="margin:0 0 11px;font-size:14px">Colaboradores <span style="color:var(--v2-mut2);font-weight:400">(' + ms.length + ')</span></h2>' +
+        (ms.length ? ms.map(p => this.htmlMembro(p, false)).join('')
+                   : '<p class="nota" style="margin:0">Nenhum colaborador nesta equipe.</p>') +
+        (candidatos.length ?
+          '<div class="eq-vincular" style="margin-top:12px">' +
+            '<select class="inp" id="eqVincSel"><option value="">— vincular um colaborador de fora do Bitrix —</option>' +
+              candidatos.map(p => '<option value="' + esc(p.pessoa_id) + '">' + esc(p.nome) +
+                (p.equipe_id ? ' · ' + esc(this.nomeEquipe(p.equipe_id)) : ' · sem equipe') + '</option>').join('') +
+            '</select><button class="v2btn" id="eqVincBtn">Vincular</button></div>' : '') +
+        (e.bitrix_stage_id ? '<p class="nota" style="margin:10px 0 0">Equipe sincronizada do Bitrix: quem entra e sai é decidido movendo o card no kanban "Gerenciamento de Equipe".</p>' : '') +
+      '</div>';
+  },
+
+  htmlMembro(p, mostrarEquipe) {
+    return '<div class="eq-membro"><span class="av">' + esc(this.iniciais(p.nome)) + '</span>' +
+      '<div style="flex:1;min-width:0"><div class="nm">' + esc(p.nome) + '</div>' +
+        '<div class="mt">Matrícula ' + esc(p.matricula) + (p.papel === 'gestor' ? ' · gestor' : '') +
+          (mostrarEquipe && p.equipe_id ? ' · ' + esc(this.nomeEquipe(p.equipe_id)) : '') + '</div></div>' +
+      (p.bitrix_contact_id
+        ? '<span class="mt" title="A equipe desta pessoa é o card dela no Bitrix">via Bitrix</span>'
+        : p.equipe_id
+          ? '<button class="v2btn ghost mini" data-desv="' + esc(p.pessoa_id) + '">Remover da equipe</button>'
+          : '<span class="mt">vincule a uma equipe ao lado</span>') +
+    '</div>';
+  },
+
+  /** Ações do painel direito (repintado a cada seleção). */
+  ligarAcoesEquipe() {
+    const e = (this.dados.equipes || []).find(x => x.equipe_id === this.equipeAberta);
+    const def = $('eqDefinirLocal');
+    if (def) def.onclick = () => this.abrirLocalDaEquipe(e);
+    const jor = $('eqIrJornadas');
+    if (jor) jor.onclick = () => { this.aba = 'jornadas'; this.pintar(); };
+    const esc2 = $('eqIrEscala');
+    if (esc2) esc2.onclick = () => { this.aba = 'planos'; this.pintar(); };
+
+    const sel = $('eqVincSel'), btn = $('eqVincBtn');
+    if (btn) btn.onclick = async () => {
+      if (!sel.value) { toast('Escolha um colaborador', 'warn'); return; }
+      btn.disabled = true;
+      const r = await ApiRh.equipe(this.token, { acao: 'vincular', equipe_id: e.equipe_id, colaborador_id: sel.value });
+      btn.disabled = false;
+      if (!r.ok) { toast(r.erro || 'Falha ao vincular', 'bad'); return; }
+      toast('Vinculado a ' + e.nome, 'ok');
+      await this.recarregar();
+    };
+    $('eqDetalhe').querySelectorAll('[data-desv]').forEach(b => {
       b.onclick = async () => {
-        const p = pessoas.find(x => x.pessoa_id === b.dataset.desv);
-        if (!confirm('Tirar ' + (p ? p.nome : 'este colaborador') + ' da equipe? A pessoa fica sem equipe até ser vinculada a outra.')) return;
+        const p = this.pessoaDe(b.dataset.desv);
+        if (!confirm('Tirar ' + (p ? p.nome : 'este colaborador') + ' da equipe? A pessoa fica sem cerca até entrar em outra.')) return;
         const r = await ApiRh.equipe(this.token, { acao: 'desvincular', colaborador_id: b.dataset.desv });
         if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
         toast('Removido da equipe', 'ok');
