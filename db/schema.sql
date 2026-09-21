@@ -48,9 +48,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_usuario_rh_usuario ON usuario_rh (lower(usu
 
 -- ═══════════════════════════════════════════════════════ equipes
 
--- A equipe é o agrupamento estável (setor, turma, obra). A CERCA fica na
--- alocação diária, não aqui: uma mesma equipe pode operar em locais diferentes
--- em dias diferentes, e é o RH que define o de hoje.
+-- A equipe é o agrupamento estável (setor, turma, obra). Na prática ela É a
+-- obra: no pipeline "Gerenciamento de Equipe" do Bitrix cada etapa é um local
+-- de trabalho. Por isso a equipe aponta para um `local` (equipe.local_id): essa
+-- é a cerca de quem está nela, todo dia, sem precisar de escala. A escala
+-- (plano_alocacao) continua existindo para a EXCEÇÃO — turma que vai para outro
+-- ponto num período — e, quando existe, ganha da equipe.
 CREATE TABLE IF NOT EXISTS equipe (
   id           text PRIMARY KEY,
   empresa_id   text NOT NULL REFERENCES empresa(id) ON DELETE CASCADE,
@@ -236,6 +239,12 @@ CREATE INDEX IF NOT EXISTS ix_jornada_empresa ON jornada (empresa_id);
 -- não reescrever o histórico; equipe antiga continua válida com NULL.
 ALTER TABLE equipe ADD COLUMN IF NOT EXISTS jornada_id text REFERENCES jornada(id);
 ALTER TABLE equipe ADD COLUMN IF NOT EXISTS supervisor_id text REFERENCES colaborador(id);
+
+-- local_id: onde essa equipe trabalha. É a cerca PADRÃO de todo mundo dela — o
+-- ponto é aceito aqui mesmo sem nenhuma linha de `alocacao` no dia. NULL = a
+-- equipe ainda não tem local (etapa "A alocar" do Bitrix, equipe recém-criada):
+-- quem está nela bate ponto sem cerca e cai em revisão do RH.
+ALTER TABLE equipe ADD COLUMN IF NOT EXISTS local_id text REFERENCES local(id);
 
 -- ═══════════════════════════════════════════════════════ configurações + auth
 

@@ -67,6 +67,34 @@ export async function materializarPlano(sql, plano, hoje, { recriar = false } = 
   return { dias: dias.length, gravadas };
 }
 
+/**
+ * A cerca que vale para uma pessoa num dia. Duas fontes, nesta ordem:
+ *
+ *   1. `alocacao` do dia — veio de uma escala (exceção) ou de um ajuste manual;
+ *   2. o LOCAL da equipe dela (`colaborador.equipe_padrao → equipe.local_id`).
+ *
+ * O caso comum é o 2: equipe = obra, cerca definida uma vez, nada materializado.
+ * Devolve sempre a equipe (para carimbar a marcação), mesmo sem cerca; sem cerca
+ * as coordenadas vêm null e o chamador manda a marcação para revisão.
+ */
+export async function cercaVigente(sql, empresaId, colaboradorId, dia) {
+  const [r] = await sql`
+    SELECT COALESCE(a.equipe_id, c.equipe_padrao)        AS equipe_id,
+           e.nome                                        AS equipe_nome,
+           COALESCE(a.cerca_lat,    l.lat)               AS cerca_lat,
+           COALESCE(a.cerca_lng,    l.lng)               AS cerca_lng,
+           COALESCE(a.cerca_raio_m, l.raio_m)            AS cerca_raio_m,
+           CASE WHEN a.id IS NOT NULL THEN 'alocacao' WHEN l.id IS NOT NULL THEN 'equipe' END AS cerca_origem
+    FROM colaborador c
+    LEFT JOIN alocacao a ON a.empresa_id=c.empresa_id AND a.colaborador_id=c.id AND a.dia=${dia}::date
+    LEFT JOIN equipe   e ON e.id = COALESCE(a.equipe_id, c.equipe_padrao)
+    LEFT JOIN local    l ON l.id = e.local_id AND l.ativo=true
+    WHERE c.id=${colaboradorId} AND c.empresa_id=${empresaId}
+    LIMIT 1`;
+  if (!r || r.cerca_lat == null) return r ? Object.assign({}, r, { cerca_lat: null, cerca_lng: null, cerca_raio_m: null }) : null;
+  return r;
+}
+
 // O driver devolve colunas DATE como Date (meia-noite LOCAL). Formatar com os
 // getters locais preserva o dia; toISOString() poderia voltar um dia em fusos > UTC.
 function diaISO(v) {

@@ -47,7 +47,8 @@ export async function zerarEmpresa(sql, empresaId) {
     txn`DELETE FROM equipe WHERE empresa_id=${empresaId}`,
     txn`DELETE FROM local WHERE empresa_id=${empresaId}`,
     txn`DELETE FROM jornada WHERE empresa_id=${empresaId}`,
-    txn`UPDATE config_empresa SET dados = dados - 'integracao_bitrix', atualizada_em=now() WHERE empresa_id=${empresaId}`
+    // jornadaPadraoId aponta para uma jornada que acabou de ser apagada.
+    txn`UPDATE config_empresa SET dados = dados - 'integracao_bitrix' - 'jornadaPadraoId', atualizada_em=now() WHERE empresa_id=${empresaId}`
   ]);
 
   const [trg] = await sql`SELECT tgenabled FROM pg_trigger WHERE tgname='trg_marcacao_imutavel'`;

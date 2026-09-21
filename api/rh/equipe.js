@@ -1,8 +1,10 @@
-// Equipes: criar/renomear e vincular/desvincular colaboradores. A cerca NÃO fica
-// aqui — ela é definida pela escala (/rh/plano) ou por dia (/rh/alocar), porque
-// a mesma equipe pode operar em locais diferentes em dias diferentes.
+// Equipes: criar/renomear, definir o local (cerca) e vincular/desvincular
+// colaboradores. A equipe É a obra: o local dela é a cerca de quem está nela,
+// todo dia, sem escala nenhuma. Escala (/rh/plano) e ajuste do dia (/rh/alocar)
+// continuam valendo para a exceção e ganham da equipe quando existem.
 //
 //   • sem acao (default): cria (sem equipe_id) ou renomeia (com equipe_id)
+//   • acao 'local'       { equipe_id, local_id|null }: define/limpa a cerca da equipe
 //   • acao 'vincular'    { equipe_id, colaborador_id }: colaborador.equipe_padrao = equipe
 //   • acao 'desvincular' { colaborador_id }: equipe_padrao = NULL
 // O vínculo é a equipe PADRÃO da pessoa e, desde a integração com o Bitrix,
@@ -21,6 +23,19 @@ export default async function handler(req, res) {
 
   const b = corpo(req);
   const sql = db();
+
+  // Local da equipe: a cerca padrão de todo mundo dela. null = volta a não ter.
+  if (b.acao === 'local') {
+    if (!b.equipe_id) return erro(res, 400, 'CORPO_INVALIDO', 'equipe_id obrigatório');
+    if (b.local_id) {
+      const loc = await sql`SELECT id FROM local WHERE id=${b.local_id} AND empresa_id=${rh.empresa_id} AND ativo=true LIMIT 1`;
+      if (!loc[0]) return erro(res, 404, 'LOCAL_NAO_ENCONTRADO', 'local não encontrado');
+    }
+    const r = await sql`UPDATE equipe SET local_id=${b.local_id || null}
+                        WHERE id=${b.equipe_id} AND empresa_id=${rh.empresa_id} RETURNING id`;
+    if (!r[0]) return erro(res, 404, 'EQUIPE_NAO_ENCONTRADA', 'equipe não encontrada');
+    return ok(res, { equipe_id: b.equipe_id, local_id: b.local_id || null });
+  }
 
   if (b.acao === 'vincular' || b.acao === 'desvincular') {
     if (!b.colaborador_id) return erro(res, 400, 'CORPO_INVALIDO', 'colaborador_id obrigatório');

@@ -3,6 +3,7 @@ import { ApiRh } from './api.js';
 import { Alocacao } from './alocacao.js';
 import { MapaOp } from './mapa.js';
 import { PlanoEditor } from './plano.js';
+import { LocalEquipe } from './local-equipe.js';
 import { Face } from './face.js';
 import { derivar } from './cripto.js';
 import {
@@ -158,7 +159,7 @@ export const Rh = {
     const cfg = window.EFRAT_CFG || {};
     return exceptionsDoDia(
       d.marcacoes, d.pessoas, d.alocacoes_hoje, this.hojeServidor(),
-      d.servidor_hora, cfg.horaEntrada || '08:00',
+      d.servidor_hora, (this.jornadaPadrao() || {}).entrada || cfg.horaEntrada || '08:00',
       horasEntradaPorEquipe(d.equipes, d.jornadas));   // hora-limite por jornada da equipe
   },
 
@@ -198,10 +199,19 @@ export const Rh = {
     return alertasDePlanejamento(d.planos, d.alocacoes, d.pessoas, d.equipes, this.hojeServidor(), 14, 3);
   },
 
+  /** A jornada padrão da empresa (Configurações). null = nenhuma escolhida. */
+  jornadaPadrao() {
+    const cfg = window.EFRAT_CFG || {};
+    if (!cfg.jornadaPadraoId) return null;
+    return (this.dados.jornadas || []).find(j => j.jornada_id === cfg.jornadaPadraoId) || null;
+  },
+
   jornadaDe(equipeId) {
     // Jornada real da equipe (jornada associada) — senão o default da empresa.
     const cfg = window.EFRAT_CFG || {};
-    return jornadaDaEquipe(equipeId, this.dados.equipes, this.dados.jornadas, cfg.jornadaPadrao);
+    const jp = this.jornadaPadrao();
+    return jornadaDaEquipe(equipeId, this.dados.equipes, this.dados.jornadas,
+      jp ? jp.entrada + '–' + jp.saida : cfg.jornadaPadrao);
   },
 
   nomeDe(id) {
@@ -417,7 +427,7 @@ export const Rh = {
 
     $('rh-planos').innerHTML =
       '<div class="pg-head"><div><h1 class="tit">Escala das equipes</h1>' +
-        '<p class="sub">Cadastre onde cada equipe trabalha. O sistema aplica todo dia sozinho e avisa em Pendências quando alguém bate fora da cerca. Volte aqui só quando a equipe mudar de local.</p></div>' +
+        '<p class="sub">Só para a exceção: turma que trabalha noutro ponto, em dias e por um período. No dia a dia a cerca já vem do local da equipe (Equipes) — quem está na equipe bate ponto lá sem escala nenhuma. Quando existe, a escala ganha do local nos dias dela.</p></div>' +
         '<div class="acoes"><button class="v2btn" id="btnNovoPlano">+ Nova escala</button></div></div>' +
       '<div class="aloc-grid">' +
         planos.map(card).join('') +
@@ -662,7 +672,7 @@ export const Rh = {
       return '<div class="aten"><div class="aten-top">' + sevPill(x.severidade) +
         '<span class="aten-tit">' + esc(x.rotulo) + '</span></div>' +
         '<div class="aten-sub">' + esc(contexto) + '</div>' +
-        '<button class="v2btn ghost mini" data-plan="' + esc(x.tipo) + '" style="margin-top:9px">Resolver</button></div>';
+        '<button class="v2btn ghost mini" data-plan="' + esc(x.tipo) + '" data-plan-eq="' + esc(x.equipe_id || '') + '" style="margin-top:9px">Resolver</button></div>';
     }).join('') || '<div class="aten"><div class="aten-sub">Planejamento em dia. ✓</div></div>';
 
     const ativ = (d.marcacoes || []).slice(0, 6).map(m => {
@@ -736,7 +746,12 @@ export const Rh = {
     $('abrirFila').onclick = () => { this.aba = 'pendencias'; this.pintar(); };
     $('abrirPlanos').onclick = () => { this.aba = 'planos'; this.pintar(); };
     $('rh-painel').querySelectorAll('button[data-plan]').forEach(b => {
-      b.onclick = () => { this.aba = 'planos'; this.pintar(); };
+      b.onclick = () => {
+        // Equipe sem local se resolve em Equipes (apontar o local), não em Escala.
+        if (b.dataset.plan === 'equipe_sem_local') { this.equipeAberta = b.dataset.planEq || null; this.aba = 'equipes'; }
+        else this.aba = 'planos';
+        this.pintar();
+      };
     });
     $('rh-painel').querySelectorAll('button[data-exc]').forEach(b => {
       b.onclick = () => { this.aba = 'pendencias'; this.pendSel = b.dataset.exc; this.pintar(); };
@@ -745,10 +760,16 @@ export const Rh = {
     this.carregarGraficos({ serie, equipes: ind.equipes, motivos, alarme: cfg.alarmeManual || 20 });
   },
 
-  /** Cerca ativa por equipe hoje (uma alocação representa o grupo). */
+  /** Cerca ativa por equipe hoje: a alocação do dia se houver, senão o local da
+   *  equipe (que é a cerca padrão de quem está nela). */
   cercaPorEquipe() {
     const m = {};
-    for (const a of (this.dados.alocacoes_hoje || [])) if (!m[a.equipe_id]) m[a.equipe_id] = a;
+    for (const e of (this.dados.equipes || [])) {
+      if (!e.local_id) continue;
+      const l = (this.dados.locais || []).find(x => x.local_id === e.local_id);
+      if (l) m[e.equipe_id] = { equipe_id: e.equipe_id, cerca_lat: l.lat, cerca_lng: l.lng, cerca_raio_m: l.raio_m };
+    }
+    for (const a of (this.dados.alocacoes_hoje || [])) m[a.equipe_id] = a;
     return m;
   },
 
@@ -1644,6 +1665,9 @@ export const Rh = {
     const membros = eq => pessoas.filter(p => p.equipe_id === eq);
     const semEquipe = pessoas.filter(p => !p.equipe_id || !eqs.some(e => e.equipe_id === p.equipe_id));
     const escalasDe = eq => (this.dados.planos || []).filter(pl => pl.equipe_id === eq);
+    const locais = (this.dados.locais || []).filter(l => l.ativo !== false);
+    const localDe = eq => locais.find(l => l.local_id === eq.local_id) || null;
+    const semLocal = eqs.filter(e => e.ativo && !e.local_id);
     if (!this.equipeAberta && eqs[0]) this.equipeAberta = eqs[0].equipe_id;
 
     const opcao = p => '<option value="' + p.pessoa_id + '">' + esc(p.nome) +
@@ -1657,12 +1681,16 @@ export const Rh = {
       // Sem equipe primeiro: é quem mais provavelmente está sendo vinculado.
       candidatos.sort((a, b) => (!a.equipe_id === !b.equipe_id ? a.nome.localeCompare(b.nome) : (a.equipe_id ? 1 : -1)));
       const escalas = escalasDe(e.equipe_id);
+      const loc = localDe(e);
       return '<div class="eq-bloco' + (aberta ? ' aberta' : '') + '">' +
         '<button class="linha-item eq-head" data-eqtoggle="' + esc(e.equipe_id) + '">' +
           '<span class="ponto ' + (e.ativo ? 'ok' : 'bad') + '"></span>' +
           '<div style="flex:1;text-align:left"><div class="nm">' + esc(e.nome) +
-            (e.bitrix_stage_id ? ' <span class="pill mut" style="padding:0 6px" title="Etapa do pipeline Gerenciamento de Equipe no Bitrix">Bitrix</span>' : '') + '</div>' +
-          '<div class="mt">' + ms.length + ' pessoa(s)' + (escalas.length ? ' · ' + escalas.length + ' escala(s)' : '') + '</div></div>' +
+            (e.bitrix_stage_id ? ' <span class="pill mut" style="padding:0 6px" title="Etapa do pipeline Gerenciamento de Equipe no Bitrix">Bitrix</span>' : '') +
+            (e.ativo && !e.local_id ? ' <span class="pill bad" style="padding:0 6px" title="Sem local, ninguém desta equipe tem cerca: o ponto cai em revisão">Sem local</span>' : '') + '</div>' +
+          '<div class="mt">' + ms.length + ' pessoa(s)' +
+            (loc ? ' · ' + esc(loc.nome) + ' · ' + loc.raio_m + 'm' : '') +
+            (escalas.length ? ' · ' + escalas.length + ' escala(s)' : '') + '</div></div>' +
           '<span class="eq-seta">' + (aberta ? '▾' : '▸') + '</span></button>' +
         (aberta ?
           '<div class="eq-corpo">' +
@@ -1677,10 +1705,15 @@ export const Rh = {
               '<select class="inp" data-vsel="' + esc(e.equipe_id) + '">' +
                 '<option value="">— escolha um colaborador para vincular —</option>' + candidatos.map(opcao).join('') + '</select>' +
               '<button class="v2btn" data-vinc="' + esc(e.equipe_id) + '">Vincular</button></div>' +
+            '<div class="eq-vincular" style="margin-top:4px">' +
+              '<button class="v2btn' + (loc ? ' ghost' : '') + '" data-loc-eq="' + esc(e.equipe_id) + '">' +
+                (loc ? 'Trocar o local' : '📍 Definir local') + '</button>' +
+              '<span class="mt">' + (loc ? esc(loc.nome) + ' · raio ' + loc.raio_m + ' m' : 'Sem local, o ponto de quem está aqui cai em revisão') + '</span></div>' +
             (e.bitrix_stage_id ? '<p class="nota" style="margin:8px 0 0">Equipe sincronizada do Bitrix: quem entra e sai é decidido movendo o card no kanban "Gerenciamento de Equipe". Vincular aqui vale só para quem não está no Bitrix.</p>' : '') +
-            (escalas.length ? '<p class="nota" style="margin:8px 0 0">Quem entra na equipe entra na escala ' +
-              escalas.map(pl => '"' + esc(pl.nome || e.nome) + '"').join(', ') + ' a partir de hoje (e sai da escala anterior).</p>'
-              : '<p class="nota" style="margin:8px 0 0">Esta equipe ainda não tem escala: crie uma em Escala para a cerca e os dias valerem para quem está nela.</p>') +
+            (loc ? '<p class="nota" style="margin:8px 0 0">Quem está nesta equipe bate ponto em ' + esc(loc.nome) + ' (raio ' + loc.raio_m + ' m), todo dia, sem precisar de escala.</p>'
+                 : '<p class="nota" style="margin:8px 0 0"><b>Falta o local.</b> Toque em "Definir local" e solte o pino no mapa: a cerca passa a valer para todo mundo da equipe.</p>') +
+            (escalas.length ? '<p class="nota" style="margin:8px 0 0">' + escalas.length + ' escala(s) de exceção (' +
+              escalas.map(pl => '"' + esc(pl.nome || e.nome) + '"').join(', ') + '): nos dias dela, a cerca da escala ganha da do local.</p>' : '') +
           '</div>' : '') +
       '</div>';
     };
@@ -1688,13 +1721,17 @@ export const Rh = {
     $('rh-equipes').innerHTML =
       '<div class="pg-head"><div><h1 class="tit">Equipes</h1>' +
         '<p class="sub">' + eqs.length + ' equipe(s) · ' + pessoas.length + ' colaborador(es) ativo(s)' +
-          (semEquipe.length ? ' · <b>' + semEquipe.length + ' sem equipe</b>' : '') + '</p></div></div>' +
+          (semEquipe.length ? ' · <b>' + semEquipe.length + ' sem equipe</b>' : '') +
+          (semLocal.length ? ' · <b>' + semLocal.length + ' sem local</b>' : '') + '</p></div></div>' +
       '<div class="card"><h2>Nova equipe</h2>' +
         '<div class="eq-vincular"><input type="text" id="eNome" placeholder="Nome da equipe" style="margin:0">' +
         '<button class="v2btn" id="btnNovaEquipe">Criar equipe</button></div></div>' +
       '<div class="card"><h2>Equipes e colaboradores</h2>' +
         (eqs.length ? eqs.map(bloco).join('') : '<p class="nota">Nenhuma equipe.</p>') +
-      '</div>';
+      '</div>' +
+      '<div id="eqLocalModal" class="modal-back hide"><div class="modal"><div class="modal-head">' +
+        '<h2 id="eqLocalTit">Local da equipe</h2><button class="modal-x" id="eqLocalX">✕</button></div>' +
+        '<div id="equipeLocalEditor" class="modal-body"></div></div></div>';
 
     $('btnNovaEquipe').onclick = async () => {
       const nome = $('eNome').value.trim();
@@ -1723,6 +1760,11 @@ export const Rh = {
         await this.recarregar();
       };
     });
+    $('rh-equipes').querySelectorAll('[data-loc-eq]').forEach(b => {
+      b.onclick = () => this.abrirLocalDaEquipe(eqs.find(e => e.equipe_id === b.dataset.locEq));
+    });
+    $('eqLocalX').onclick = () => $('eqLocalModal').classList.add('hide');
+    $('eqLocalModal').onclick = e => { if (e.target.id === 'eqLocalModal') $('eqLocalModal').classList.add('hide'); };
     $('rh-equipes').querySelectorAll('[data-desv]').forEach(b => {
       b.onclick = async () => {
         const p = pessoas.find(x => x.pessoa_id === b.dataset.desv);
@@ -1732,6 +1774,17 @@ export const Rh = {
         toast('Removido da equipe', 'ok');
         await this.recarregar();
       };
+    });
+  },
+
+  abrirLocalDaEquipe(eq) {
+    if (!eq) return;
+    this.equipeAberta = eq.equipe_id;
+    $('eqLocalTit').textContent = 'Local da equipe — ' + eq.nome;
+    $('eqLocalModal').classList.remove('hide');
+    LocalEquipe.abrir(this, eq, {
+      alvo: 'equipeLocalEditor',
+      aoSalvar: (cancelado) => { $('eqLocalModal').classList.add('hide'); if (!cancelado) this.recarregar(); }
     });
   },
 
@@ -1993,12 +2046,17 @@ export const Rh = {
         '<p class="sub">Parâmetros da operação, dados da empresa e acesso do RH.</p></div></div>' +
 
       '<div class="cfg-sec"><h2>Anti-fraude e operação</h2>' +
-        '<p class="cap">Estes valores valem para o app do colaborador e para a detecção de exceções.</p>' +
+        '<p class="cap">Estes valores são o PADRÃO da empresa: valem para toda equipe, local e escala que não definir o seu próprio. Equipe nova (inclusive a que chega do Bitrix) já nasce com eles — só o local dela precisa ser apontado.</p>' +
         '<div class="form-grid">' +
           '<div><label class="lb2">Limiar facial (aceite)</label><input class="inp" id="cfLimiar" type="number" step="0.01" min="0.2" max="0.9" value="' + (cfg.limiarAceite ?? 0.45) + '"></div>' +
           '<div><label class="lb2">Raio de cerca padrão (m)</label><input class="inp" id="cfRaio" type="number" min="30" max="5000" value="' + (cfg.raioPadraoM ?? 200) + '"></div>' +
           '<div><label class="lb2">Tolerância GPS (m)</label><input class="inp" id="cfGps" type="number" min="0" max="500" value="' + (cfg.toleranciaGpsM ?? 100) + '"></div>' +
-          '<div><label class="lb2">Hora-limite de entrada</label><input class="inp" id="cfHora" type="time" value="' + (cfg.horaEntrada || '08:00') + '"></div>' +
+          '<div><label class="lb2">Jornada padrão</label><select class="inp" id="cfJornada">' +
+            '<option value="">— sem jornada padrão —</option>' +
+            (this.dados.jornadas || []).map(j => '<option value="' + esc(j.jornada_id) + '"' + (cfg.jornadaPadraoId === j.jornada_id ? ' selected' : '') + '>' +
+              esc(j.nome) + ' · ' + esc(j.entrada) + '–' + esc(j.saida) + '</option>').join('') + '</select></div>' +
+          '<div><label class="lb2">Hora-limite de entrada</label><input class="inp" id="cfHora" type="time" value="' + (cfg.horaEntrada || '08:00') + '"' +
+            (cfg.jornadaPadraoId ? ' disabled title="Vem da jornada padrão"' : '') + '></div>' +
           '<div><label class="lb2">Alarme de registro manual (%)</label><input class="inp" id="cfAlarme" type="number" min="1" max="100" value="' + (cfg.alarmeManual ?? 20) + '"></div>' +
         '</div>' +
         '<button class="act" id="btnSalvarCfg" style="margin-top:14px;width:auto;padding:10px 18px">Salvar parâmetros</button></div>' +
@@ -2074,6 +2132,7 @@ export const Rh = {
       const dados = {
         limiarAceite: Number($('cfLimiar').value), raioPadraoM: Number($('cfRaio').value),
         toleranciaGpsM: Number($('cfGps').value), horaEntrada: $('cfHora').value,
+        jornadaPadraoId: $('cfJornada').value || null,
         alarmeManual: Number($('cfAlarme').value)
       };
       const r = await ApiRh.config(this.token, { dados });

@@ -567,6 +567,21 @@ test('alertasDePlanejamento: colaborador ativo sem nenhuma alocação futura', (
   assert.deepEqual(semPlano, ['b', 'c']);      // Dario é inativo, não conta; Ana tem plano
 });
 
+test('alertasDePlanejamento: equipe com local dá cerca a quem está nela (sem alerta de sem-cerca)', () => {
+  const eqs = [{ equipe_id: 'e1', nome: 'Um', local_id: 'l1' }, { equipe_id: 'e2', nome: 'Dois' }];
+  const al = alertasDePlanejamento([], [], ALPESSOAS, eqs, PHOJE, 14, 3);
+  const semCerca = al.filter(x => x.tipo === 'ativo_sem_plano').map(x => x.pessoa_id).sort();
+  assert.deepEqual(semCerca, ['c']);                                   // Ana e Bruno têm a cerca da e1
+  assert.ok(!al.some(x => x.tipo === 'equipe_sem_local' && x.equipe_id === 'e1'));
+  assert.ok(al.some(x => x.tipo === 'equipe_sem_local' && x.equipe_id === 'e2'));
+});
+
+test('alertasDePlanejamento: equipe sem local e sem gente não vira pendência', () => {
+  const eqs = ALEQUIPES.concat([{ equipe_id: 'e3', nome: 'Vazia' }]);
+  const al = alertasDePlanejamento([], [], ALPESSOAS, eqs, PHOJE, 14, 3);
+  assert.ok(!al.some(x => x.tipo === 'equipe_sem_local' && x.equipe_id === 'e3'));
+});
+
 test('alertasDePlanejamento: plano vencendo dentro da janela; fora não alerta', () => {
   const planos = [
     { plano_id: 'p1', equipe_id: 'e1', colaboradores: ['a'], ativo: true, vigencia_fim: '2026-09-11' }, // +2 dias

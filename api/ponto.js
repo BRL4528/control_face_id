@@ -5,14 +5,16 @@
 //     reenvio após timeout devolve 'duplicado', nunca dobra o ponto. (O n8n não
 //     tinha índice único; aqui tem.)
 //   • A CERCA é reconferida no servidor. O cliente informa lat/lng; nós medimos
-//     contra a alocação do dia. Fora da cerca → grava e marca para revisão
-//     (nunca nega: pode ser GPS ruim, e o ponto jamais é negado por técnica).
+//     contra a cerca do dia — a escala se houver, senão o local da equipe
+//     (cercaVigente). Fora da cerca → grava e marca para revisão (nunca nega:
+//     pode ser GPS ruim, e o ponto jamais é negado por técnica).
 //   • Vai para revisão quando: veredito != aceito, origem manual, fora da cerca,
-//     liveness reprovado, sem alocação, ou relógio > 2 min fora.
+//     liveness reprovado, sem cerca nenhuma, ou relógio > 2 min fora.
 //   • A foto de auditoria só se guarda quando a marcação vai para revisão.
 import { db } from './_lib/db.js';
 import { autenticarDispositivo } from './_lib/auth.js';
 import { dentroDaCerca } from './_lib/geo.js';
+import { cercaVigente } from './_lib/escala.js';
 import { cors, ok, erro, corpo, exigeMetodo } from './_lib/http.js';
 import { guardarMiniatura } from './_lib/blob.js';
 
@@ -79,20 +81,17 @@ export default async function handler(req, res) {
     const colaboradorId = vinc.colaborador_id;
     const dia = String(m.marcado_dia || m.marcado_em).slice(0, 10);
 
-    // Cerca: mede contra a alocação do dia deste colaborador.
-    const alocs = await sql`
-      SELECT equipe_id, cerca_lat, cerca_lng, cerca_raio_m FROM alocacao
-      WHERE empresa_id = ${vinc.empresa_id} AND colaborador_id = ${colaboradorId} AND dia = ${dia}
-      LIMIT 1`;
-    const aloc = alocs[0] || null;
-    const cerca = aloc ? dentroDaCerca(aloc, m.lat, m.lng, m.precisao_m) : { dentro: null, distancia_m: null };
+    // Cerca do dia: escala/ajuste se houver, senão o local da equipe.
+    const aloc = await cercaVigente(sql, vinc.empresa_id, colaboradorId, dia);
+    const temCerca = !!(aloc && aloc.cerca_lat != null);
+    const cerca = temCerca ? dentroDaCerca(aloc, m.lat, m.lng, m.precisao_m) : { dentro: null, distancia_m: null };
 
     const derivaFora = Math.abs(Number(m.deriva_ms) || 0) > DERIVA_MAX_MS;
     const revisar =
       m.veredito !== 'aceito' ||
       m.origem === 'manual' ||
       m.liveness_ok === false ||
-      !aloc ||
+      !temCerca ||
       cerca.dentro === false ||
       derivaFora;
 

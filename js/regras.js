@@ -305,7 +305,8 @@ export const TIPOS_EXCECAO = {
   // Alertas de PLANEJAMENTO (não são do dia; são de gestão da escala).
   pessoa_em_2_equipes: { rotulo: 'Alocada em duas equipes no mesmo dia', severidade: 'critico' },
   cerca_sem_gente:     { rotulo: 'Equipe com cerca e sem colaboradores', severidade: 'atencao' },
-  ativo_sem_plano:     { rotulo: 'Colaborador sem escala', severidade: 'atencao' },
+  ativo_sem_plano:     { rotulo: 'Colaborador sem cerca', severidade: 'atencao' },
+  equipe_sem_local:    { rotulo: 'Equipe sem local', severidade: 'atencao' },
   plano_vencendo:      { rotulo: 'Escala vencendo', severidade: 'atencao' }
 };
 
@@ -489,15 +490,28 @@ export function alertasDePlanejamento(planos, alocacoes, pessoas, equipes, hoje,
       { tipo: 'plano', id: pl.plano_id }));
   }
 
-  // 3) Colaborador ativo sem NENHUMA alocação de hoje em diante (sem planejamento).
+  // 3) Equipe ativa com gente e sem local: ninguém dela tem cerca. É a fila de
+  //    trabalho do RH quando uma equipe nova chega (do Bitrix ou criada à mão).
+  const comLocal = new Set();
+  for (const e of (equipes || [])) if (e && e.local_id) comLocal.add(e.equipe_id);
+  for (const e of (equipes || [])) {
+    if (!e || e.ativo === false || comLocal.has(e.equipe_id)) continue;
+    const temGente = Object.keys(ativos).some(id => ativos[id].equipe_id === e.equipe_id);
+    if (temGente) itens.push(alerta('equipe_sem_local', 'el:' + e.equipe_id, null, e.equipe_id,
+      { tipo: 'equipe', id: e.equipe_id }));
+  }
+
+  // 4) Colaborador ativo sem cerca nenhuma: nem alocação de hoje em diante, nem
+  //    local pela equipe (a equipe é a cerca padrão de quem está nela).
   const temFuturo = new Set();
   for (const a of (alocacoes || [])) if (String(a.dia).slice(0, 10) >= hoje) temFuturo.add(a.colaborador_id);
   for (const id of Object.keys(ativos)) {
-    if (!temFuturo.has(id)) itens.push(alerta('ativo_sem_plano', 'sp:' + id, id, ativos[id].equipe_id || null,
+    if (temFuturo.has(id) || comLocal.has(ativos[id].equipe_id)) continue;
+    itens.push(alerta('ativo_sem_plano', 'sp:' + id, id, ativos[id].equipe_id || null,
       { tipo: 'colaborador', id }));
   }
 
-  // 4) Plano vencendo: vigência_fim entre hoje e hoje+diasVencendo.
+  // 5) Plano vencendo: vigência_fim entre hoje e hoje+diasVencendo.
   const limite = isoDia(Date.parse(hoje + 'T00:00:00Z') + (Math.max(0, diasVencendo || 3)) * UM_DIA_MS);
   for (const pl of (planos || [])) {
     if (pl.ativo === false || !pl.vigencia_fim) continue;

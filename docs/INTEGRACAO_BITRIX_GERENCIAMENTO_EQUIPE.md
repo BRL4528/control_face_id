@@ -46,8 +46,11 @@ Ao receber que o colaborador C está na etapa/equipe E:
 3. Re-materializa os planos afetados **de hoje em diante**
    (`materializarPlano(..., { recriar: true })`). Ajustes manuais
    (`origem='manual'`) e o passado não mudam. Marcações nunca mudam (trigger).
-4. E sem plano ativo → C fica só com `equipe_padrao`; a Central deve sinalizar
-   "equipe sem escala" (conferir se o aviso já existe antes de criar outro).
+4. E sem plano ativo → C fica só com `equipe_padrao`, e **isso basta**: a cerca
+   de C passa a ser o `local` da equipe E (`equipe.local_id`), sem escala nenhuma.
+   Se E também não tem local, a Central sinaliza "Equipe sem local" (Painel →
+   Planejamento e badge na tela Equipes) — é a única coisa que o RH precisa fazer
+   quando uma equipe nova chega do Bitrix.
 
 ## 3. Mecanismo
 
@@ -226,8 +229,10 @@ e rodando. Ainda em aberto:
 
 1. **Publicar a versão nova do `Efrat - Sync Colaborador Ativo (30min)`**
    (`ifnZrWqRfT90p2pZ`): a versão ativa ainda filtra pelo domínio antigo e roda 0/0.
-2. No Ponto: cadastrar a **escala** (cerca, dias) das equipes que vieram do Bitrix.
-   Só "Escritório Efrat" já tinha escala (foi adotada e ganhou os 2 cards da etapa).
+2. No Ponto: apontar o **local** de cada equipe que veio do Bitrix (Equipes →
+   equipe → "Local (cerca)"). Uma vez por obra; jornada e raio já vêm do padrão
+   da empresa (Configurações). Escala só para a exceção — turma noutro ponto,
+   em dias e por um período.
 3. No Bitrix: resolver os contatos 3807 e 3811, cada um em dois cards (seção 8).
 4. Dados demo: Configurações → **Zona de perigo** → "Ver o que seria apagado" →
    digitar ZERAR. Apaga tudo (marcações inclusive, com o trigger de imutabilidade

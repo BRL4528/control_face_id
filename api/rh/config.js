@@ -24,6 +24,8 @@ function sanear(dados) {
   if (d.horaEntrada != null && /^([01]\d|2[0-3]):[0-5]\d$/.test(d.horaEntrada)) out.horaEntrada = d.horaEntrada;
   if (d.alarmeManual != null) out.alarmeManual = num(d.alarmeManual, 1, 100, 20);
   if (d.jornadaPadrao != null) out.jornadaPadrao = String(d.jornadaPadrao).slice(0, 20);
+  // Jornada padrão da empresa: vale para toda equipe sem jornada própria.
+  if (d.jornadaPadraoId !== undefined) out.jornadaPadraoId = d.jornadaPadraoId ? String(d.jornadaPadraoId).slice(0, 40) : null;
   return out;
 }
 

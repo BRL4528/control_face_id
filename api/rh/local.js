@@ -15,8 +15,16 @@ export default async function handler(req, res) {
   if (b.lat == null || b.lng == null || !nome) {
     return erro(res, 400, 'CORPO_INVALIDO', 'nome, lat e lng obrigatórios');
   }
-  const raio = Math.max(30, Math.min(Number(b.raio_m) || 200, 5000));
   const sql = db();
+
+  // Sem raio informado, vale o padrão da empresa (Configurações) — 200 m se nem
+  // isso estiver definido.
+  let padrao = 200;
+  if (!Number(b.raio_m)) {
+    const cfg = await sql`SELECT dados FROM config_empresa WHERE empresa_id=${rh.empresa_id} LIMIT 1`;
+    padrao = Number(cfg[0] && cfg[0].dados && cfg[0].dados.raioPadraoM) || 200;
+  }
+  const raio = Math.max(30, Math.min(Number(b.raio_m) || padrao, 5000));
 
   if (b.local_id) {
     await sql`UPDATE local SET nome=${nome}, lat=${b.lat}, lng=${b.lng}, raio_m=${raio},
