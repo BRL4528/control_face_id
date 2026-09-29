@@ -10,7 +10,7 @@ WhatsApp via Elisia, retorno Ponto → Bitrix). O escopo agora é um só:
 > é o ato de realocar a pessoa. Sentido único: Bitrix → Ponto.
 
 Status: **EM PRODUÇÃO desde 09/09/2026 03:15 UTC.** Commit `f79f150` em `main`,
-rota publicada na Vercel, workflow `LCzd196pI029cTF8` ativo (5 min). Primeira
+rota publicada na Vercel, workflow `LCzd196pI029cTF8` ativo (15 min, envia só quando o snapshot muda). Primeira
 sincronização real: 18 equipes criadas (+ "Escritório Efrat" adotada pelo nome),
 67 colaboradores criados, 1 escala ajustada, 2 avisos de contato repetido. Pendências
 restantes na seção 9.
@@ -56,7 +56,7 @@ Ao receber que o colaborador C está na etapa/equipe E:
 
 Dois caminhos possíveis, ambos terminando na **mesma rota** do ponto:
 
-- **(b) Reconciliação por snapshot** — n8n, a cada 5 min: `crm.dealcategory.stage.list
+- **(b) Reconciliação por snapshot** — n8n, a cada 15 min: `crm.dealcategory.stage.list
   {id:13}` + `crm.deal.list {filter:{CATEGORY_ID:13}, select:[ID,TITLE,STAGE_ID,
   CONTACT_ID,CLOSED,DATE_MODIFY]}` (paginado) + `crm.contact.get` dos contatos
   novos → monta o estado inteiro e faz `POST /api/integracao/bitrix {acao:'snapshot'}`.
@@ -66,7 +66,7 @@ Dois caminhos possíveis, ambos terminando na **mesma rota** do ponto:
   o contato e chama a mesma rota com `{acao:'card'}`. Latência de segundos.
 
 **Recomendação: começar só com (b).** É uma rota, um workflow, sem `event.bind`,
-e 5 min de atraso é irrelevante para alocação de equipe. Adicionar (a) só se a
+e 15 min de atraso é irrelevante para alocação de equipe. Adicionar (a) só se a
 latência incomodar. Limite REST do Bitrix (2 req/s) comporta o snapshot com folga.
 
 ## 4. Contrato: `POST /api/integracao/bitrix`
@@ -138,7 +138,7 @@ Regras de aplicação:
 | `scripts/dev-local.js` (novo)           | Servidor local sem `vercel dev` (estáticos + `/api/*`), usado para testar tudo isto ponta a ponta       |
 | `api/rh/equipe.js` (vincular/desvincular) | Passa a usar `realocarColaboradores` (decisão 4) para a tela e o kanban terem o mesmo efeito           |
 | Telas Equipes / Colaboradores           | Item sincronizado ganha rótulo "Bitrix" e nome/equipe/ativo ficam só leitura ("mude no Bitrix")         |
-| n8n                                     | `Efrat - Ponto ⇐ Bitrix (snapshot Gerenciamento de Equipe)` (id `LCzd196pI029cTF8`, INATIVO): 5 min → lê tenant → REST → POST em `ponto_url` com `ponto_token`; sem `ponto_url` só monta (dry run). Colunas novas na Data Table `0plzFQOimeF5qncE`: `ponto_url`, `ponto_token`, `ponto_stage_sem_equipe` |
+| n8n                                     | `Efrat - Ponto ⇐ Bitrix (snapshot Gerenciamento de Equipe)` (id `LCzd196pI029cTF8`, ATIVO): 15 min → lê tenant → REST → monta snapshot e calcula hash → POST em `ponto_url` com `ponto_token` **só se o hash mudou** (ou execução manual, ou último envio há mais de 6 h) → grava `ponto_snapshot_hash`/`ponto_snapshot_ms` na linha do tenant quando o Ponto responde 2xx; sem `ponto_url` só monta (dry run). Colunas na Data Table `0plzFQOimeF5qncE`: `ponto_url`, `ponto_token`, `ponto_stage_sem_equipe`, `ponto_snapshot_hash`, `ponto_snapshot_ms` |
 | Testes                                  | `tests/unit/bitrix.test.js` (normalização, desempate, resumos). Ponta a ponta contra o banco pelo servidor local: criar/idempotência/plano preenchido/mover/fechar/renomear/snapshot vazio 409 — tudo passou e os dados sintéticos foram removidos |
 
 ## 6. Portal renomeado — CORRIGIDO em 09/09 (02:42 UTC)
@@ -176,7 +176,7 @@ etapas, os 69 cards e os campos do contato sem erro (seção 8).
 4. **Vincular/desvincular na tela do ponto passa a mexer na escala** (mesma função
    que o snapshot usa). Equipes/colaboradores sincronizados ficam só leitura na
    tela, com a orientação "mude no Bitrix".
-5. **Frequência: 5 min.**
+5. **Frequência: 15 min, envio só quando muda.** Desde 29/09/2026: o n8n calcula um hash do snapshot (etapas + cards + contatos; `alterado_em` só entra para contatos com mais de um card, onde o Ponto usa a data como desempate) e só faz o POST quando difere do último aceito. Sem isso o banco do Ponto (Neon Free, autosuspend de 5 min, cota de 100 CU-h/mês) ficava acordado 24/7 e estourou a cota em setembro. Reenvio forçado: execução manual no n8n (botão Executar) ou último envio há mais de 6 h — é o caminho para repovoar depois de "Zerar dados".
 
 ## 8. Levantamento da categoria 13 (feito em 09/09)
 
@@ -237,7 +237,7 @@ e rodando. Ainda em aberto:
 4. Dados demo: Configurações → **Zona de perigo** → "Ver o que seria apagado" →
    digitar ZERAR. Apaga tudo (marcações inclusive, com o trigger de imutabilidade
    desligado só dentro da transação) e mantém login, config, link e token; o
-   snapshot repovoa em até 5 min (`api/_lib/reset.js`, commit fd39541).
+   snapshot repovoa na próxima mudança no Bitrix, em até 6 h pelo reenvio periódico, ou na hora se alguém executar o workflow manualmente no n8n (`api/_lib/reset.js`, commit fd39541).
    Alternativa mais branda: `scripts/limpar-demo.js` (só desativa quem não é do Bitrix).
 
 Dry run e primeira rodada real confirmaram: 21 etapas, 69 cards, 67 contatos, 2,6 s.

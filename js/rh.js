@@ -2255,7 +2255,7 @@ export const Rh = {
         '<button class="v2btn" id="btnNovoUsuario">+ Novo usuário RH</button></div>' +
 
       '<div class="cfg-sec" style="border-color:#f0c4c0"><h2 style="color:var(--v2-vermelho)">Zona de perigo</h2>' +
-        '<p class="cap">Zerar os dados da empresa apaga marcações, correções, alocações, escalas, aparelhos, biometrias, colaboradores, equipes, locais e jornadas. Ficam: login e senha do RH, estes parâmetros, o link da empresa e o token de integração. Com a integração Bitrix ativa, equipes e colaboradores voltam na próxima sincronização (até 5 min), zerados; escalas e biometrias precisam ser refeitas.</p>' +
+        '<p class="cap">Zerar os dados da empresa apaga marcações, correções, alocações, escalas, aparelhos, biometrias, colaboradores, equipes, locais e jornadas. Ficam: login e senha do RH, estes parâmetros, o link da empresa e o token de integração. Com a integração Bitrix ativa, equipes e colaboradores voltam na próxima sincronização (na próxima mudança no Bitrix ou em até 6 h), zerados; escalas e biometrias precisam ser refeitas.</p>' +
         '<div id="areaZerar"><button class="v2btn danger" id="btnZerarPrevia">Ver o que seria apagado</button></div></div>';
 
     $('btnZerarPrevia').onclick = async () => {
