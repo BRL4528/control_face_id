@@ -1189,7 +1189,7 @@ export const Rh = {
 
       '<div class="fatos"><h2 style="margin:0 0 11px;font-size:14px;font-weight:600">Contexto do registro</h2>' +
         '<div class="g">' + fatos.map(f =>
-          '<div><div class="k">' + esc(f[0]) + '</div><div class="v">' + esc(f[1]) + '</div></div>').join('') + '</div></div>' +
+          '<div' + (f[0] === 'Motivo da revisão' ? ' style="grid-column:1/-1"' : '') + '><div class="k">' + esc(f[0]) + '</div><div class="v">' + esc(f[1]) + '</div></div>').join('') + '</div></div>' +
 
       (x.resolvida ? '' :
         '<div class="decisao"><h2>Decisão</h2>' +
