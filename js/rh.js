@@ -12,7 +12,7 @@ import {
   presencaPorEquipe, serieDiaria, pendenciasPorMotivo,
   exceptionsDoDia, TIPOS_EXCECAO,
   jornadaDaEquipe, horasEntradaPorEquipe, csvDe,
-  alertasDePlanejamento
+  alertasDePlanejamento, horasPorColaborador, fmtMinutos
 } from './regras.js';
 import { $, esc, mostrar, toast, hora, data } from './ui.js';
 
@@ -2005,6 +2005,7 @@ export const Rh = {
       '<tr><td><b>' + esc(j.nome) + '</b></td>' +
       '<td class="mono">' + esc(j.entrada) + ' → ' + esc(j.saida) + '</td>' +
       '<td>' + j.tolerancia_min + ' min</td>' +
+      '<td>' + (j.intervalo_min != null ? j.intervalo_min : 60) + ' min</td>' +
       '<td><span class="pill ' + (j.ativa ? 'ok' : 'mut') + '"><span class="dot"></span>' + (j.ativa ? 'Ativa' : 'Inativa') + '</span></td>' +
       '<td style="text-align:right"><button class="v2btn ghost mini" data-jed="' + esc(j.jornada_id) + '">Editar</button></td></tr>';
 
@@ -2024,8 +2025,8 @@ export const Rh = {
         '<div class="acoes"><button class="v2btn" id="btnNovaJornada">+ Nova jornada</button></div></div>' +
       '<div id="areaJornada"></div>' +
       '<div class="tbl-wrap" style="margin-bottom:16px"><table class="adtable"><thead><tr>' +
-        '<th>Jornada</th><th>Horário</th><th>Tolerância</th><th>Status</th><th></th></tr></thead><tbody>' +
-        (js.length ? js.map(linhaJornada).join('') : '<tr><td colspan="5" style="padding:30px;text-align:center;color:#64748b">Nenhuma jornada. Crie a primeira.</td></tr>') +
+        '<th>Jornada</th><th>Horário</th><th>Tolerância</th><th>Intervalo</th><th>Status</th><th></th></tr></thead><tbody>' +
+        (js.length ? js.map(linhaJornada).join('') : '<tr><td colspan="6" style="padding:30px;text-align:center;color:#64748b">Nenhuma jornada. Crie a primeira.</td></tr>') +
       '</tbody></table></div>' +
       '<h2 style="font-size:16px;margin:0 0 12px">Jornada e supervisor por equipe</h2>' +
       '<div class="tbl-wrap"><table class="adtable"><thead><tr>' +
@@ -2062,6 +2063,7 @@ export const Rh = {
           '<div><label class="lb2">Entrada</label><input class="inp" id="jEntrada" type="time" value="' + esc(j.entrada || '07:00') + '"></div>' +
           '<div><label class="lb2">Saída</label><input class="inp" id="jSaida" type="time" value="' + esc(j.saida || '17:00') + '"></div>' +
           '<div><label class="lb2">Tolerância (min)</label><input class="inp" id="jTol" type="number" min="0" max="120" value="' + (j.tolerancia_min != null ? j.tolerancia_min : 10) + '"></div>' +
+          '<div><label class="lb2">Intervalo / almoço (min)</label><input class="inp" id="jInt" type="number" min="0" max="240" value="' + (j.intervalo_min != null ? j.intervalo_min : 60) + '"></div>' +
         '</div>' +
         '<div class="row2" style="margin-top:14px">' +
           '<button class="act" id="btnSalvarJornada">Salvar</button>' +
@@ -2073,7 +2075,8 @@ export const Rh = {
       if (!nome) { toast('Informe o nome', 'warn'); return; }
       const r = await ApiRh.jornada(this.token, {
         jornada_id: j.jornada_id, nome, entrada: $('jEntrada').value, saida: $('jSaida').value,
-        tolerancia_min: Number($('jTol').value) || 10
+        tolerancia_min: Number($('jTol').value) || 10,
+        intervalo_min: Math.max(0, Number($('jInt').value) || 0)
       });
       if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
       toast('Jornada salva', 'ok');
@@ -2120,8 +2123,24 @@ export const Rh = {
             '<tr><td>Pendências abertas</td><td style="text-align:right"><b>' + ind.pendentes + '</b></td></tr>' +
             '<tr><td>Ativos sem biometria</td><td style="text-align:right"><b>' + ind.semBiometria + '</b></td></tr>' +
           '</tbody></table></div>' +
+      '</div>' +
+      '<div class="v2card" style="padding:15px;margin-top:16px" id="hrCard">' +
+        '<h2 style="margin:0 0 4px;font-size:14px;font-weight:600">Horas por colaborador</h2>' +
+        '<p style="font-size:12px;color:#64748b;margin:0 0 12px">Trabalhadas × previstas pela jornada da equipe (descontado o intervalo). ' +
+          'Só marcações aprovadas entram no saldo; pendentes e dias incompletos ficam sinalizados.</p>' +
+        '<div class="form-grid" style="margin-bottom:12px">' +
+          '<div><label class="lb2">Colaborador</label><select class="inp" id="hrPessoa"><option value="">Todos</option>' +
+            (d.pessoas || []).slice().sort((a, b) => a.nome.localeCompare(b.nome))
+              .map(p => '<option value="' + p.pessoa_id + '">' + esc(p.nome) + '</option>').join('') + '</select></div>' +
+          '<div><label class="lb2">De</label><input class="inp" type="date" id="hrDe" value="' + hoje.slice(0, 8) + '01"></div>' +
+          '<div><label class="lb2">Até</label><input class="inp" type="date" id="hrAte" value="' + hoje + '"></div>' +
+          '<div style="display:flex;align-items:flex-end;gap:8px"><button class="v2btn" id="btnHoras">Gerar</button>' +
+            '<button class="v2btn ghost" id="btnCsvHoras" disabled>Exportar CSV</button></div>' +
+        '</div>' +
+        '<div id="hrSaida"><p class="nota">Escolha o período e clique em Gerar (até 93 dias).</p></div>' +
       '</div>';
 
+    $('btnHoras').onclick = () => this.gerarHoras();
     $('btnCsvMarc').onclick = () => {
       const linhas = (d.marcacoes || []).map(m => [
         m.marcado_dia, hora(m.marcado_em), this.nomeDe(m.pessoa_id),
@@ -2138,6 +2157,63 @@ export const Rh = {
     };
 
     this.carregarGraficos({ serie, equipes: ind.equipes, motivos, alarme: cfg.alarmeManual || 20 });
+  },
+
+  /** Relatório de horas: busca o período na API e calcula no cliente (regras.js). */
+  async gerarHoras() {
+    const de = $('hrDe').value, ate = $('hrAte').value, pessoaId = $('hrPessoa').value;
+    if (!de || !ate) { toast('Informe o período', 'warn'); return; }
+    const btn = $('btnHoras'); btn.disabled = true;
+    $('hrSaida').innerHTML = '<p class="nota">Calculando…</p>';
+    const r = await ApiRh.horas(this.token, { de, ate });
+    btn.disabled = false;
+    if (!r.ok) { $('hrSaida').innerHTML = '<p class="nota">' + esc(r.erro || 'Falha ao buscar') + '</p>'; return; }
+    const d = this.dados, jp = this.jornadaPadrao();
+    const linhas = horasPorColaborador({
+      marcacoes: r.dados.marcacoes, alocacoes: r.dados.alocacoes, pessoas: d.pessoas, equipes: d.equipes, jornadas: d.jornadas,
+      jornadaPadrao: jp, de, ate, hoje: this.hojeServidor(), fuso: (d.empresa || {}).fuso, pessoaId: pessoaId || null
+    });
+    this.horasLinhas = { linhas, de, ate };
+    $('btnCsvHoras').disabled = !linhas.length;
+    $('btnCsvHoras').onclick = () => this.csvHoras();
+    if (!linhas.length) { $('hrSaida').innerHTML = '<p class="nota">Sem marcações nem escala no período.</p>'; return; }
+    const ST = { ok: 'OK', falta: 'Falta', incompleto: 'Incompleto', a_confirmar: 'A confirmar', sem_escala: 'Sem escala', em_andamento: 'Em andamento' };
+    const saldoCls = v => v < 0 ? ' style="color:#b42318"' : v > 0 ? ' style="color:#12805c"' : '';
+    const diasHtml = l => '<tr class="hr-det hide" data-det="' + esc(l.pessoa_id) + '"><td colspan="9" style="background:#f8fafc;padding:8px 12px">' +
+      '<table class="adtable"><thead><tr><th>Dia</th><th>Equipe</th><th>Previstas</th><th>Trabalhadas</th><th>Saldo</th><th>Atraso</th><th>Situação</th></tr></thead><tbody>' +
+      l.dias.map(x => '<tr><td>' + esc(this.dataCurta(x.dia)) + '</td><td>' + esc(this.nomeEquipe(x.equipe_id)) + '</td>' +
+        '<td class="mono">' + fmtMinutos(x.previsto) + '</td><td class="mono">' + fmtMinutos(x.trabalhado) + '</td>' +
+        '<td class="mono"' + (x.saldo != null ? saldoCls(x.saldo) : '') + '>' + (x.saldo != null ? fmtMinutos(x.saldo, true) : '—') + '</td>' +
+        '<td class="mono">' + (x.atraso ? fmtMinutos(x.atraso) : '—') + '</td>' +
+        '<td>' + ST[x.status] + (x.a_confirmar ? ' · ' + fmtMinutos(x.a_confirmar) + ' pendentes' : '') + '</td></tr>').join('') +
+      '</tbody></table></td></tr>';
+    $('hrSaida').innerHTML = '<div class="tbl-wrap"><table class="adtable"><thead><tr>' +
+      '<th>Colaborador</th><th>Previstas</th><th>Trabalhadas</th><th>Saldo</th><th>Atrasos</th><th>Faltas</th><th>Incompletos</th><th>A confirmar</th><th></th></tr></thead><tbody>' +
+      linhas.map(l => { const t = l.totais;
+        return '<tr><td><b>' + esc(l.nome) + '</b><div class="nota">Matrícula ' + esc(l.matricula) + '</div></td>' +
+          '<td class="mono">' + fmtMinutos(t.previsto) + '</td><td class="mono">' + fmtMinutos(t.trabalhado) + '</td>' +
+          '<td class="mono"' + saldoCls(t.saldo) + '><b>' + fmtMinutos(t.saldo, true) + '</b></td>' +
+          '<td>' + (t.atrasos ? t.atrasos + ' · ' + fmtMinutos(t.atraso_min) : '—') + '</td>' +
+          '<td>' + (t.faltas || '—') + '</td><td>' + (t.incompletos || '—') + '</td>' +
+          '<td>' + (t.dias_a_confirmar ? t.dias_a_confirmar + ' dia(s) · ' + fmtMinutos(t.a_confirmar) : '—') + '</td>' +
+          '<td style="text-align:right"><button class="v2btn ghost mini" data-hr-det="' + esc(l.pessoa_id) + '">Dias</button></td></tr>' + diasHtml(l); }).join('') +
+      '</tbody></table></div>';
+    $('hrSaida').querySelectorAll('[data-hr-det]').forEach(b => {
+      b.onclick = () => $('hrSaida').querySelector('[data-det="' + b.dataset.hrDet + '"]').classList.toggle('hide');
+    });
+  },
+
+  csvHoras() {
+    const h = this.horasLinhas; if (!h) return;
+    const ST = { ok: 'OK', falta: 'Falta', incompleto: 'Incompleto', a_confirmar: 'A confirmar', sem_escala: 'Sem escala', em_andamento: 'Em andamento' };
+    const linhas = [];
+    for (const l of h.linhas) for (const x of l.dias) {
+      linhas.push([l.nome, l.matricula, x.dia, this.nomeEquipe(x.equipe_id), fmtMinutos(x.previsto), fmtMinutos(x.trabalhado),
+        x.saldo != null ? fmtMinutos(x.saldo, true) : '', x.atraso ? fmtMinutos(x.atraso) : '', ST[x.status],
+        x.a_confirmar ? fmtMinutos(x.a_confirmar) : '']);
+    }
+    this.baixarCsv('horas-' + h.de + '_' + h.ate + '.csv',
+      ['Colaborador', 'Matrícula', 'Dia', 'Equipe', 'Previstas', 'Trabalhadas', 'Saldo', 'Atraso', 'Situação', 'A confirmar'], linhas);
   },
 
   baixarCsv(nome, cabecalho, linhas) {

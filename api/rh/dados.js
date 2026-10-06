@@ -46,7 +46,7 @@ export default async function handler(req, res) {
     sql`SELECT id AS local_id, nome, lat, lng, raio_m FROM local
         WHERE empresa_id = ${empresa} AND ativo = true ORDER BY nome`,
     sql`SELECT id AS jornada_id, nome, to_char(entrada,'HH24:MI') AS entrada, to_char(saida,'HH24:MI') AS saida,
-               tolerancia_min, ativa FROM jornada WHERE empresa_id = ${empresa} ORDER BY nome`,
+               tolerancia_min, intervalo_min, ativa FROM jornada WHERE empresa_id = ${empresa} ORDER BY nome`,
     sql`SELECT nome, fuso, link_token, (integracao_token_hash IS NOT NULL) AS integracao_ativa FROM empresa WHERE id = ${empresa} LIMIT 1`,
     sql`SELECT dados FROM config_empresa WHERE empresa_id = ${empresa} LIMIT 1`,
     sql`SELECT id AS usuario_id, usuario, nome, ativo, trocar_senha,

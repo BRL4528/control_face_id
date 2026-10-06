@@ -533,3 +533,125 @@ function alerta(tipo, id, pessoaId, equipeId, alvo) {
     marcacao: null, alocacao: null, alvo, planejamento: true
   };
 }
+
+/* ------------------------------------------------ relatório de horas */
+
+const JORNADA_FIXA = { entrada: '07:00', saida: '17:00', tolerancia_min: 10, intervalo_min: 60 };
+const emMin = hhmm => { const [h, m] = String(hhmm).split(':'); return Number(h) * 60 + Number(m); };
+
+/** Minutos desde 00:00 do relógio local no fuso informado. */
+function minutoLocal(iso, fuso) {
+  try {
+    const p = new Intl.DateTimeFormat('en-GB', { timeZone: fuso || 'America/Campo_Grande', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+      .formatToParts(new Date(iso));
+    return Number(p.find(x => x.type === 'hour').value) * 60 + Number(p.find(x => x.type === 'minute').value);
+  } catch { const d = new Date(iso); return d.getUTCHours() * 60 + d.getUTCMinutes(); }
+}
+
+/**
+ * Emparelha entrada→saída na ordem do dia e soma os minutos dos pares fechados.
+ * `incompleto`: sobrou entrada sem saída, saída sem entrada ou entrada repetida —
+ * nunca se inventa o horário que falta.
+ */
+export function minutosTrabalhados(marcacoes) {
+  const ord = (marcacoes || []).filter(m => m && m.marcado_em)
+    .slice().sort((a, b) => String(a.marcado_em).localeCompare(String(b.marcado_em)));
+  let aberta = null, ms = 0, incompleto = false;
+  for (const m of ord) {
+    const t = new Date(m.marcado_em).getTime();
+    if (m.tipo === 'entrada') { if (aberta == null) aberta = t; else incompleto = true; }
+    else if (aberta != null) { ms += t - aberta; aberta = null; }
+    else incompleto = true;
+  }
+  if (aberta != null) incompleto = true;
+  return { minutos: Math.round(ms / 60000), incompleto };
+}
+
+/**
+ * Relatório de horas por colaborador no período [de, ate] (YYYY-MM-DD).
+ * Previsto = (saída − entrada − intervalo) da jornada da equipe, só em dia com
+ * alocação. Trabalhado = pares entrada→saída. Só contam marcações aceitas;
+ * `estado:'pendente'` fica fora do saldo (a_confirmar) e `'rejeitada'` é ignorada.
+ * Dia sem saldo calculável (incompleto ou com pendência) não entra nos totais de
+ * previsto/trabalhado — aparece sinalizado. Dia de hoje sem batida = em andamento.
+ *
+ * marcacoes: { pessoa_id, equipe_id, tipo, marcado_em, marcado_dia, estado }
+ * alocacoes: { dia, colaborador_id, equipe_id }
+ */
+export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jornadas, jornadaPadrao, de, ate, hoje, fuso, pessoaId }) {
+  const jornadaDe = equipeId => {
+    const eq = (equipes || []).find(e => e.equipe_id === equipeId);
+    const j = (eq && eq.jornada_id && (jornadas || []).find(x => x.jornada_id === eq.jornada_id)) || jornadaPadrao || null;
+    return Object.assign({}, JORNADA_FIXA, j ? {
+      entrada: j.entrada, saida: j.saida,
+      tolerancia_min: j.tolerancia_min != null ? j.tolerancia_min : JORNADA_FIXA.tolerancia_min,
+      intervalo_min: j.intervalo_min != null ? j.intervalo_min : JORNADA_FIXA.intervalo_min
+    } : {});
+  };
+  const porPessoa = new Map();
+  const bolsa = id => {
+    if (!porPessoa.has(id)) porPessoa.set(id, { marcas: new Map(), aloc: new Map() });
+    return porPessoa.get(id);
+  };
+  const dentro = d => d >= de && d <= ate;
+  for (const m of (marcacoes || [])) {
+    if (!m.pessoa_id || m.estado === 'rejeitada' || !dentro(m.marcado_dia)) continue;
+    if (pessoaId && m.pessoa_id !== pessoaId) continue;
+    const b = bolsa(m.pessoa_id);
+    if (!b.marcas.has(m.marcado_dia)) b.marcas.set(m.marcado_dia, []);
+    b.marcas.get(m.marcado_dia).push(m);
+  }
+  for (const a of (alocacoes || [])) {
+    if (!a.colaborador_id || !dentro(a.dia)) continue;
+    if (pessoaId && a.colaborador_id !== pessoaId) continue;
+    bolsa(a.colaborador_id).aloc.set(a.dia, a.equipe_id);
+  }
+
+  const linhas = [];
+  for (const [id, b] of porPessoa) {
+    const pessoa = (pessoas || []).find(p => p.pessoa_id === id) || { nome: id, matricula: '' };
+    const tot = { previsto: 0, trabalhado: 0, saldo: 0, a_confirmar: 0, faltas: 0, atrasos: 0, atraso_min: 0, incompletos: 0, dias_a_confirmar: 0, dias: 0 };
+    const dias = [];
+    const todos = new Set([...b.marcas.keys(), ...b.aloc.keys()]);
+    for (const dia of [...todos].sort()) {
+      const marcas = b.marcas.get(dia) || [];
+      const equipeId = b.aloc.get(dia) || (marcas[0] && marcas[0].equipe_id) || null;
+      const jor = jornadaDe(equipeId);
+      const escalado = b.aloc.has(dia);
+      const previsto = escalado ? Math.max(0, emMin(jor.saida) - emMin(jor.entrada) - jor.intervalo_min) : 0;
+      const aceitas = marcas.filter(m => m.estado !== 'pendente');
+      const pendentes = marcas.length - aceitas.length;
+      const ok = minutosTrabalhados(aceitas);
+      const todas = minutosTrabalhados(marcas);
+      const primeira = marcas.filter(m => m.tipo === 'entrada').map(m => m.marcado_em).sort()[0];
+      const atraso = escalado && primeira ? Math.max(0, minutoLocal(primeira, fuso) - emMin(jor.entrada)) : 0;
+      const atrasado = atraso > jor.tolerancia_min;
+
+      let status = 'ok', saldo = null;
+      if (!marcas.length) status = dia >= hoje ? 'em_andamento' : 'falta';
+      else if (pendentes) status = 'a_confirmar';
+      else if (ok.incompleto) status = dia >= hoje ? 'em_andamento' : 'incompleto';
+      else if (!escalado) status = 'sem_escala';
+      if (status === 'ok' || status === 'sem_escala' || status === 'falta') saldo = ok.minutos - previsto;
+
+      const aConfirmar = pendentes ? Math.max(0, todas.minutos - ok.minutos) : 0;
+      if (saldo != null) { tot.previsto += previsto; tot.trabalhado += ok.minutos; tot.saldo += saldo; }
+      if (status === 'falta') tot.faltas++;
+      if (status === 'incompleto') tot.incompletos++;
+      if (status === 'a_confirmar') { tot.dias_a_confirmar++; tot.a_confirmar += aConfirmar; }
+      if (atrasado && status !== 'em_andamento') { tot.atrasos++; tot.atraso_min += atraso; }
+      if (marcas.length) tot.dias++;
+      dias.push({ dia, equipe_id: equipeId, status, previsto, trabalhado: ok.minutos, saldo, a_confirmar: aConfirmar,
+                  atraso: atrasado ? atraso : 0, marcacoes: marcas.length });
+    }
+    linhas.push({ pessoa_id: id, nome: pessoa.nome, matricula: pessoa.matricula, totais: tot, dias });
+  }
+  return linhas.sort((a, b) => String(a.nome).localeCompare(String(b.nome)));
+}
+
+/** 510 → "8h30"; com `sinal`, 65 → "+1h05" e -20 → "-0h20". */
+export function fmtMinutos(min, sinal) {
+  const n = Math.round(Number(min) || 0), a = Math.abs(n);
+  const t = Math.floor(a / 60) + 'h' + String(a % 60).padStart(2, '0');
+  return sinal ? (n < 0 ? '-' : '+') + t : t;
+}

@@ -1,6 +1,6 @@
 // Jornadas (turnos) da empresa. Cria, edita ou desativa uma jornada; e associa
 // uma jornada + supervisor a uma equipe. Mesmo endpoint para os dois papéis:
-//   • { nome, entrada, saida, tolerancia_min } → cria/edita jornada
+//   • { nome, entrada, saida, tolerancia_min, intervalo_min } → cria/edita jornada
 //   • { equipe_id, jornada_id, supervisor_id } → associa à equipe
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
@@ -29,15 +29,16 @@ export default async function handler(req, res) {
   const entrada = HORA.test(b.entrada) ? b.entrada : '07:00';
   const saida = HORA.test(b.saida) ? b.saida : '17:00';
   const tol = Math.max(0, Math.min(Number(b.tolerancia_min) || 10, 120));
+  const intervalo = b.intervalo_min === 0 || b.intervalo_min === '0' ? 0 : Math.max(0, Math.min(Number(b.intervalo_min) || 60, 240));
 
   if (b.jornada_id) {
     await sql`UPDATE jornada SET nome=${nome}, entrada=${entrada}, saida=${saida},
-              tolerancia_min=${tol}, ativa=${b.ativa === false ? false : true}
+              tolerancia_min=${tol}, intervalo_min=${intervalo}, ativa=${b.ativa === false ? false : true}
               WHERE id=${b.jornada_id} AND empresa_id=${rh.empresa_id}`;
     return ok(res, { jornada_id: b.jornada_id, atualizado: true });
   }
   const id = novoId();
-  await sql`INSERT INTO jornada (id, empresa_id, nome, entrada, saida, tolerancia_min)
-            VALUES (${id}, ${rh.empresa_id}, ${nome}, ${entrada}, ${saida}, ${tol})`;
+  await sql`INSERT INTO jornada (id, empresa_id, nome, entrada, saida, tolerancia_min, intervalo_min)
+            VALUES (${id}, ${rh.empresa_id}, ${nome}, ${entrada}, ${saida}, ${tol}, ${intervalo})`;
   return ok(res, { jornada_id: id, criado: true });
 }

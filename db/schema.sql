@@ -234,6 +234,8 @@ CREATE TABLE IF NOT EXISTS jornada (
   criada_em      timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS ix_jornada_empresa ON jornada (empresa_id);
+-- Pausa (almoço) descontada das horas previstas no relatório de horas.
+ALTER TABLE jornada ADD COLUMN IF NOT EXISTS intervalo_min integer NOT NULL DEFAULT 60;
 
 -- A equipe ganha jornada e supervisor (ambos opcionais). Colunas aditivas para
 -- não reescrever o histórico; equipe antiga continua válida com NULL.
