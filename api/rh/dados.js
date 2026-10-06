@@ -22,7 +22,7 @@ export default async function handler(req, res) {
   const empresa = rh.empresa_id;
   const sql = db();
 
-  const [equipes, pessoas, marcacoes, alocacoes, locais, jornadas, empresaRow, configRow, usuariosRh, correcoes, planos, aparelhosPendentes] = await Promise.all([
+  const [equipes, pessoas, marcacoes, alocacoes, locais, jornadas, empresaRow, configRow, usuariosRh, correcoes, planos, aparelhosPendentes, papeis] = await Promise.all([
     sql`SELECT id AS equipe_id, nome, ativo, jornada_id, supervisor_id, local_id, bitrix_stage_id FROM equipe WHERE empresa_id = ${empresa} ORDER BY nome`,
     sql`SELECT c.id AS pessoa_id, c.nome, c.matricula, c.papel, c.equipe_padrao AS equipe_id, c.ativo, c.bitrix_contact_id,
                EXISTS(SELECT 1 FROM template_facial t WHERE t.colaborador_id = c.id AND t.estado='ativo') AS tem_biometria,
@@ -80,7 +80,10 @@ export default async function handler(req, res) {
                    AND NOT EXISTS (SELECT 1 FROM correcao co WHERE co.alvo_tipo='marcacao' AND co.alvo_id=m.id_cliente)), '[]'::json) AS marcacoes
         FROM dispositivo d
         WHERE d.empresa_id = ${empresa} AND d.estado = 'pendente' AND d.ativo = true
-        ORDER BY d.pareado_em DESC`
+        ORDER BY d.pareado_em DESC`,
+    // Papéis personalizados + quantos colaboradores usam cada um.
+    sql`SELECT p.id, p.nome, p.ativo, (SELECT count(*)::int FROM colaborador c WHERE c.empresa_id = p.empresa_id AND c.papel = p.id) AS em_uso
+        FROM papel p WHERE p.empresa_id = ${empresa} ORDER BY lower(p.nome)`
   ]);
 
   // "Hoje" no fuso da EMPRESA, não em UTC: às 21h em Campo Grande já é amanhã em
@@ -100,7 +103,7 @@ export default async function handler(req, res) {
     periodo_dias: dias,
     servidor_hora: new Date().toISOString(),
     hoje,                     // 'YYYY-MM-DD' no fuso da empresa — o front usa este, não o UTC
-    equipes, pessoas, marcacoes, locais, jornadas, planos,
+    equipes, pessoas, marcacoes, locais, jornadas, planos, papeis,
     usuarios_rh: usuariosRh, correcoes,
     alocacoes,                 // janela ontem..+30 (tabs de dia + alertas de planejamento)
     alocacoes_hoje: alocacoesHoje,

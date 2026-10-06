@@ -339,3 +339,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_colab_bitrix_contact ON colaborador (empres
 -- Token que autentica o robô (n8n) em /api/integracao/bitrix. Só o sha256 fica
 -- no banco, como a credencial do aparelho; o RH vê o token uma vez ao gerar.
 ALTER TABLE empresa ADD COLUMN IF NOT EXISTS integracao_token_hash text;
+
+-- ═══════════════════════════════════════════════════════ papéis do colaborador
+-- Papéis personalizados da empresa (rótulos que o RH escolhe no cadastro do
+-- colaborador). colaborador.papel guarda o id daqui; os de sistema (colaborador,
+-- lider, gestor) não ficam na tabela. Só 'gestor' tem comportamento próprio.
+CREATE TABLE IF NOT EXISTS papel (
+  id         text PRIMARY KEY,
+  empresa_id text NOT NULL REFERENCES empresa(id) ON DELETE CASCADE,
+  nome       text NOT NULL,
+  ativo      boolean NOT NULL DEFAULT true,
+  criado_em  timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_papel_nome ON papel (empresa_id, lower(nome));

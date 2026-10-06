@@ -285,6 +285,17 @@ export const Rh = {
     const p = (this.dados.pessoas || []).find(x => x.pessoa_id === id);
     return p ? p.nome : id;
   },
+  /** Papéis de sistema + personalizados da empresa (id → nome). `gestor` tem comportamento próprio. */
+  PAPEIS_SISTEMA: [{ id: 'colaborador', nome: 'Colaborador' }, { id: 'lider', nome: 'Líder de equipe' }, { id: 'gestor', nome: 'Gestor' }],
+  papeisAtivos(atual) {
+    const custom = (this.dados.papeis || []).filter(p => p.ativo || p.id === atual);
+    return this.PAPEIS_SISTEMA.concat(custom.map(p => ({ id: p.id, nome: p.nome + (p.ativo ? '' : ' (desativado)') })));
+  },
+  nomePapel(id) {
+    const x = this.PAPEIS_SISTEMA.concat(this.dados.papeis || []).find(p => p.id === id);
+    return x ? x.nome : '';
+  },
+
   nomeEquipe(id) {
     const e = (this.dados.equipes || []).find(x => x.equipe_id === id);
     return e ? e.nome : '—';
@@ -600,7 +611,7 @@ export const Rh = {
       return '<div class="eqp-row">' +
         '<span class="av' + (p.tem_biometria ? '' : ' bad') + '">' + esc(this.iniciais(p.nome)) + '</span>' +
         '<div class="eqp-quem"><div class="nm">' + esc(p.nome) + (deOutra ? ' <span class="pill mut" style="padding:0 7px">ajuste de hoje · ' + esc(this.nomeEquipe(p.equipe_id)) + '</span>' : '') +
-          (p.papel === 'gestor' ? ' <span class="tag">gestor</span>' : '') + (p.papel === 'lider' ? ' <span class="tag">líder</span>' : '') + '</div>' +
+          (p.papel && p.papel !== 'colaborador' ? ' <span class="tag">' + esc(this.nomePapel(p.papel).toLowerCase()) + '</span>' : '') + '</div>' +
           '<div class="mt">' + (ent ? 'Entrada <b class="mono">' + esc(hora(ent.marcado_em)) + '</b>' : 'Sem entrada') + (sai ? ' · Saída <b class="mono">' + esc(hora(sai.marcado_em)) + '</b>' : '') +
             (minhas.length ? ' · <span class="badfg">' + esc(minhas.map(x => x.rotulo).join(', ')) + '</span>' : '') + '</div></div>' +
         '<span class="pill ' + cls + '"><span class="dot"></span>' + esc(estado) + '</span>' +
@@ -1342,8 +1353,7 @@ export const Rh = {
       return '<tr>' +
         '<td><div class="cel-nome"><span class="av' + (semBio ? ' bad' : '') + '">' + esc(this.iniciais(p.nome)) + '</span>' +
           '<span><span class="n">' + esc(p.nome) +
-            (p.papel === 'gestor' ? ' <span class="pill mut" style="padding:0 6px">gestor</span>' : '') +
-            (p.papel === 'lider' ? ' <span class="pill mut" style="padding:0 6px">líder de equipe</span>' : '') +
+            (p.papel && p.papel !== 'colaborador' ? ' <span class="pill mut" style="padding:0 6px">' + esc(this.nomePapel(p.papel)) + '</span>' : '') +
             (p.bitrix_contact_id ? ' <span class="pill mut" style="padding:0 6px" title="Sincronizado do Bitrix">Bitrix</span>' : '') +
             (p.ativo ? '' : ' <span class="pill mut" style="padding:0 6px">inativo</span>') + '</span>' +
           '<span class="m">Matrícula ' + esc(p.matricula) + '</span></span></div></td>' +
@@ -1508,7 +1518,7 @@ export const Rh = {
           '<div><label class="lb2">Equipe</label><select class="inp" id="pEquipe">' +
             eqs.map(e => opt(e.equipe_id, e.nome, p.equipe_id === e.equipe_id)).join('') + '</select></div>' +
           '<div><label class="lb2">Papel</label><select class="inp" id="pPapel">' +
-            opt('colaborador', 'Colaborador', p.papel !== 'gestor' && p.papel !== 'lider') + opt('lider', 'Líder de equipe', p.papel === 'lider') + opt('gestor', 'Gestor', p.papel === 'gestor') + '</select></div>' +
+            this.papeisAtivos(p.papel).map(x => opt(x.id, x.nome, (p.papel || 'colaborador') === x.id)).join('') + '</select></div>' +
           (editando ? '<div><label class="lb2">Status</label><select class="inp" id="pAtivo">' +
             opt('true', 'Ativo', p.ativo !== false) + opt('false', 'Inativo', p.ativo === false) + '</select></div>' : '') +
         '</div>' +
@@ -1901,7 +1911,7 @@ export const Rh = {
   htmlMembro(p, mostrarEquipe) {
     return '<div class="eq-membro"><span class="av">' + esc(this.iniciais(p.nome)) + '</span>' +
       '<div style="flex:1;min-width:0"><div class="nm">' + esc(p.nome) + '</div>' +
-        '<div class="mt">Matrícula ' + esc(p.matricula) + (p.papel === 'gestor' ? ' · gestor' : '') + (p.papel === 'lider' ? ' · líder de equipe' : '') +
+        '<div class="mt">Matrícula ' + esc(p.matricula) + (p.papel && p.papel !== 'colaborador' ? ' · ' + esc(this.nomePapel(p.papel).toLowerCase()) : '') +
           (mostrarEquipe && p.equipe_id ? ' · ' + esc(this.nomeEquipe(p.equipe_id)) : '') + '</div></div>' +
       (p.bitrix_contact_id
         ? '<span class="mt" title="A equipe desta pessoa é o card dela no Bitrix">via Bitrix</span>'
@@ -2327,6 +2337,20 @@ export const Rh = {
         '</div>' +
         '<button class="act" id="btnSalvarEmp" style="margin-top:14px;width:auto;padding:10px 18px">Salvar empresa</button></div>' +
 
+      '<div class="cfg-sec"><h2>Papéis dos colaboradores</h2>' +
+        '<p class="cap">Os papéis aparecem no cadastro do colaborador. Colaborador, Líder de equipe e Gestor são do sistema (o Gestor também marca ponto pelo painel e tem as batidas revisadas). Os que você criar abaixo são rótulos para organizar a equipe.</p>' +
+        '<div class="tbl-wrap" style="margin-bottom:12px"><table class="adtable"><thead><tr><th>Papel</th><th>Colaboradores</th><th>Status</th><th></th></tr></thead><tbody>' +
+          this.PAPEIS_SISTEMA.map(x => '<tr><td><b>' + esc(x.nome) + '</b> <span class="nota">sistema</span></td><td>' +
+            (this.dados.pessoas || []).filter(p => (p.papel || 'colaborador') === x.id).length + '</td><td><span class="pill ok"><span class="dot"></span>Ativo</span></td><td></td></tr>').join('') +
+          (this.dados.papeis || []).map(x => '<tr><td><b>' + esc(x.nome) + '</b></td><td>' + x.em_uso + '</td>' +
+            '<td><span class="pill ' + (x.ativo ? 'ok' : 'mut') + '"><span class="dot"></span>' + (x.ativo ? 'Ativo' : 'Desativado') + '</span></td>' +
+            '<td style="text-align:right;white-space:nowrap"><button class="v2btn ghost mini" data-papel-ren="' + esc(x.id) + '">Renomear</button> ' +
+              '<button class="v2btn ghost mini" data-papel-ativo="' + esc(x.id) + '" data-ativo="' + (x.ativo ? '0' : '1') + '">' + (x.ativo ? 'Desativar' : 'Reativar') + '</button> ' +
+              (x.em_uso ? '' : '<button class="v2btn ghost mini" data-papel-exc="' + esc(x.id) + '">Excluir</button>') + '</td></tr>').join('') +
+        '</tbody></table></div>' +
+        '<div class="eq-vincular"><input class="inp" id="papelNovo" maxlength="60" placeholder="Novo papel (ex.: Encarregado, Eletricista, Estagiário)" style="margin:0">' +
+          '<button class="v2btn" id="btnNovoPapel">+ Adicionar papel</button></div></div>' +
+
       '<div class="cfg-sec"><h2>Usuários do RH</h2>' +
         '<p class="cap">Crie acessos para a equipe de RH. A senha temporária aparece uma vez — repasse com segurança.</p>' +
         '<div class="tbl-wrap" style="margin-bottom:12px"><table class="adtable"><thead><tr>' +
@@ -2338,6 +2362,31 @@ export const Rh = {
       '<div class="cfg-sec" style="border-color:#f0c4c0"><h2 style="color:var(--v2-vermelho)">Zona de perigo</h2>' +
         '<p class="cap">Zerar os dados da empresa apaga marcações, correções, alocações, escalas, aparelhos, biometrias, colaboradores, equipes, locais e jornadas. Ficam: login e senha do RH, estes parâmetros, o link da empresa e o token de integração. Com a integração Bitrix ativa, equipes e colaboradores voltam na próxima sincronização (na próxima mudança no Bitrix ou em até 6 h), zerados; escalas e biometrias precisam ser refeitas.</p>' +
         '<div id="areaZerar"><button class="v2btn danger" id="btnZerarPrevia">Ver o que seria apagado</button></div></div>';
+
+    const chamarPapel = async (corpo, ok) => {
+      const r = await ApiRh.papel(this.token, corpo);
+      if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+      toast(ok, 'ok'); await this.recarregar();
+    };
+    $('btnNovoPapel').onclick = () => {
+      const nome = $('papelNovo').value.trim();
+      if (!nome) { toast('Informe o nome do papel', 'warn'); return; }
+      chamarPapel({ nome }, 'Papel criado');
+    };
+    $('papelNovo').onkeydown = e => { if (e.key === 'Enter') $('btnNovoPapel').click(); };
+    $('rh-config').querySelectorAll('[data-papel-ren]').forEach(b => {
+      b.onclick = () => {
+        const atual = (this.dados.papeis || []).find(x => x.id === b.dataset.papelRen);
+        const nome = prompt('Novo nome do papel:', atual ? atual.nome : '');
+        if (nome && nome.trim()) chamarPapel({ papel_id: b.dataset.papelRen, nome: nome.trim() }, 'Papel renomeado');
+      };
+    });
+    $('rh-config').querySelectorAll('[data-papel-ativo]').forEach(b => {
+      b.onclick = () => chamarPapel({ papel_id: b.dataset.papelAtivo, ativo: b.dataset.ativo === '1' }, b.dataset.ativo === '1' ? 'Papel reativado' : 'Papel desativado');
+    });
+    $('rh-config').querySelectorAll('[data-papel-exc]').forEach(b => {
+      b.onclick = () => { if (confirm('Excluir este papel?')) chamarPapel({ papel_id: b.dataset.papelExc, excluir: true }, 'Papel excluído'); };
+    });
 
     $('btnZerarPrevia').onclick = async () => {
       const btn = $('btnZerarPrevia'); btn.disabled = true;

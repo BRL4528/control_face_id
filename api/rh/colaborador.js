@@ -15,12 +15,19 @@ export default async function handler(req, res) {
   const nome = String(b.nome || '').trim();
   const matricula = String(b.matricula || '').trim();
   if (!nome || !matricula) return erro(res, 400, 'CORPO_INVALIDO', 'nome e matrícula obrigatórios');
-  const papel = ['gestor', 'lider'].includes(b.papel) ? b.papel : 'colaborador';
+  const papelPedido = String(b.papel || 'colaborador');
   const equipeId = b.equipe_id || null;
   const sql = db();
 
   const existentes = await sql`
-    SELECT id, bitrix_contact_id FROM colaborador WHERE empresa_id = ${rh.empresa_id} AND matricula = ${matricula} LIMIT 1`;
+    SELECT id, bitrix_contact_id, papel FROM colaborador WHERE empresa_id = ${rh.empresa_id} AND matricula = ${matricula} LIMIT 1`;
+
+  // Papel: de sistema, personalizado ativo da empresa, ou o que a pessoa já tem (papel desativado não bloqueia a edição).
+  let papel = papelPedido;
+  if (!['colaborador', 'lider', 'gestor'].includes(papel) && !(existentes[0] && existentes[0].papel === papel)) {
+    const p = await sql`SELECT 1 FROM papel WHERE id=${papel} AND empresa_id=${rh.empresa_id} AND ativo LIMIT 1`;
+    if (!p[0]) return erro(res, 400, 'PAPEL_INVALIDO', 'papel inexistente ou desativado');
+  }
 
   if (existentes[0]) {
     // Sincronizado do Bitrix: nome, equipe e status vêm do kanban; aqui só o papel.
