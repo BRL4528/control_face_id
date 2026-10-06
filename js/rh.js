@@ -2343,7 +2343,7 @@ export const Rh = {
           '<div><label class="lb2">Alarme de registro manual (%)</label><input class="inp" id="cfAlarme" type="number" min="1" max="100" value="' + (cfg.alarmeManual ?? 20) + '"></div>' +
         '</div>' +
         '<label class="cfg-check" style="display:flex;gap:9px;align-items:flex-start;margin-top:14px;cursor:pointer">' +
-          '<input type="checkbox" id="cfGestorCerca" style="margin-top:3px"' + ((this.dados.config || {}).gestorQualquerCerca === false ? '' : ' checked') + '>' +
+          '<input type="checkbox" id="cfGestorCerca" style="width:18px;height:18px;flex:none;margin:2px 0 0;padding:0"' + ((this.dados.config || {}).gestorQualquerCerca === false ? '' : ' checked') + '>' +
           '<span><b>Gestor pode bater ponto em qualquer local da empresa</b><br>' +
             '<span class="cap" style="margin:0">O gestor visita as equipes: a batida dele vale em qualquer cerca da empresa, não só na da própria equipe. Fora de todas as cercas continua indo para revisão. Desligado, o gestor segue a cerca da própria equipe como os demais.</span></span></label>' +
         '<button class="act" id="btnSalvarCfg" style="margin-top:14px;width:auto;padding:10px 18px">Salvar parâmetros</button></div>' +
