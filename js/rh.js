@@ -2195,7 +2195,9 @@ export const Rh = {
         '<td class="mono">' + fmtMinutos(x.previsto) + '</td><td class="mono">' + fmtMinutos(x.trabalhado) + '</td>' +
         '<td class="mono"' + (x.saldo != null ? saldoCls(x.saldo) : '') + '>' + (x.saldo != null ? fmtMinutos(x.saldo, true) : '—') + '</td>' +
         '<td class="mono">' + (x.atraso ? fmtMinutos(x.atraso) : '—') + '</td>' +
-        '<td>' + ST[x.status] + (x.a_confirmar ? ' · ' + fmtMinutos(x.a_confirmar) + ' pendentes' : '') + '</td></tr>').join('') +
+        '<td>' + ST[x.status] + (x.a_confirmar ? ' · ' + fmtMinutos(x.a_confirmar) + ' pendentes' : '') +
+          (x.intervalo_descontado ? ' · <span class="nota" title="Só 2 batidas: o intervalo da jornada foi descontado">intervalo ' + fmtMinutos(x.intervalo_descontado) + ' descontado</span>' : '') +
+          (x.na_tolerancia ? ' · <span class="nota">dentro da tolerância</span>' : '') + '</td></tr>').join('') +
       '</tbody></table></td></tr>';
     $('hrSaida').innerHTML = '<div class="tbl-wrap"><table class="adtable"><thead><tr>' +
       '<th>Colaborador</th><th>Previstas</th><th>Trabalhadas</th><th>Saldo</th><th>Atrasos</th><th>Faltas</th><th>Incompletos</th><th>A confirmar</th><th></th></tr></thead><tbody>' +

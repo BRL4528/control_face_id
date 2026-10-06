@@ -241,6 +241,7 @@ async function abrirPonto() {
         await Store.set('template', template);
         await Store.set('alocacao', alocacao);
         await Store.set('deriva', deriva);
+        if (r.fuso) await Store.set('fuso', r.fuso);
       } else if (r.status === 403 && r.codigo === 'BLOQUEADO') {
         await marcarBloqueado(); return irParaPorta();
       } else if (r.status === 401) {

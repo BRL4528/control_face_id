@@ -17,6 +17,7 @@ import { dentroDaCerca } from './_lib/geo.js';
 import { cercaVigente } from './_lib/escala.js';
 import { cors, ok, erro, corpo, exigeMetodo } from './_lib/http.js';
 import { guardarMiniatura } from './_lib/blob.js';
+import { diaNoFuso, fusoDaEmpresa } from './_lib/dia.js';
 
 const DERIVA_MAX_MS = 120000;
 
@@ -34,6 +35,7 @@ export default async function handler(req, res) {
   }
 
   const sql = db();
+  const fuso = await fusoDaEmpresa(sql, vinc.empresa_id);
   const resultados = [];
   let aceitas = 0, duplicadas = 0, emRevisao = 0;
   await sql`UPDATE dispositivo SET visto_em=now() WHERE id=${vinc.dispositivo_id}`;
@@ -48,7 +50,7 @@ export default async function handler(req, res) {
         resultados.push({ id_cliente: m && m.id_cliente, status: 'rejeitado', motivo: 'campos obrigatórios ausentes' });
         continue;
       }
-      const dia = String(m.marcado_dia || m.marcado_em).slice(0, 10);
+      const dia = diaNoFuso(m.marcado_em, fuso);   // o servidor decide o dia; o do cliente é ignorado
       if (m.cadastro && Array.isArray(m.cadastro.vetores) && m.cadastro.vetores.length) {
         const temCad = await sql`SELECT 1 FROM dispositivo WHERE id=${vinc.dispositivo_id} AND cadastro IS NOT NULL LIMIT 1`;
         if (!temCad[0]) {
@@ -79,7 +81,7 @@ export default async function handler(req, res) {
     }
     // A marcação é SEMPRE do dono do dispositivo — o cliente não escolhe pessoa.
     const colaboradorId = vinc.colaborador_id;
-    const dia = String(m.marcado_dia || m.marcado_em).slice(0, 10);
+    const dia = diaNoFuso(m.marcado_em, fuso);   // o servidor decide o dia; o do cliente é ignorado
 
     // Cerca do dia: escala/ajuste se houver, senão o local da equipe.
     const aloc = await cercaVigente(sql, vinc.empresa_id, colaboradorId, dia);

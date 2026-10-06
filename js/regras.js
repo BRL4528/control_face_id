@@ -115,7 +115,12 @@ export function euclidiana(a, b) {
   return Math.sqrt(s);
 }
 
-export function dia(iso) {
+/** Dia (YYYY-MM-DD) de um instante. Com `fuso`, no relógio dele; sem, em UTC (legado). */
+export function dia(iso, fuso) {
+  if (fuso) {
+    try { return new Intl.DateTimeFormat('en-CA', { timeZone: fuso, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso)); }
+    catch { /* fuso inválido: cai no UTC */ }
+  }
   return String(iso).slice(0, 10);
 }
 
@@ -536,6 +541,7 @@ function alerta(tipo, id, pessoaId, equipeId, alvo) {
 
 /* ------------------------------------------------ relatório de horas */
 
+const LIMITE_INTERVALO_MIN = 360;   // turno contínuo acima de 6h exige pausa
 const JORNADA_FIXA = { entrada: '07:00', saida: '17:00', tolerancia_min: 10, intervalo_min: 60 };
 const emMin = hhmm => { const [h, m] = String(hhmm).split(':'); return Number(h) * 60 + Number(m); };
 
@@ -570,7 +576,8 @@ export function minutosTrabalhados(marcacoes) {
 /**
  * Relatório de horas por colaborador no período [de, ate] (YYYY-MM-DD).
  * Previsto = (saída − entrada − intervalo) da jornada da equipe, só em dia com
- * alocação. Trabalhado = pares entrada→saída. Só contam marcações aceitas;
+ * alocação. Trabalhado = pares entrada→saída; com só 2 batidas (>6h) desconta o
+ * intervalo da jornada. Saldo dentro da tolerância da jornada vira 0. Só contam marcações aceitas;
  * `estado:'pendente'` fica fora do saldo (a_confirmar) e `'rejeitada'` é ignorada.
  * Dia sem saldo calculável (incompleto ou com pendência) não entra nos totais de
  * previsto/trabalhado — aparece sinalizado. Dia de hoje sem batida = em andamento.
@@ -622,6 +629,10 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
       const aceitas = marcas.filter(m => m.estado !== 'pendente');
       const pendentes = marcas.length - aceitas.length;
       const ok = minutosTrabalhados(aceitas);
+      // Só 2 batidas (entrada e saída) num turno longo: ninguém bateu o almoço, então
+      // o intervalo da jornada é descontado (CLT: >6h pede pausa). Com 4 batidas vale o batido.
+      const semBaterIntervalo = !ok.incompleto && aceitas.length === 2 && ok.minutos > LIMITE_INTERVALO_MIN && jor.intervalo_min > 0;
+      if (semBaterIntervalo) ok.minutos -= jor.intervalo_min;
       const todas = minutosTrabalhados(marcas);
       const primeira = marcas.filter(m => m.tipo === 'entrada').map(m => m.marcado_em).sort()[0];
       const atraso = escalado && primeira ? Math.max(0, minutoLocal(primeira, fuso) - emMin(jor.entrada)) : 0;
@@ -633,6 +644,9 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
       else if (ok.incompleto) status = dia >= hoje ? 'em_andamento' : 'incompleto';
       else if (!escalado) status = 'sem_escala';
       if (status === 'ok' || status === 'sem_escala' || status === 'falta') saldo = ok.minutos - previsto;
+      // Tolerância: diferença pequena (≤ tolerância da jornada) não vira extra nem desconto.
+      const naTolerancia = status === 'ok' && escalado && saldo !== 0 && Math.abs(saldo) <= jor.tolerancia_min;
+      if (naTolerancia) saldo = 0;
 
       const aConfirmar = pendentes ? Math.max(0, todas.minutos - ok.minutos) : 0;
       if (saldo != null) { tot.previsto += previsto; tot.trabalhado += ok.minutos; tot.saldo += saldo; }
@@ -642,7 +656,8 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
       if (atrasado && status !== 'em_andamento') { tot.atrasos++; tot.atraso_min += atraso; }
       if (marcas.length) tot.dias++;
       dias.push({ dia, equipe_id: equipeId, status, previsto, trabalhado: ok.minutos, saldo, a_confirmar: aConfirmar,
-                  atraso: atrasado ? atraso : 0, marcacoes: marcas.length });
+                  atraso: atrasado ? atraso : 0, marcacoes: marcas.length,
+                  intervalo_descontado: semBaterIntervalo ? jor.intervalo_min : 0, na_tolerancia: naTolerancia });
     }
     linhas.push({ pessoa_id: id, nome: pessoa.nome, matricula: pessoa.matricula, totais: tot, dias });
   }

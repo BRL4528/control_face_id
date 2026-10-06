@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { minutosTrabalhados, horasPorColaborador, fmtMinutos } from '../../js/regras.js';
+import { minutosTrabalhados, horasPorColaborador, fmtMinutos, dia as diaDe } from '../../js/regras.js';
 
 // Fuso -04 (Campo Grande): 07:00 local = 11:00Z.
 const z = (hhmmLocal) => { const [h, m] = hhmmLocal.split(':').map(Number); return `2026-10-05T${String(h + 4).padStart(2, '0')}:${String(m).padStart(2, '0')}:00Z`; };
@@ -26,15 +26,31 @@ test('dia completo: 9h trabalhadas × 9h previstas (10h − 1h de intervalo) = s
   assert.equal(r[0].totais.saldo, 0); assert.equal(dia(r).status, 'ok');
 });
 
-test('hora extra e atraso além da tolerância', () => {
+test('hora extra e atraso além da tolerância (2 batidas: desconta o intervalo)', () => {
   const r = horasPorColaborador({ ...base, marcacoes: [mk('entrada', '07:25'), mk('saida', '18:00')] });
-  assert.equal(dia(r).trabalhado, 635); assert.equal(dia(r).saldo, 95);
+  assert.equal(dia(r).trabalhado, 575); assert.equal(dia(r).saldo, 35); assert.equal(dia(r).intervalo_descontado, 60);
   assert.equal(dia(r).atraso, 25); assert.equal(r[0].totais.atrasos, 1);
 });
 
-test('atraso dentro da tolerância não conta', () => {
+test('atraso dentro da tolerância não conta e o saldo fica 0', () => {
   const r = horasPorColaborador({ ...base, marcacoes: [mk('entrada', '07:08'), mk('saida', '17:00')] });
   assert.equal(dia(r).atraso, 0); assert.equal(r[0].totais.atrasos, 0);
+  assert.equal(dia(r).saldo, 0); assert.equal(dia(r).na_tolerancia, true);
+});
+
+test('chegar 15 min antes e sair na hora, com 4 batidas: 15 min de extra (fora da tolerância)', () => {
+  const r = horasPorColaborador({ ...base, marcacoes: [mk('entrada', '06:45'), mk('saida', '11:00'), mk('entrada', '12:00'), mk('saida', '17:00')] });
+  assert.equal(dia(r).saldo, 15); assert.equal(dia(r).intervalo_descontado, 0);
+});
+
+test('2 batidas sem almoço: 07–17 dá saldo 0, não +1h', () => {
+  const r = horasPorColaborador({ ...base, marcacoes: [mk('entrada', '07:00'), mk('saida', '17:00')] });
+  assert.equal(dia(r).trabalhado, 540); assert.equal(dia(r).saldo, 0);
+});
+
+test('turno curto de 2 batidas não desconta intervalo', () => {
+  const r = horasPorColaborador({ ...base, alocacoes: [], marcacoes: [mk('entrada', '08:00'), mk('saida', '12:00')] });
+  assert.equal(dia(r).trabalhado, 240); assert.equal(dia(r).intervalo_descontado, 0);
 });
 
 test('marcação rejeitada é ignorada; pendente tira o dia do saldo e vai para a_confirmar', () => {
@@ -56,4 +72,11 @@ test('batida sem escala conta tudo como extra; fmtMinutos', () => {
   const r = horasPorColaborador({ ...base, alocacoes: [], marcacoes: [mk('entrada', '08:00'), mk('saida', '10:00')] });
   assert.equal(dia(r).status, 'sem_escala'); assert.equal(dia(r).saldo, 120);
   assert.equal(fmtMinutos(510), '8h30'); assert.equal(fmtMinutos(65, true), '+1h05'); assert.equal(fmtMinutos(-20, true), '-0h20'); assert.equal(fmtMinutos(0, true), '0h00');
+});
+
+test('dia no fuso da empresa: 21h em Campo Grande ainda é o mesmo dia (UTC já virou)', () => {
+  assert.equal(diaDe('2026-10-06T01:30:00Z'), '2026-10-06');                         // legado: UTC
+  assert.equal(diaDe('2026-10-06T01:30:00Z', 'America/Campo_Grande'), '2026-10-05');  // 21:30 do dia 5
+  assert.equal(diaDe('2026-10-05T14:00:00Z', 'America/Campo_Grande'), '2026-10-05');
+  assert.equal(diaDe('2026-10-05T14:00:00Z', 'fuso/invalido'), '2026-10-05');        // inválido cai no UTC
 });

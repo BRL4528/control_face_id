@@ -11,6 +11,7 @@
 //     rastro de QUEM lançou e POR QUÊ. A marcacao continua imutável.
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
+import { diaNoFuso, fusoDaEmpresa } from '../_lib/dia.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 
 export default async function handler(req, res) {
@@ -25,8 +26,8 @@ export default async function handler(req, res) {
   if (!colaboradorId) return erro(res, 400, 'CORPO_INVALIDO', 'colaborador_id obrigatório');
 
   const marcadoEm = b.marcado_em || new Date().toISOString();
-  const dia = String(b.marcado_dia || marcadoEm).slice(0, 10);
   const sql = db();
+  const dia = diaNoFuso(marcadoEm, await fusoDaEmpresa(sql, rh.empresa_id));
 
   // A pessoa é da empresa do RH? (evita lançar ponto de outro tenant)
   const pessoas = await sql`

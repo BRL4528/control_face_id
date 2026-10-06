@@ -12,6 +12,7 @@
 import { db } from './_lib/db.js';
 import { cercaVigente } from './_lib/escala.js';
 import { autenticarDispositivo } from './_lib/auth.js';
+import { diaNoFuso, fusoDaEmpresa } from './_lib/dia.js';
 import { cors, ok, erro, corpo, exigeMetodo } from './_lib/http.js';
 
 export default async function handler(req, res) {
@@ -24,15 +25,16 @@ export default async function handler(req, res) {
   // e para de sincronizar, em vez de ficar tentando para sempre.
   if (vinc.bloqueado) return erro(res, 403, 'BLOQUEADO', 'este aparelho foi bloqueado pelo RH');
 
-  const dia = String(corpo(req).dia || new Date().toISOString().slice(0, 10));
   const sql = db();
+  const fuso = await fusoDaEmpresa(sql, vinc.empresa_id);
+  const dia = String(corpo(req).dia || diaNoFuso(new Date(), fuso));
   await sql`UPDATE dispositivo SET visto_em=now() WHERE id=${vinc.dispositivo_id}`;
 
   // Pendente: ainda sem colaborador. O app segue batendo (as marcações ficam
   // para o RH identificar); não há template nem alocação para mandar.
   if (vinc.estado === 'pendente') {
     return ok(res, { estado: 'pendente', colaborador: null, template: null, alocacao: null,
-                     matricula_informada: vinc.matricula_informada || null, servidor_hora: new Date().toISOString() });
+                     matricula_informada: vinc.matricula_informada || null, servidor_hora: new Date().toISOString(), fuso });
   }
 
   const templates = await sql`
@@ -50,6 +52,7 @@ export default async function handler(req, res) {
       equipe_id: a.equipe_id, equipe_nome: a.equipe_nome, cerca_origem: a.cerca_origem,
       cerca: { lat: a.cerca_lat, lng: a.cerca_lng, raio_m: a.cerca_raio_m }
     } : null,
-    servidor_hora: new Date().toISOString()
+    servidor_hora: new Date().toISOString(),
+    fuso
   });
 }

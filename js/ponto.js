@@ -248,7 +248,7 @@ export const Ponto = {
       score: dist == null ? null : Number(dist.toFixed(4)),
       liveness_ok: livenessOk,
       marcado_em: quando.toISOString(),
-      marcado_dia: dia(quando.toISOString()),
+      marcado_dia: dia(quando.toISOString(), await this.fuso()),
       deriva_ms: this.deriva,
       lat: pos ? pos.coords.latitude : null,
       lng: pos ? pos.coords.longitude : null,
@@ -321,8 +321,13 @@ export const Ponto = {
   },
 
   async recarregarDia() {
-    const hoje = dia(agoraCorrigido(this.deriva).toISOString());
+    const hoje = dia(agoraCorrigido(this.deriva).toISOString(), await this.fuso());
     this.doDia = await Store.doDia(hoje);
+  },
+
+  /** Fuso da empresa (vem da carga do dia); sem ele, o do próprio aparelho. */
+  async fuso() {
+    return (await Store.get('fuso')) || Intl.DateTimeFormat().resolvedOptions().timeZone;
   },
 
   pararCamera() {
