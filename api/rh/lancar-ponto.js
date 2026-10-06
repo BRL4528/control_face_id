@@ -1,17 +1,18 @@
-// Lançamento manual de ponto pelo RH — o caminho para resolver a exceção
-// "sem entrada" (pessoa alocada que não bateu ponto). NÃO é o mesmo que o app do
-// colaborador: aqui é um ato administrativo, autenticado pelo JWT do RH, com
-// justificativa que fica na auditoria.
+// Lançamento manual de ponto pelo RH: a pessoa não bateu (ou bateu errado) e o RH
+// registra a entrada ou a saída. Ato administrativo, autenticado pelo JWT do RH,
+// com justificativa OBRIGATÓRIA que fica na auditoria e vai ao card do Bitrix.
 //
-//   • Insere uma marcacao origem='manual', veredito='aceito' — é decisão
-//     explícita do RH, não passa por revisão de novo (requer_revisao=false).
-//   • Puxa equipe da alocação do dia da pessoa, quando houver.
-//   • dentro_cerca=null: registro administrativo não tem GPS para conferir.
-//   • Grava também uma correcao (aprovar) apontando para a marcação, deixando
-//     rastro de QUEM lançou e POR QUÊ. A marcacao continua imutável.
-import { db, novoId } from '../_lib/db.js';
+//   { colaborador_id, tipo:'entrada'|'saida', motivo,
+//     dia:'YYYY-MM-DD' + hora:'HH:MM' (relógio da empresa)  |  marcado_em (ISO) }
+//
+//   • Grava marcacao origem='manual', veredito='aceito' (decisão do RH, sem nova revisão).
+//   • Equipe vem da alocação do dia, quando houver. Sem GPS: dentro_cerca=null.
+//   • Grava também uma correcao (aprovar) com quem lançou e por quê.
+import { db } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
-import { diaNoFuso, fusoDaEmpresa } from '../_lib/dia.js';
+import { diaNoFuso, fusoDaEmpresa, instanteNoFuso } from '../_lib/dia.js';
+import { statementsLancamento, noFuturo } from '../_lib/lancamento.js';
+import { comentarNoCard, montarComentarioLancamento } from '../_lib/bitrix-saida.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 
 export default async function handler(req, res) {
@@ -23,40 +24,36 @@ export default async function handler(req, res) {
   const b = corpo(req);
   const colaboradorId = b.colaborador_id;
   const tipo = b.tipo === 'saida' ? 'saida' : 'entrada';
+  const motivo = String(b.motivo || '').trim();
   if (!colaboradorId) return erro(res, 400, 'CORPO_INVALIDO', 'colaborador_id obrigatório');
+  if (!motivo) return erro(res, 400, 'JUSTIFICATIVA_OBRIGATORIA', 'informe a justificativa do lançamento');
 
-  const marcadoEm = b.marcado_em || new Date().toISOString();
   const sql = db();
-  const dia = diaNoFuso(marcadoEm, await fusoDaEmpresa(sql, rh.empresa_id));
+  const fuso = await fusoDaEmpresa(sql, rh.empresa_id);
+  const marcadoEm = (b.dia || b.hora) ? instanteNoFuso(b.dia, b.hora, fuso) : (b.marcado_em || new Date().toISOString());
+  if (!marcadoEm || isNaN(Date.parse(marcadoEm))) return erro(res, 400, 'CORPO_INVALIDO', 'dia e hora inválidos');
+  if (noFuturo(marcadoEm)) return erro(res, 400, 'DATA_FUTURA', 'não é possível lançar ponto no futuro');
+  const dia = diaNoFuso(marcadoEm, fuso);
 
   // A pessoa é da empresa do RH? (evita lançar ponto de outro tenant)
   const pessoas = await sql`
-    SELECT id FROM colaborador WHERE id = ${colaboradorId} AND empresa_id = ${rh.empresa_id} LIMIT 1`;
+    SELECT id, nome, bitrix_card_id FROM colaborador WHERE id = ${colaboradorId} AND empresa_id = ${rh.empresa_id} LIMIT 1`;
   if (!pessoas.length) return erro(res, 404, 'NAO_ENCONTRADO', 'colaborador não encontrado');
 
-  // Equipe vem da alocação do dia, se existir.
   const alocs = await sql`
     SELECT equipe_id FROM alocacao
-    WHERE empresa_id = ${rh.empresa_id} AND colaborador_id = ${colaboradorId} AND dia = ${dia}
-    LIMIT 1`;
+    WHERE empresa_id = ${rh.empresa_id} AND colaborador_id = ${colaboradorId} AND dia = ${dia} LIMIT 1`;
   const equipeId = (alocs[0] && alocs[0].equipe_id) || null;
 
-  const idCliente = novoId();
-  await sql`
-    INSERT INTO marcacao (
-      id_cliente, empresa_id, colaborador_id, equipe_id, tipo, origem, veredito,
-      marcado_em, marcado_dia, dentro_cerca, motivo, requer_revisao
-    ) VALUES (
-      ${idCliente}, ${rh.empresa_id}, ${colaboradorId}, ${equipeId},
-      ${tipo}, 'manual', 'aceito',
-      ${marcadoEm}, ${dia}, ${null}, ${b.motivo || 'lançado pelo RH'}, ${false}
-    )
-    ON CONFLICT (id_cliente) DO NOTHING`;
+  let id;
+  await sql.transaction(txn => {
+    const r = statementsLancamento(txn, { empresaId: rh.empresa_id, colaboradorId, equipeId, tipo, marcadoEm, dia, motivo, rhId: rh.sub });
+    id = r.idCliente;
+    return r.stmts;
+  });
 
-  // Rastro de auditoria: quem lançou, quando e por quê.
-  await sql`
-    INSERT INTO correcao (id, empresa_id, alvo_tipo, alvo_id, acao, motivo, usuario_rh_id)
-    VALUES (${novoId()}, ${rh.empresa_id}, 'marcacao', ${idCliente}, 'aprovar', ${b.motivo || 'lançamento manual'}, ${rh.sub})`;
-
-  return ok(res, { lancado: true, id_cliente: idCliente, tipo, marcado_dia: dia });
+  await comentarNoCard(pessoas[0], montarComentarioLancamento({
+    acao: 'lancar', decisao: motivo, rh: rh.nome || rh.usuario || 'RH', fuso, novo: { tipo, marcado_em: marcadoEm }, alvoId: id
+  }));
+  return ok(res, { lancado: true, id_cliente: id, tipo, marcado_dia: dia });
 }

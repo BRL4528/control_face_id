@@ -12,7 +12,7 @@ import {
   presencaPorEquipe, serieDiaria, pendenciasPorMotivo,
   exceptionsDoDia, TIPOS_EXCECAO,
   jornadaDaEquipe, horasEntradaPorEquipe, csvDe,
-  alertasDePlanejamento, horasPorColaborador, fmtMinutos
+  alertasDePlanejamento, horasPorColaborador, fmtMinutos, dia as diaDe
 } from './regras.js';
 import { $, esc, mostrar, toast, hora, data } from './ui.js';
 
@@ -39,6 +39,7 @@ export const Rh = {
   pendSel: null,     // exceção selecionada no master-detail de pendências
   pendTab: 'abertas',
   buscaPessoas: '',
+  regPessoaSel: null,   // colaborador aberto no Espelho de ponto
   filtroFuncao: '',     // papel (função) filtrado em Colaboradores, Equipes e Relatórios; '' = todas
   aoSair: null,
   capturas: [],
@@ -116,7 +117,15 @@ export const Rh = {
   },
 
   /** Mescla a config da empresa (banco) sobre os defaults de EFRAT_CFG. */
+  /** Batidas anuladas pelo RH saem dos cálculos (presença, horas, indicadores); o espelho as mostra riscadas. */
+  separarAnuladas() {
+    const ms = (this.dados && this.dados.marcacoes) || [];
+    this.dados.marcacoes_anuladas = ms.filter(m => m.anulada);
+    this.dados.marcacoes = ms.filter(m => !m.anulada);
+  },
+
   aplicarConfig() {
+    this.separarAnuladas();
     const c = (this.dados && this.dados.config) || {};
     window.EFRAT_CFG = Object.assign(window.EFRAT_CFG || {}, c);
   },
@@ -1989,27 +1998,96 @@ export const Rh = {
 
   /* ------------------------------------------------------- registros */
 
+  /** Hora e dia no relógio da empresa (o painel pode estar em outro fuso). */
+  horaFuso(iso) {
+    try { return new Intl.DateTimeFormat('pt-BR', { timeZone: (this.dados.empresa || {}).fuso || 'America/Campo_Grande', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso)); }
+    catch { return hora(iso); }
+  },
+  diaFuso(iso) { return diaDe(iso, (this.dados.empresa || {}).fuso); },
+
   pintarRegistros() {
     const pessoas = (this.dados.pessoas || []).slice().sort((a, b) => a.nome.localeCompare(b.nome));
     $('rh-registros').innerHTML =
       '<div class="pg-head"><div><h1 class="tit">Espelho de ponto</h1>' +
-        '<p class="sub">Registros por colaborador no período.</p></div></div>' +
+        '<p class="sub">Registros por colaborador no período. Lance um ponto que faltou ou corrija um registro: nada é apagado, tudo fica na auditoria com a justificativa.</p></div></div>' +
       '<div class="card"><h2>Espelho de ponto</h2>' +
-        '<label class="lb">Colaborador</label><select id="regPessoa">' +
-          pessoas.map(p => '<option value="' + p.pessoa_id + '">' + esc(p.nome) + '</option>').join('') +
-        '</select><div id="regSaida"></div></div>';
-    const desenhar = () => {
-      const id = $('regPessoa').value;
-      const linhas = espelho(this.dados.marcacoes, id);
-      $('regSaida').innerHTML = linhas.length
-        ? linhas.map(l => '<div class="esp"><span class="d">' + data(l.dia) + '</span><span>' +
-            l.marcacoes.map(m => (m.tipo === 'entrada' ? 'E ' : 'S ') + '<span class="mono">' + hora(m.marcado_em) + '</span>' +
-              (m.origem === 'manual' ? ' <span class="tag">manual</span>' : '') +
-              (m.pendente ? ' <span class="tag">pendente</span>' : '')).join(' · ') +
-            '</span></div>').join('')
-        : '<p class="nota" style="margin-top:10px">Sem marcações no período.</p>';
+        '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><div style="flex:1;min-width:220px"><label class="lb">Colaborador</label><select id="regPessoa">' +
+          pessoas.map(p => '<option value="' + p.pessoa_id + '"' + (p.pessoa_id === this.regPessoaSel ? ' selected' : '') + '>' + esc(p.nome) + '</option>').join('') +
+        '</select></div><button class="v2btn" id="btnLancarPonto">+ Lançar ponto</button></div>' +
+        '<div id="regForm"></div><div id="regSaida"></div></div>';
+
+    const pessoaId = () => $('regPessoa').value;
+    const formulario = ({ titulo, tipo, dia, hora: hh, original }) => {
+      const hoje = this.hojeServidor();
+      $('regForm').innerHTML =
+        '<div class="v2card" style="padding:14px;margin:12px 0"><h3 style="margin:0 0 10px;font-size:13.5px">' + esc(titulo) + '</h3>' +
+          '<div class="form-grid">' +
+            '<div><label class="lb2">Dia</label><input class="inp" type="date" id="lpDia" max="' + hoje + '" value="' + esc(dia || hoje) + '"></div>' +
+            '<div><label class="lb2">Hora</label><input class="inp" type="time" id="lpHora" value="' + esc(hh || '') + '"></div>' +
+            '<div><label class="lb2">Tipo</label><select class="inp" id="lpTipo"><option value="entrada"' + (tipo !== 'saida' ? ' selected' : '') + '>Entrada</option>' +
+              '<option value="saida"' + (tipo === 'saida' ? ' selected' : '') + '>Saída</option></select></div>' +
+            '<div style="grid-column:1/-1"><label class="lb2">Justificativa (obrigatória)</label>' +
+              '<input class="inp" id="lpMotivo" placeholder="Ex.: colaborador esqueceu de bater a saída, confirmado com o encarregado"></div>' +
+          '</div>' +
+          '<div class="row2" style="margin-top:12px;display:flex;gap:8px"><button class="v2btn" id="lpSalvar">' + (original ? 'Salvar correção' : 'Lançar') + '</button>' +
+            '<button class="v2btn ghost" id="lpCancelar">Cancelar</button></div>' +
+          (original ? '<p class="nota" style="margin:8px 0 0">O registro original é anulado e um novo é lançado no lugar. O original continua visível, riscado, e a troca fica na auditoria.</p>'
+                    : '<p class="nota" style="margin:8px 0 0">O lançamento entra como "manual", já aprovado, sem GPS. A justificativa fica na auditoria.</p>') +
+        '</div>';
+      $('lpCancelar').onclick = () => { $('regForm').innerHTML = ''; };
+      $('lpSalvar').onclick = async () => {
+        const motivo = $('lpMotivo').value.trim(), d = $('lpDia').value, h = $('lpHora').value, t = $('lpTipo').value;
+        if (!d || !h) { toast('Informe o dia e a hora', 'warn'); return; }
+        if (!motivo) { toast('A justificativa é obrigatória', 'warn'); $('lpMotivo').focus(); return; }
+        $('lpSalvar').disabled = true;
+        const r = original
+          ? await ApiRh.corrigirPonto(this.token, { id: original, acao: 'corrigir', tipo: t, dia: d, hora: h, motivo })
+          : await ApiRh.lancarPonto(this.token, { colaborador_id: pessoaId(), tipo: t, dia: d, hora: h, motivo });
+        if (!r.ok) { toast(r.erro || 'Falha', 'bad'); $('lpSalvar').disabled = false; return; }
+        toast(original ? 'Registro corrigido' : 'Ponto lançado', 'ok');
+        this.regPessoaSel = pessoaId();
+        await this.recarregar();
+      };
+      $('lpHora').focus();
     };
-    $('regPessoa').onchange = desenhar;
+
+    const desenhar = () => {
+      const id = pessoaId();
+      this.regPessoaSel = id;
+      const todas = (this.dados.marcacoes || []).concat(this.dados.marcacoes_anuladas || []);
+      const linhas = espelho(todas, id);
+      const marca = m => {
+        const rotulo = (m.tipo === 'entrada' ? 'Entrada ' : 'Saída ') + '<span class="mono">' + this.horaFuso(m.marcado_em) + '</span>';
+        if (m.anulada) return '<span style="text-decoration:line-through;color:#94a3b8">' + rotulo + '</span> <span class="tag">anulada</span>';
+        return rotulo + (m.origem === 'manual' ? ' <span class="tag">manual</span>' : '') + (m.pendente ? ' <span class="tag">pendente</span>' : '') +
+          ' <button class="v2btn ghost mini" data-corrigir="' + esc(m.id_cliente) + '">Corrigir</button>' +
+          ' <button class="v2btn ghost mini" data-anular="' + esc(m.id_cliente) + '">Anular</button>';
+      };
+      $('regSaida').innerHTML = linhas.length
+        ? linhas.map(l => '<div class="esp"><span class="d">' + data(l.dia) + '</span><span style="display:flex;flex-direction:column;gap:5px">' +
+            l.marcacoes.map(m => '<span>' + marca(m) + '</span>').join('') + '</span></div>').join('')
+        : '<p class="nota" style="margin-top:10px">Sem marcações no período.</p>';
+      $('regSaida').querySelectorAll('[data-corrigir]').forEach(b => {
+        b.onclick = () => {
+          const m = todas.find(x => x.id_cliente === b.dataset.corrigir); if (!m) return;
+          formulario({ titulo: 'Corrigir ' + (m.tipo === 'saida' ? 'saída' : 'entrada') + ' de ' + data(this.diaFuso(m.marcado_em)) + ' às ' + this.horaFuso(m.marcado_em),
+            tipo: m.tipo, dia: this.diaFuso(m.marcado_em), hora: this.horaFuso(m.marcado_em), original: m.id_cliente });
+        };
+      });
+      $('regSaida').querySelectorAll('[data-anular]').forEach(b => {
+        b.onclick = async () => {
+          const motivo = prompt('Anular este registro. Justificativa (obrigatória, fica na auditoria):');
+          if (motivo == null) return;
+          if (!motivo.trim()) { toast('A justificativa é obrigatória', 'warn'); return; }
+          const r = await ApiRh.corrigirPonto(this.token, { id: b.dataset.anular, acao: 'anular', motivo: motivo.trim() });
+          if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+          toast('Registro anulado', 'ok');
+          await this.recarregar();
+        };
+      });
+    };
+    $('regPessoa').onchange = () => { $('regForm').innerHTML = ''; desenhar(); };
+    $('btnLancarPonto').onclick = () => formulario({ titulo: 'Lançar ponto de ' + (($('regPessoa').selectedOptions[0] || {}).text || ''), tipo: 'entrada' });
     if (pessoas.length) desenhar();
   },
 

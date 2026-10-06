@@ -32,7 +32,9 @@ export default async function handler(req, res) {
                m.marcado_em, to_char(m.marcado_dia,'YYYY-MM-DD') AS marcado_dia, m.deriva_ms AS deriva_relogio_ms, m.dentro_cerca,
                m.distancia_cerca_m, m.lat, m.lng, m.foto_url AS foto_auditoria, m.requer_revisao, m.score,
                (m.requer_revisao AND NOT EXISTS(
-                  SELECT 1 FROM correcao co WHERE co.alvo_tipo='marcacao' AND co.alvo_id=m.id_cliente)) AS pendente
+                  SELECT 1 FROM correcao co WHERE co.alvo_tipo='marcacao' AND co.alvo_id=m.id_cliente)) AS pendente,
+               EXISTS(SELECT 1 FROM correcao co WHERE co.alvo_tipo='marcacao' AND co.alvo_id=m.id_cliente AND co.acao='rejeitar') AS anulada,
+               m.motivo
         FROM marcacao m
         WHERE m.empresa_id = ${empresa} AND m.colaborador_id IS NOT NULL
           AND m.marcado_dia >= (CURRENT_DATE - ${dias}::int)

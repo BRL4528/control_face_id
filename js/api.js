@@ -138,6 +138,7 @@ export const ApiRh = {
   papel(token, d) { return reqRh('/rh/papel', token, d); },
   horas(token, d) { return reqRh('/rh/horas', token, d); },
   decidir(token, d) { return reqRh('/rh/decidir', token, d); },
+  corrigirPonto(token, d) { return reqRh('/rh/corrigir-ponto', token, d); },
   lancarPonto(token, d) { return reqRh('/rh/lancar-ponto', token, d); },
   jornada(token, d) { return reqRh('/rh/jornada', token, d); },
   config(token, d) { return reqRh('/rh/config', token, d); },

@@ -36,6 +36,21 @@ export function montarComentario({ tipo, acao, decisao, rh, alvoId, alvo, fuso, 
   return l.join('\n');
 }
 
+/** Comentário do card para lançamento manual, anulação e correção de ponto. Pura. */
+export function montarComentarioLancamento({ acao, decisao, rh, fuso, original, novo, alvoId, agora = new Date() }) {
+  const quando = d => {
+    try { return new Intl.DateTimeFormat('pt-BR', { timeZone: fuso || 'America/Campo_Grande', dateStyle: 'short', timeStyle: 'short' }).format(new Date(d)); }
+    catch { return new Date(d).toISOString(); }
+  };
+  const nome = t => (t === 'saida' ? 'Saída' : 'Entrada');
+  const titulo = { lancar: 'LANÇAMENTO DE PONTO PELO RH', anular: 'REGISTRO DE PONTO ANULADO PELO RH', corrigir: 'REGISTRO DE PONTO CORRIGIDO PELO RH' }[acao];
+  const l = [`[B]${titulo}[/B]`, `[B]Justificativa:[/B] ${decisao}`, `[B]Feito por:[/B] ${rh} em ${quando(agora)}`];
+  if (original) l.push(`[B]Registro original:[/B] ${nome(original.tipo)} em ${quando(original.marcado_em)}`);
+  if (novo) l.push(`[B]${acao === 'lancar' ? 'Registro lançado' : 'Registro novo'}:[/B] ${nome(novo.tipo)} em ${quando(novo.marcado_em)}`);
+  l.push(`[B]ID no Ponto:[/B] ${alvoId}`);
+  return l.join('\n');
+}
+
 export async function comentarNoCard(colab, texto) {
   const url = process.env.BITRIX_DECISAO_WEBHOOK_URL;
   if (!url || !colab || !colab.bitrix_card_id) return false;
