@@ -97,7 +97,7 @@ export default async function handler(req, res) {
   const alocacoesHoje = alocacoes.filter(a => a.dia === hoje);
 
   return ok(res, {
-    usuario: { nome: rh.nome, usuario: rh.usuario },
+    usuario: { id: rh.sub, nome: rh.nome, usuario: rh.usuario },
     empresa_id: empresa,   // o app do colaborador usa como "código da empresa" no pareamento
     empresa: empresaRow[0] || { nome: '', fuso: 'America/Campo_Grande', link_token: null },
     aparelhos_pendentes: aparelhosPendentes,
