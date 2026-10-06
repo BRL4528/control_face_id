@@ -18,6 +18,7 @@ import { cercaVigente } from './_lib/escala.js';
 import { cors, ok, erro, corpo, exigeMetodo } from './_lib/http.js';
 import { guardarMiniatura } from './_lib/blob.js';
 import { diaNoFuso, fusoDaEmpresa } from './_lib/dia.js';
+import { configGestorQualquerCerca, perimetroDoPonto } from './_lib/cerca-gestor.js';
 
 const DERIVA_MAX_MS = 120000;
 
@@ -36,6 +37,7 @@ export default async function handler(req, res) {
 
   const sql = db();
   const fuso = await fusoDaEmpresa(sql, vinc.empresa_id);
+  let gestorLivre = null;   // parâmetro lido sob demanda (só gestor precisa)
   const resultados = [];
   let aceitas = 0, duplicadas = 0, emRevisao = 0;
   await sql`UPDATE dispositivo SET visto_em=now() WHERE id=${vinc.dispositivo_id}`;
@@ -86,14 +88,24 @@ export default async function handler(req, res) {
     // Cerca do dia: escala/ajuste se houver, senão o local da equipe.
     const aloc = await cercaVigente(sql, vinc.empresa_id, colaboradorId, dia);
     const temCerca = !!(aloc && aloc.cerca_lat != null);
-    const cerca = temCerca ? dentroDaCerca(aloc, m.lat, m.lng, m.precisao_m) : { dentro: null, distancia_m: null };
+    let cerca = temCerca ? dentroDaCerca(aloc, m.lat, m.lng, m.precisao_m) : { dentro: null, distancia_m: null };
+
+    // Gestor em visita: vale qualquer perímetro da empresa (parâmetro gestorQualquerCerca).
+    let visitado = null;
+    if (vinc.papel === 'gestor' && cerca.dentro !== true && m.lat != null) {
+      if (gestorLivre === null) gestorLivre = await configGestorQualquerCerca(sql, vinc.empresa_id);
+      if (gestorLivre) {
+        visitado = await perimetroDoPonto(sql, vinc.empresa_id, dia, m.lat, m.lng, m.precisao_m);
+        if (visitado) cerca = { dentro: true, distancia_m: visitado.distancia_m };
+      }
+    }
 
     const derivaFora = Math.abs(Number(m.deriva_ms) || 0) > DERIVA_MAX_MS;
     const revisar =
       m.veredito !== 'aceito' ||
       m.origem === 'manual' ||
       m.liveness_ok === false ||
-      !temCerca ||
+      (!temCerca && !visitado) ||
       cerca.dentro === false ||
       derivaFora;
 
@@ -107,7 +119,7 @@ export default async function handler(req, res) {
       ) VALUES (
         ${m.id_cliente}, ${vinc.empresa_id}, ${colaboradorId}, ${vinc.dispositivo_id}, ${equipeId},
         ${m.tipo}, ${m.origem || 'biometria'}, ${revisar ? 'revisar' : 'aceito'},
-        ${m.score ?? null}, ${m.liveness_ok ?? null}, ${m.motivo || null},
+        ${m.score ?? null}, ${m.liveness_ok ?? null}, ${visitado ? 'gestor em outro local: ' + visitado.nome : (m.motivo || null)},
         ${m.marcado_em}, ${dia}, ${Number(m.deriva_ms) || 0},
         ${m.lat ?? null}, ${m.lng ?? null}, ${m.precisao_m ?? null},
         ${cerca.dentro}, ${cerca.distancia_m}, ${revisar ? (m.foto_url || null) : null}, ${revisar}

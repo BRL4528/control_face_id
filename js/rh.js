@@ -2342,6 +2342,10 @@ export const Rh = {
             (cfg.jornadaPadraoId ? ' disabled title="Vem da jornada padrão"' : '') + '></div>' +
           '<div><label class="lb2">Alarme de registro manual (%)</label><input class="inp" id="cfAlarme" type="number" min="1" max="100" value="' + (cfg.alarmeManual ?? 20) + '"></div>' +
         '</div>' +
+        '<label class="cfg-check" style="display:flex;gap:9px;align-items:flex-start;margin-top:14px;cursor:pointer">' +
+          '<input type="checkbox" id="cfGestorCerca" style="margin-top:3px"' + ((this.dados.config || {}).gestorQualquerCerca === false ? '' : ' checked') + '>' +
+          '<span><b>Gestor pode bater ponto em qualquer local da empresa</b><br>' +
+            '<span class="cap" style="margin:0">O gestor visita as equipes: a batida dele vale em qualquer cerca da empresa, não só na da própria equipe. Fora de todas as cercas continua indo para revisão. Desligado, o gestor segue a cerca da própria equipe como os demais.</span></span></label>' +
         '<button class="act" id="btnSalvarCfg" style="margin-top:14px;width:auto;padding:10px 18px">Salvar parâmetros</button></div>' +
 
       '<div class="cfg-sec"><h2>Link da empresa</h2>' +
@@ -2369,7 +2373,7 @@ export const Rh = {
         '<button class="act" id="btnSalvarEmp" style="margin-top:14px;width:auto;padding:10px 18px">Salvar empresa</button></div>' +
 
       '<div class="cfg-sec"><h2>Papéis dos colaboradores</h2>' +
-        '<p class="cap">Os papéis aparecem no cadastro do colaborador. Colaborador, Líder de equipe e Gestor são do sistema (o Gestor também marca ponto pelo painel e tem as batidas revisadas). Os que você criar abaixo são rótulos para organizar a equipe.</p>' +
+        '<p class="cap">Os papéis aparecem no cadastro do colaborador. Colaborador, Líder de equipe e Gestor são do sistema. O Gestor pode bater ponto em qualquer cerca da empresa (parâmetro em Anti-fraude e operação). Os que você criar abaixo são rótulos para organizar a equipe.</p>' +
         '<div class="tbl-wrap" style="margin-bottom:12px"><table class="adtable"><thead><tr><th>Papel</th><th>Colaboradores</th><th>Status</th><th></th></tr></thead><tbody>' +
           this.PAPEIS_SISTEMA.map(x => '<tr><td><b>' + esc(x.nome) + '</b> <span class="nota">sistema</span></td><td>' +
             (this.dados.pessoas || []).filter(p => (p.papel || 'colaborador') === x.id).length + '</td><td><span class="pill ok"><span class="dot"></span>Ativo</span></td><td></td></tr>').join('') +
@@ -2455,7 +2459,8 @@ export const Rh = {
         limiarAceite: Number($('cfLimiar').value), raioPadraoM: Number($('cfRaio').value),
         toleranciaGpsM: Number($('cfGps').value), horaEntrada: $('cfHora').value,
         jornadaPadraoId: $('cfJornada').value || null,
-        alarmeManual: Number($('cfAlarme').value)
+        alarmeManual: Number($('cfAlarme').value),
+        gestorQualquerCerca: $('cfGestorCerca').checked
       };
       const r = await ApiRh.config(this.token, { dados });
       if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }

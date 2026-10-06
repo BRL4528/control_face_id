@@ -343,7 +343,8 @@ ALTER TABLE empresa ADD COLUMN IF NOT EXISTS integracao_token_hash text;
 -- ═══════════════════════════════════════════════════════ papéis do colaborador
 -- Papéis personalizados da empresa (rótulos que o RH escolhe no cadastro do
 -- colaborador). colaborador.papel guarda o id daqui; os de sistema (colaborador,
--- lider, gestor) não ficam na tabela. Só 'gestor' tem comportamento próprio.
+-- lider, gestor) não ficam na tabela. Só 'gestor' tem comportamento próprio: bate
+-- ponto em qualquer cerca da empresa (config gestorQualquerCerca).
 CREATE TABLE IF NOT EXISTS papel (
   id         text PRIMARY KEY,
   empresa_id text NOT NULL REFERENCES empresa(id) ON DELETE CASCADE,

@@ -22,6 +22,8 @@ function sanear(dados) {
   if (d.raioPadraoM != null) out.raioPadraoM = num(d.raioPadraoM, 30, 5000, 200);
   if (d.toleranciaGpsM != null) out.toleranciaGpsM = num(d.toleranciaGpsM, 0, 500, 100);
   if (d.horaEntrada != null && /^([01]\d|2[0-3]):[0-5]\d$/.test(d.horaEntrada)) out.horaEntrada = d.horaEntrada;
+  // Gestor pode bater em qualquer perímetro da empresa (visita equipes). Ausente = ligado.
+  if (typeof d.gestorQualquerCerca === 'boolean') out.gestorQualquerCerca = d.gestorQualquerCerca;
   if (d.alarmeManual != null) out.alarmeManual = num(d.alarmeManual, 1, 100, 20);
   if (d.jornadaPadrao != null) out.jornadaPadrao = String(d.jornadaPadrao).slice(0, 20);
   // Jornada padrão da empresa: vale para toda equipe sem jornada própria.
