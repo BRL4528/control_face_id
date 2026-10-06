@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS colaborador (
   empresa_id    text NOT NULL REFERENCES empresa(id) ON DELETE CASCADE,
   nome          text NOT NULL,
   matricula     text NOT NULL,          -- usada no pareamento inicial do celular
-  papel         text NOT NULL DEFAULT 'colaborador',  -- colaborador | gestor
+  papel         text NOT NULL DEFAULT 'colaborador',  -- colaborador | lider | gestor
   equipe_padrao text REFERENCES equipe(id),           -- equipe default (o RH pode realocar por dia)
   ativo         boolean NOT NULL DEFAULT true,
   criado_em     timestamptz NOT NULL DEFAULT now(),
@@ -331,6 +331,8 @@ CREATE INDEX IF NOT EXISTS ix_marc_disp_pendente ON marcacao (dispositivo_id) WH
 ALTER TABLE equipe ADD COLUMN IF NOT EXISTS bitrix_stage_id text;
 CREATE UNIQUE INDEX IF NOT EXISTS ux_equipe_bitrix_stage ON equipe (empresa_id, bitrix_stage_id) WHERE bitrix_stage_id IS NOT NULL;
 ALTER TABLE colaborador ADD COLUMN IF NOT EXISTS bitrix_contact_id text;
+-- Card (deal) do colaborador no pipeline: destino do comentário com a decisão do RH.
+ALTER TABLE colaborador ADD COLUMN IF NOT EXISTS bitrix_card_id text;
 CREATE UNIQUE INDEX IF NOT EXISTS ux_colab_bitrix_contact ON colaborador (empresa_id, bitrix_contact_id) WHERE bitrix_contact_id IS NOT NULL;
 -- Token que autentica o robô (n8n) em /api/integracao/bitrix. Só o sha256 fica
 -- no banco, como a credencial do aparelho; o RH vê o token uma vez ao gerar.

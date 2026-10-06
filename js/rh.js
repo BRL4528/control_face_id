@@ -600,7 +600,7 @@ export const Rh = {
       return '<div class="eqp-row">' +
         '<span class="av' + (p.tem_biometria ? '' : ' bad') + '">' + esc(this.iniciais(p.nome)) + '</span>' +
         '<div class="eqp-quem"><div class="nm">' + esc(p.nome) + (deOutra ? ' <span class="pill mut" style="padding:0 7px">ajuste de hoje · ' + esc(this.nomeEquipe(p.equipe_id)) + '</span>' : '') +
-          (p.papel === 'gestor' ? ' <span class="tag">gestor</span>' : '') + '</div>' +
+          (p.papel === 'gestor' ? ' <span class="tag">gestor</span>' : '') + (p.papel === 'lider' ? ' <span class="tag">líder</span>' : '') + '</div>' +
           '<div class="mt">' + (ent ? 'Entrada <b class="mono">' + esc(hora(ent.marcado_em)) + '</b>' : 'Sem entrada') + (sai ? ' · Saída <b class="mono">' + esc(hora(sai.marcado_em)) + '</b>' : '') +
             (minhas.length ? ' · <span class="badfg">' + esc(minhas.map(x => x.rotulo).join(', ')) + '</span>' : '') + '</div></div>' +
         '<span class="pill ' + cls + '"><span class="dot"></span>' + esc(estado) + '</span>' +
@@ -1155,7 +1155,7 @@ export const Rh = {
 
       (x.resolvida ? '' :
         '<div class="decisao"><h2>Decisão</h2>' +
-          '<input id="pendJust" placeholder="Justificativa — fica na auditoria e no espelho de ponto">' +
+          '<input id="pendJust" required placeholder="Decisão (obrigatória) — fica na auditoria, no espelho de ponto e no card do Bitrix">' +
           '<div class="linha"><span style="font-size:12.5px;color:#94a3b8">Registrado como ' + esc(this.dados.usuario.nome || 'RH') + ' · RH</span></div>' +
         '</div>');
   },
@@ -1220,6 +1220,8 @@ export const Rh = {
             '<div><label class="lb2">Equipe</label><select class="inp" id="apNovoEq"><option value="">— sem equipe —</option>' +
               (this.dados.equipes || []).map(e => '<option value="' + e.equipe_id + '">' + esc(e.nome) + '</option>').join('') + '</select></div>' +
           '</div></details>' +
+        '<div style="margin-top:12px"><label class="lb2">Decisão (obrigatória para bloquear)</label>' +
+          '<input class="inp" id="pendJust" placeholder="Ex.: não é funcionário, aparelho de terceiro"></div>' +
         '<div class="row2" style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">' +
           '<button class="v2btn" data-identificar="' + esc(a.dispositivo_id) + '">Identificar e liberar</button>' +
           '<button class="v2btn danger" data-bloquear="' + esc(a.dispositivo_id) + '" style="margin-left:auto">Não é da empresa — bloquear</button>' +
@@ -1253,9 +1255,10 @@ export const Rh = {
     });
     cont.querySelectorAll('button[data-bloquear]').forEach(b => {
       b.onclick = async () => {
+        if (!just()) { toast('Preencha a decisão antes de bloquear', 'warn'); $('pendJust') && $('pendJust').focus(); return; }
         if (!confirm('Bloquear este aparelho? Ele para de enviar registros e as batidas dele saem da fila.')) return;
         b.disabled = true;
-        const r = await ApiRh.decidir(this.token, { tipo: 'dispositivo', id: b.dataset.bloquear, acao: 'bloquear' });
+        const r = await ApiRh.decidir(this.token, { tipo: 'dispositivo', id: b.dataset.bloquear, acao: 'bloquear', motivo: just() });
         if (!r.ok) { toast(r.erro || 'Falha', 'bad'); b.disabled = false; return; }
         toast('Aparelho bloqueado', 'ok');
         this.pendSel = null;
@@ -1265,6 +1268,7 @@ export const Rh = {
 
     cont.querySelectorAll('button[data-decidir]').forEach(b => {
       b.onclick = async () => {
+        if (!just()) { toast('Preencha a decisão antes de aprovar ou rejeitar', 'warn'); $('pendJust') && $('pendJust').focus(); return; }
         b.disabled = true;
         const r = await ApiRh.decidir(this.token, {
           tipo: 'marcacao', id: b.dataset.alvoId, acao: b.dataset.decidir, motivo: just()
@@ -1339,6 +1343,7 @@ export const Rh = {
         '<td><div class="cel-nome"><span class="av' + (semBio ? ' bad' : '') + '">' + esc(this.iniciais(p.nome)) + '</span>' +
           '<span><span class="n">' + esc(p.nome) +
             (p.papel === 'gestor' ? ' <span class="pill mut" style="padding:0 6px">gestor</span>' : '') +
+            (p.papel === 'lider' ? ' <span class="pill mut" style="padding:0 6px">líder de equipe</span>' : '') +
             (p.bitrix_contact_id ? ' <span class="pill mut" style="padding:0 6px" title="Sincronizado do Bitrix">Bitrix</span>' : '') +
             (p.ativo ? '' : ' <span class="pill mut" style="padding:0 6px">inativo</span>') + '</span>' +
           '<span class="m">Matrícula ' + esc(p.matricula) + '</span></span></div></td>' +
@@ -1503,7 +1508,7 @@ export const Rh = {
           '<div><label class="lb2">Equipe</label><select class="inp" id="pEquipe">' +
             eqs.map(e => opt(e.equipe_id, e.nome, p.equipe_id === e.equipe_id)).join('') + '</select></div>' +
           '<div><label class="lb2">Papel</label><select class="inp" id="pPapel">' +
-            opt('colaborador', 'Colaborador', p.papel !== 'gestor') + opt('gestor', 'Gestor', p.papel === 'gestor') + '</select></div>' +
+            opt('colaborador', 'Colaborador', p.papel !== 'gestor' && p.papel !== 'lider') + opt('lider', 'Líder de equipe', p.papel === 'lider') + opt('gestor', 'Gestor', p.papel === 'gestor') + '</select></div>' +
           (editando ? '<div><label class="lb2">Status</label><select class="inp" id="pAtivo">' +
             opt('true', 'Ativo', p.ativo !== false) + opt('false', 'Inativo', p.ativo === false) + '</select></div>' : '') +
         '</div>' +
@@ -1896,7 +1901,7 @@ export const Rh = {
   htmlMembro(p, mostrarEquipe) {
     return '<div class="eq-membro"><span class="av">' + esc(this.iniciais(p.nome)) + '</span>' +
       '<div style="flex:1;min-width:0"><div class="nm">' + esc(p.nome) + '</div>' +
-        '<div class="mt">Matrícula ' + esc(p.matricula) + (p.papel === 'gestor' ? ' · gestor' : '') +
+        '<div class="mt">Matrícula ' + esc(p.matricula) + (p.papel === 'gestor' ? ' · gestor' : '') + (p.papel === 'lider' ? ' · líder de equipe' : '') +
           (mostrarEquipe && p.equipe_id ? ' · ' + esc(this.nomeEquipe(p.equipe_id)) : '') + '</div></div>' +
       (p.bitrix_contact_id
         ? '<span class="mt" title="A equipe desta pessoa é o card dela no Bitrix">via Bitrix</span>'

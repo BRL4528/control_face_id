@@ -5,6 +5,7 @@ import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 import { dentroDaCerca } from '../_lib/geo.js';
+import { comentarNoCard } from '../_lib/bitrix-saida.js';
 
 export default async function handler(req, res) {
   if (cors(req, res)) return;
@@ -13,20 +14,30 @@ export default async function handler(req, res) {
   if (!rh) return erro(res, 401, 'SESSAO_INVALIDA', 'faça login novamente');
 
   const b = corpo(req);
+  // A decisão precisa ser justificada: ela fica na auditoria e no card do Bitrix.
+  b.motivo = String(b.motivo || '').trim();
+  const bloqueio = b.tipo === 'dispositivo' && b.acao === 'bloquear';
+  if ((b.tipo !== 'dispositivo' || bloqueio) && !b.motivo) {
+    return erro(res, 400, 'DECISAO_OBRIGATORIA', 'informe a decisão (justificativa)');
+  }
   if (b.tipo === 'dispositivo') return decidirDispositivo(req, res, rh, b);
   const tipo = b.tipo === 'template' ? 'template' : 'marcacao';
   const acao = b.acao === 'rejeitar' ? 'rejeitar' : 'aprovar';
   if (!b.id) return erro(res, 400, 'CORPO_INVALIDO', 'id obrigatório');
   const sql = db();
+  let alvoColab = null;
 
   // Isolamento de tenant: o alvo precisa pertencer à empresa do RH. Marcação
   // tem empresa_id direto; template chega ao dono via colaborador.
   if (tipo === 'template') {
-    const dono = await sql`SELECT 1 FROM template_facial t JOIN colaborador c ON c.id=t.colaborador_id
+    const dono = await sql`SELECT c.id, c.nome, c.bitrix_card_id FROM template_facial t JOIN colaborador c ON c.id=t.colaborador_id
                            WHERE t.id=${b.id} AND c.empresa_id=${rh.empresa_id} LIMIT 1`;
+    alvoColab = dono[0] || null;
     if (!dono[0]) return erro(res, 404, 'ALVO_NAO_ENCONTRADO', 'cadastro facial não encontrado');
   } else {
-    const dono = await sql`SELECT 1 FROM marcacao WHERE id_cliente=${b.id} AND empresa_id=${rh.empresa_id} LIMIT 1`;
+    const dono = await sql`SELECT c.id, c.nome, c.bitrix_card_id FROM marcacao m LEFT JOIN colaborador c ON c.id=m.colaborador_id
+                           WHERE m.id_cliente=${b.id} AND m.empresa_id=${rh.empresa_id} LIMIT 1`;
+    alvoColab = dono[0] && dono[0].id ? dono[0] : null;
     if (!dono[0]) return erro(res, 404, 'ALVO_NAO_ENCONTRADO', 'marcação não encontrada');
   }
 
@@ -49,6 +60,7 @@ export default async function handler(req, res) {
       await sql`UPDATE template_facial SET estado='ativo' WHERE id=${b.id}`;
     }
   }
+  await comentarNoCard(alvoColab, `Decisão do RH (${rh.nome || 'RH'}) — ${tipo === 'template' ? 'cadastro facial' : 'marcação'} ${acao === 'rejeitar' ? 'rejeitado(a)' : 'aprovado(a)'}: ${b.motivo}`);
   return ok(res, { decidido: true });
 }
 
@@ -79,7 +91,7 @@ async function decidirDispositivo(req, res, rh, b) {
                 VALUES (${novoId()}, ${rh.empresa_id}, 'marcacao', ${m.id_cliente}, 'rejeitar', 'aparelho bloqueado pelo RH', ${rh.sub})`;
     }
     await sql`INSERT INTO correcao (id, empresa_id, alvo_tipo, alvo_id, acao, motivo, usuario_rh_id)
-              VALUES (${novoId()}, ${rh.empresa_id}, 'dispositivo', ${disp.id}, 'bloquear', ${b.motivo || null}, ${rh.sub})`;
+              VALUES (${novoId()}, ${rh.empresa_id}, 'dispositivo', ${disp.id}, 'bloquear', ${b.motivo}, ${rh.sub})`;
     return ok(res, { bloqueado: true, marcacoes_rejeitadas: pend.length });
   }
 

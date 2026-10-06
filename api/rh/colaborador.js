@@ -15,7 +15,7 @@ export default async function handler(req, res) {
   const nome = String(b.nome || '').trim();
   const matricula = String(b.matricula || '').trim();
   if (!nome || !matricula) return erro(res, 400, 'CORPO_INVALIDO', 'nome e matrícula obrigatórios');
-  const papel = b.papel === 'gestor' ? 'gestor' : 'colaborador';
+  const papel = ['gestor', 'lider'].includes(b.papel) ? b.papel : 'colaborador';
   const equipeId = b.equipe_id || null;
   const sql = db();
 

@@ -165,23 +165,25 @@ export async function aplicarSnapshot(sql, empresaId, snap, hoje, { confirmarVaz
   const contatos = abertos.map(c => c.contato);
   const nomesC = abertos.map(c => c.nome);
   const eqs = abertos.map(c => eqPorStage.get(c.etapa) || null);
+  const cardsId = abertos.map(c => c.card);
   if (abertos.length) {
     await sql.query(
-      `UPDATE colaborador c SET nome=t.nome, equipe_padrao=t.equipe, ativo=true
-       FROM unnest($2::text[], $3::text[], $4::text[]) AS t(contato, nome, equipe)
+      `UPDATE colaborador c SET nome=t.nome, equipe_padrao=t.equipe, ativo=true, bitrix_card_id=t.card
+       FROM unnest($2::text[], $3::text[], $4::text[], $5::text[]) AS t(contato, nome, equipe, card)
        WHERE c.empresa_id=$1 AND c.bitrix_contact_id=t.contato`,
-      [empresaId, contatos, nomesC, eqs]);
+      [empresaId, contatos, nomesC, eqs, cardsId]);
     // Novo: matrícula = id do contato. Se essa matrícula já existir sem vínculo
     // (importado por planilha com o mesmo código), o registro é adotado.
     await sql.query(
-      `INSERT INTO colaborador (id, empresa_id, nome, matricula, papel, equipe_padrao, ativo, bitrix_contact_id)
-       SELECT t.id, $1, t.nome, t.contato, 'colaborador', t.equipe, true, t.contato
-       FROM unnest($2::text[], $3::text[], $4::text[], $5::text[]) AS t(id, contato, nome, equipe)
+      `INSERT INTO colaborador (id, empresa_id, nome, matricula, papel, equipe_padrao, ativo, bitrix_contact_id, bitrix_card_id)
+       SELECT t.id, $1, t.nome, t.contato, 'colaborador', t.equipe, true, t.contato, t.card
+       FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[]) AS t(id, contato, nome, equipe, card)
        WHERE NOT EXISTS (SELECT 1 FROM colaborador c WHERE c.empresa_id=$1 AND c.bitrix_contact_id=t.contato)
        ON CONFLICT (empresa_id, matricula) DO UPDATE SET
-         nome=EXCLUDED.nome, equipe_padrao=EXCLUDED.equipe_padrao, ativo=true, bitrix_contact_id=EXCLUDED.bitrix_contact_id
+         nome=EXCLUDED.nome, equipe_padrao=EXCLUDED.equipe_padrao, ativo=true, bitrix_contact_id=EXCLUDED.bitrix_contact_id,
+         bitrix_card_id=EXCLUDED.bitrix_card_id
        WHERE colaborador.bitrix_contact_id IS NULL`,
-      [empresaId, contatos.map(() => novoId()), contatos, nomesC, eqs]);
+      [empresaId, contatos.map(() => novoId()), contatos, nomesC, eqs, cardsId]);
   }
   await sql`UPDATE colaborador SET ativo=false
             WHERE empresa_id=${empresaId} AND bitrix_contact_id IS NOT NULL AND ativo=true

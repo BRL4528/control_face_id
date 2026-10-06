@@ -526,6 +526,9 @@ export function criarServidor(opts = {}) {
         }
         if (url.pathname.endsWith('/decidir')) {
           if (!body.id) return responder(422, { ok: false, erro: 'id obrigatorio' });
+          if (body.tipo !== 'dispositivo' || body.acao === 'bloquear') {
+            if (!String(body.motivo || '').trim()) return responder(400, { ok: false, erro: 'informe a decisão (justificativa)' });
+          }
           estado.decisoes.push({ tipo: body.tipo, id: body.id, acao: body.acao });
           if (body.tipo === 'template') {
             estado.recadastros = estado.recadastros.filter(t => t.template_id !== body.id);
