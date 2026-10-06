@@ -39,6 +39,7 @@ export const Rh = {
   pendSel: null,     // exceção selecionada no master-detail de pendências
   pendTab: 'abertas',
   buscaPessoas: '',
+  filtroFuncao: '',     // papel (função) filtrado em Colaboradores, Equipes e Relatórios; '' = todas
   aoSair: null,
   capturas: [],
   alvoCadastro: null,
@@ -291,6 +292,21 @@ export const Rh = {
     const custom = (this.dados.papeis || []).filter(p => p.ativo || p.id === atual);
     return this.PAPEIS_SISTEMA.concat(custom.map(p => ({ id: p.id, nome: p.nome + (p.ativo ? '' : ' (desativado)') })));
   },
+  /** Funções filtráveis: as do sistema + todas as personalizadas (inclusive desativadas, que ainda podem ter gente). */
+  funcoes() { return this.PAPEIS_SISTEMA.concat((this.dados.papeis || []).map(p => ({ id: p.id, nome: p.nome + (p.ativo ? '' : ' (desativado)') }))); },
+  passaFuncao(p) { return !this.filtroFuncao || (p.papel || 'colaborador') === this.filtroFuncao; },
+  /** <select> de função; `ao` roda depois de trocar o filtro (repinta a tela). */
+  htmlFiltroFuncao(id) {
+    return '<select class="inp" id="' + id + '" title="Filtrar por função" style="margin:0;width:auto;min-width:150px">' +
+      '<option value="">Todas as funções</option>' +
+      this.funcoes().map(f => '<option value="' + esc(f.id) + '"' + (this.filtroFuncao === f.id ? ' selected' : '') + '>' + esc(f.nome) + '</option>').join('') +
+      '</select>';
+  },
+  ligarFiltroFuncao(id, ao) {
+    const el = $(id);
+    if (el) el.onchange = () => { this.filtroFuncao = el.value; ao(); };
+  },
+
   nomePapel(id) {
     const x = this.PAPEIS_SISTEMA.concat(this.dados.papeis || []).find(p => p.id === id);
     return x ? x.nome : '';
@@ -1344,6 +1360,7 @@ export const Rh = {
     const q = this.buscaPessoas.toLowerCase();
     const lista = (this.dados.pessoas || []).slice()
       .filter(p => !q || (p.nome + ' ' + p.matricula).toLowerCase().includes(q))
+      .filter(p => this.passaFuncao(p))
       .sort((a, b) => a.nome.localeCompare(b.nome));
     const total = (this.dados.pessoas || []).length;
 
@@ -1383,6 +1400,7 @@ export const Rh = {
       '<div class="tbl-wrap">' +
         '<div class="tbl-bar">' +
           '<div class="tbl-busca">🔍<input id="pBusca" placeholder="Buscar por nome ou matrícula…" value="' + esc(this.buscaPessoas) + '"></div>' +
+          this.htmlFiltroFuncao('pFuncao') +
           '<span style="margin-left:auto;font-size:12.5px;color:#94a3b8">' + lista.length + ' de ' + total + '</span>' +
         '</div>' +
         '<div style="overflow:auto"><table class="densa"><thead><tr>' +
@@ -1394,6 +1412,7 @@ export const Rh = {
       '</div>' +
       '<div id="areaBio"></div>';
 
+    this.ligarFiltroFuncao('pFuncao', () => this.pintarPessoas());
     const busca = $('pBusca');
     busca.oninput = () => {
       this.buscaPessoas = busca.value;
@@ -1743,7 +1762,7 @@ export const Rh = {
 
   pintarEquipes() {
     const d = this.dados;
-    const pessoas = (d.pessoas || []).filter(p => p.ativo).slice().sort((a, b) => a.nome.localeCompare(b.nome));
+    const pessoas = (d.pessoas || []).filter(p => p.ativo && this.passaFuncao(p)).slice().sort((a, b) => a.nome.localeCompare(b.nome));
     const locais = d.locais || [];
     const localDe = e => locais.find(l => l.local_id === e.local_id) || null;
     const membros = id => pessoas.filter(p => p.equipe_id === id);
@@ -1753,7 +1772,7 @@ export const Rh = {
 
     // A fila de trabalho do RH: obra ativa, com gente ou não, ainda sem cerca.
     const busca = (this.buscaEquipes || '').trim().toLowerCase();
-    const casa = e => !busca || e.nome.toLowerCase().includes(busca);
+    const casa = e => (!busca || e.nome.toLowerCase().includes(busca)) && (!this.filtroFuncao || membros(e.equipe_id).length > 0);
     const precisam = eqs.filter(e => e.ativo && !e.local_id).filter(casa);
     const prontas = eqs.filter(e => e.ativo && e.local_id).filter(casa);
     const inativas = eqs.filter(e => !e.ativo).filter(casa);
@@ -1799,6 +1818,7 @@ export const Rh = {
               (precisam.length ? ' · <b style="color:var(--v2-vermelho)">' + precisam.length + ' sem local</b>' : '') + '</p>' +
             '<div class="eq-busca">' +
               '<input class="inp" id="eqBusca" type="search" placeholder="🔍 Buscar obra…" value="' + esc(this.buscaEquipes || '') + '">' +
+              this.htmlFiltroFuncao('eqFuncao') +
               '<button class="v2btn ghost" id="btnNovaEquipe" title="Criar uma equipe que não vem do Bitrix">+</button>' +
             '</div>' +
           '</div>' +
@@ -1817,6 +1837,7 @@ export const Rh = {
         '<h2 id="eqLocalTit">Local da equipe</h2><button class="modal-x" id="eqLocalX">✕</button></div>' +
         '<div id="equipeLocalEditor" class="modal-body"></div></div></div>';
 
+    this.ligarFiltroFuncao('eqFuncao', () => this.pintarEquipes());
     const bus = $('eqBusca');
     bus.oninput = () => { this.buscaEquipes = bus.value; this.pintarEquipes(); $('eqBusca').focus(); };
     $('btnNovaEquipe').onclick = async () => {
@@ -1839,7 +1860,8 @@ export const Rh = {
   /** Painel direito: a obra selecionada — cerca, jornada, escala e quem está nela. */
   htmlDetalheEquipe() {
     const d = this.dados;
-    const pessoas = (d.pessoas || []).filter(p => p.ativo).slice().sort((a, b) => a.nome.localeCompare(b.nome));
+    const todas = (d.pessoas || []).filter(p => p.ativo).slice().sort((a, b) => a.nome.localeCompare(b.nome));   // sem filtro: p/ vincular
+    const pessoas = (d.pessoas || []).filter(p => p.ativo && this.passaFuncao(p)).slice().sort((a, b) => a.nome.localeCompare(b.nome));
     const semEquipe = pessoas.filter(p => !p.equipe_id || !(d.equipes || []).some(e => e.equipe_id === p.equipe_id));
 
     if (this.equipeAberta === SEM_EQUIPE) {
@@ -1864,7 +1886,7 @@ export const Rh = {
     const jNome = (d.jornadas || []).find(j => j.jornada_id === e.jornada_id);
     const sup = e.supervisor_id ? this.pessoaDe(e.supervisor_id) : null;
     // Quem vem do Bitrix não é vinculado à mão: a equipe dele é o card no kanban.
-    const candidatos = pessoas.filter(p => p.equipe_id !== e.equipe_id && !p.bitrix_contact_id)
+    const candidatos = todas.filter(p => p.equipe_id !== e.equipe_id && !p.bitrix_contact_id)
       .sort((a, b) => (!a.equipe_id === !b.equipe_id ? a.nome.localeCompare(b.nome) : (a.equipe_id ? 1 : -1)));
 
     const fato = (k, v, acao) => '<div><div class="k">' + k + '</div><div class="v">' + v + '</div>' +
@@ -1895,7 +1917,8 @@ export const Rh = {
       '</div></div>' +
 
       '<div class="fatos">' +
-        '<h2 style="margin:0 0 11px;font-size:14px">Colaboradores <span style="color:var(--v2-mut2);font-weight:400">(' + ms.length + ')</span></h2>' +
+        '<h2 style="margin:0 0 11px;font-size:14px">Colaboradores <span style="color:var(--v2-mut2);font-weight:400">(' + ms.length + ')</span>' +
+          (this.filtroFuncao ? ' <span class="pill mut" style="padding:0 7px">só ' + esc(this.nomePapel(this.filtroFuncao).toLowerCase()) + '</span>' : '') + '</h2>' +
         (ms.length ? ms.map(p => this.htmlMembro(p, false)).join('')
                    : '<p class="nota" style="margin:0">Nenhum colaborador nesta equipe.</p>') +
         (candidatos.length ?
@@ -2102,14 +2125,19 @@ export const Rh = {
     const d = this.dados;
     const hoje = this.hojeServidor();
     const cfg = window.EFRAT_CFG || {};
-    const ind = indicadores(d.marcacoes, d.pessoas, d.equipes);
-    const serie = serieDiaria(d.marcacoes, d.periodo_dias || this.dias, hoje);
-    const motivos = pendenciasPorMotivo(d.marcacoes, d.recadastros, d.pessoas);
+    // Filtro de função vale para a página inteira: gráficos, resumo, CSVs e horas.
+    const pessoasF = (d.pessoas || []).filter(p => this.passaFuncao(p));
+    const idsF = new Set(pessoasF.map(p => p.pessoa_id));
+    const marcacoesF = this.filtroFuncao ? (d.marcacoes || []).filter(m => idsF.has(m.pessoa_id)) : (d.marcacoes || []);
+    const ind = indicadores(marcacoesF, pessoasF, d.equipes);
+    const serie = serieDiaria(marcacoesF, d.periodo_dias || this.dias, hoje);
+    const motivos = pendenciasPorMotivo(marcacoesF, d.recadastros, pessoasF);
 
     $('rh-relatorios').innerHTML =
       '<div class="pg-head"><div><h1 class="tit">Relatórios</h1>' +
-        '<p class="sub">Marcações, presença e registro manual no período de ' + (d.periodo_dias || this.dias) + ' dias.</p></div>' +
-        '<div class="acoes"><button class="v2btn ghost" id="btnCsvMarc">Exportar marcações (CSV)</button>' +
+        '<p class="sub">Marcações, presença e registro manual no período de ' + (d.periodo_dias || this.dias) + ' dias' +
+          (this.filtroFuncao ? ' · só ' + esc(this.nomePapel(this.filtroFuncao).toLowerCase()) : '') + '.</p></div>' +
+        '<div class="acoes">' + this.htmlFiltroFuncao('rFuncao') + '<button class="v2btn ghost" id="btnCsvMarc">Exportar marcações (CSV)</button>' +
           '<button class="v2btn ghost" id="btnCsvEquipe">Exportar por equipe (CSV)</button></div></div>' +
       '<div class="vizrow">' +
         '<div class="v2card" style="padding:15px">' +
@@ -2140,7 +2168,7 @@ export const Rh = {
           'Só marcações aprovadas entram no saldo; pendentes e dias incompletos ficam sinalizados.</p>' +
         '<div class="form-grid" style="margin-bottom:12px">' +
           '<div><label class="lb2">Colaborador</label><select class="inp" id="hrPessoa"><option value="">Todos</option>' +
-            (d.pessoas || []).slice().sort((a, b) => a.nome.localeCompare(b.nome))
+            pessoasF.slice().sort((a, b) => a.nome.localeCompare(b.nome))
               .map(p => '<option value="' + p.pessoa_id + '">' + esc(p.nome) + '</option>').join('') + '</select></div>' +
           '<div><label class="lb2">De</label><input class="inp" type="date" id="hrDe" value="' + hoje.slice(0, 8) + '01"></div>' +
           '<div><label class="lb2">Até</label><input class="inp" type="date" id="hrAte" value="' + hoje + '"></div>' +
@@ -2150,9 +2178,10 @@ export const Rh = {
         '<div id="hrSaida"><p class="nota">Escolha o período e clique em Gerar (até 93 dias).</p></div>' +
       '</div>';
 
+    this.ligarFiltroFuncao('rFuncao', () => this.pintarRelatorios());
     $('btnHoras').onclick = () => this.gerarHoras();
     $('btnCsvMarc').onclick = () => {
-      const linhas = (d.marcacoes || []).map(m => [
+      const linhas = marcacoesF.map(m => [
         m.marcado_dia, hora(m.marcado_em), this.nomeDe(m.pessoa_id),
         this.nomeEquipe(m.equipe_id), m.tipo, m.origem, m.veredito,
         m.dentro_cerca === false ? 'fora' : (m.dentro_cerca ? 'dentro' : '')
@@ -2182,7 +2211,7 @@ export const Rh = {
     const linhas = horasPorColaborador({
       marcacoes: r.dados.marcacoes, alocacoes: r.dados.alocacoes, pessoas: d.pessoas, equipes: d.equipes, jornadas: d.jornadas,
       jornadaPadrao: jp, de, ate, hoje: this.hojeServidor(), fuso: (d.empresa || {}).fuso, pessoaId: pessoaId || null
-    });
+    }).filter(l => this.passaFuncao(d.pessoas.find(p => p.pessoa_id === l.pessoa_id) || {}));
     this.horasLinhas = { linhas, de, ate };
     $('btnCsvHoras').disabled = !linhas.length;
     $('btnCsvHoras').onclick = () => this.csvHoras();
