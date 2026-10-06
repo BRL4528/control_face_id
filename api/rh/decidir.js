@@ -5,7 +5,7 @@ import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 import { dentroDaCerca } from '../_lib/geo.js';
-import { comentarNoCard } from '../_lib/bitrix-saida.js';
+import { comentarNoCard, montarComentario } from '../_lib/bitrix-saida.js';
 
 export default async function handler(req, res) {
   if (cors(req, res)) return;
@@ -25,19 +25,25 @@ export default async function handler(req, res) {
   const acao = b.acao === 'rejeitar' ? 'rejeitar' : 'aprovar';
   if (!b.id) return erro(res, 400, 'CORPO_INVALIDO', 'id obrigatório');
   const sql = db();
-  let alvoColab = null;
+  let alvoColab = null, alvo = null;
 
   // Isolamento de tenant: o alvo precisa pertencer à empresa do RH. Marcação
   // tem empresa_id direto; template chega ao dono via colaborador.
   if (tipo === 'template') {
-    const dono = await sql`SELECT c.id, c.nome, c.bitrix_card_id FROM template_facial t JOIN colaborador c ON c.id=t.colaborador_id
+    const dono = await sql`SELECT c.id, c.nome, c.matricula, c.bitrix_card_id, t.versao, t.origem, t.criado_em
+                           FROM template_facial t JOIN colaborador c ON c.id=t.colaborador_id
                            WHERE t.id=${b.id} AND c.empresa_id=${rh.empresa_id} LIMIT 1`;
     alvoColab = dono[0] || null;
+    alvo = dono[0] || null;
     if (!dono[0]) return erro(res, 404, 'ALVO_NAO_ENCONTRADO', 'cadastro facial não encontrado');
   } else {
-    const dono = await sql`SELECT c.id, c.nome, c.bitrix_card_id FROM marcacao m LEFT JOIN colaborador c ON c.id=m.colaborador_id
+    const dono = await sql`SELECT c.id, c.nome, c.matricula, c.bitrix_card_id, m.tipo, m.origem, m.veredito, m.motivo AS motivo_revisao,
+                                  m.marcado_em, m.dentro_cerca, m.distancia_cerca_m, m.liveness_ok, m.lat, m.lng, m.precisao_m,
+                                  eq.nome AS equipe
+                           FROM marcacao m LEFT JOIN colaborador c ON c.id=m.colaborador_id LEFT JOIN equipe eq ON eq.id=m.equipe_id
                            WHERE m.id_cliente=${b.id} AND m.empresa_id=${rh.empresa_id} LIMIT 1`;
     alvoColab = dono[0] && dono[0].id ? dono[0] : null;
+    alvo = dono[0] || null;
     if (!dono[0]) return erro(res, 404, 'ALVO_NAO_ENCONTRADO', 'marcação não encontrada');
   }
 
@@ -60,7 +66,12 @@ export default async function handler(req, res) {
       await sql`UPDATE template_facial SET estado='ativo' WHERE id=${b.id}`;
     }
   }
-  await comentarNoCard(alvoColab, `Decisão do RH (${rh.nome || 'RH'}) — ${tipo === 'template' ? 'cadastro facial' : 'marcação'} ${acao === 'rejeitar' ? 'rejeitado(a)' : 'aprovado(a)'}: ${b.motivo}`);
+  if (alvoColab) {
+    const fuso = (await sql`SELECT fuso FROM empresa WHERE id=${rh.empresa_id} LIMIT 1`)[0];
+    await comentarNoCard(alvoColab, montarComentario({
+      tipo, acao, decisao: b.motivo, rh: rh.nome || rh.usuario || 'RH', alvoId: b.id, alvo, fuso: fuso && fuso.fuso
+    }));
+  }
   return ok(res, { decidido: true });
 }
 
