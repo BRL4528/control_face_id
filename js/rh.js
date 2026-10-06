@@ -12,7 +12,7 @@ import {
   presencaPorEquipe, serieDiaria, pendenciasPorMotivo,
   exceptionsDoDia, TIPOS_EXCECAO,
   jornadaDaEquipe, horasEntradaPorEquipe, csvDe,
-  alertasDePlanejamento, horasPorColaborador, fmtMinutos, dia as diaDe
+  alertasDePlanejamento, horasPorColaborador, fmtMinutos, dia as diaDe, motivosDaRevisao, rotuloAuditoria
 } from './regras.js';
 import { $, esc, mostrar, toast, hora, data } from './ui.js';
 
@@ -1150,6 +1150,8 @@ export const Rh = {
       ['Origem', m ? (m.origem === 'manual' ? 'Registro manual' : 'Biometria facial · app') : 'Ausência detectada'],
       ['Desvio', m && m.distancia_cerca_m != null ? (m.distancia_cerca_m + ' m do centro') : '—']
     ];
+    const motivosRev = motivosDaRevisao(m, window.EFRAT_CFG);
+    if (motivosRev.length) fatos.unshift(['Motivo da revisão', motivosRev.join(' · ')]);
 
     // ações dependem do tipo
     let acoes = '';
@@ -2349,13 +2351,13 @@ export const Rh = {
 
   pintarAuditoria() {
     const cs = this.dados.correcoes || [];
-    const rotAcao = a => a === 'aprovar' ? 'Aprovou' : a === 'rejeitar' ? 'Rejeitou' : a === 'lancar' ? 'Lançou' : esc(a);
-    const pillAcao = a => a === 'rejeitar' ? 'bad' : a === 'aprovar' ? 'ok' : 'mut';
+    const rotAcao = c => rotuloAuditoria(c).txt;
+    const pillAcao = c => rotuloAuditoria(c).cls;
 
     const linha = c =>
       '<tr><td class="mono" style="white-space:nowrap">' + esc(String(c.criada_em).slice(0, 16).replace('T', ' ')) + '</td>' +
       '<td>' + esc(c.usuario_rh_nome || c.usuario_rh_login || 'RH') + '</td>' +
-      '<td><span class="pill ' + pillAcao(c.acao) + '"><span class="dot"></span>' + rotAcao(c.acao) + '</span></td>' +
+      '<td><span class="pill ' + pillAcao(c) + '"><span class="dot"></span>' + esc(rotAcao(c)) + '</span></td>' +
       '<td>' + esc(c.pessoa_nome || (c.alvo_tipo === 'template' ? 'recadastro' : '—')) + '</td>' +
       '<td style="color:#64748b">' + esc(c.motivo || '—') + '</td></tr>';
 
@@ -2382,7 +2384,7 @@ export const Rh = {
     };
     $('btnCsvAud').onclick = () => {
       const linhas = cs.map(c => [String(c.criada_em).slice(0, 16).replace('T', ' '),
-        c.usuario_rh_nome || c.usuario_rh_login || 'RH', rotAcao(c.acao), c.pessoa_nome || '', c.motivo || '']);
+        c.usuario_rh_nome || c.usuario_rh_login || 'RH', rotAcao(c), c.pessoa_nome || '', c.motivo || '']);
       this.baixarCsv('auditoria.csv', ['Quando', 'Quem', 'Ação', 'Colaborador', 'Motivo'], linhas);
     };
   },

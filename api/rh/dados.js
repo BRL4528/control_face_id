@@ -30,7 +30,7 @@ export default async function handler(req, res) {
         FROM colaborador c WHERE c.empresa_id = ${empresa} ORDER BY c.nome`,
     sql`SELECT m.id_cliente, m.colaborador_id AS pessoa_id, m.equipe_id, m.tipo, m.origem, m.veredito,
                m.marcado_em, to_char(m.marcado_dia,'YYYY-MM-DD') AS marcado_dia, m.deriva_ms AS deriva_relogio_ms, m.dentro_cerca,
-               m.distancia_cerca_m, m.lat, m.lng, m.foto_url AS foto_auditoria, m.requer_revisao, m.score,
+               m.distancia_cerca_m, m.lat, m.lng, m.foto_url AS foto_auditoria, m.requer_revisao, m.score, m.liveness_ok,
                (m.requer_revisao AND NOT EXISTS(
                   SELECT 1 FROM correcao co WHERE co.alvo_tipo='marcacao' AND co.alvo_id=m.id_cliente)) AS pendente,
                EXISTS(SELECT 1 FROM correcao co WHERE co.alvo_tipo='marcacao' AND co.alvo_id=m.id_cliente AND co.acao='rejeitar') AS anulada,
@@ -57,7 +57,7 @@ export default async function handler(req, res) {
     // Trilha de auditoria: decisões do RH, com nome de quem decidiu e da pessoa alvo.
     sql`SELECT co.id, co.alvo_tipo, co.alvo_id, co.acao, co.motivo, co.criada_em,
                u.nome AS usuario_rh_nome, u.usuario AS usuario_rh_login,
-               c.nome AS pessoa_nome
+               c.nome AS pessoa_nome, m.origem AS marcacao_origem
         FROM correcao co
         LEFT JOIN usuario_rh u ON u.id = co.usuario_rh_id
         LEFT JOIN marcacao m ON (co.alvo_tipo='marcacao' AND m.id_cliente = co.alvo_id)

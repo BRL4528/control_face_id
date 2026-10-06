@@ -670,3 +670,47 @@ export function fmtMinutos(min, sinal) {
   const t = Math.floor(a / 60) + 'h' + String(a % 60).padStart(2, '0');
   return sinal && n !== 0 ? (n < 0 ? '-' : '+') + t : t;
 }
+
+/* ------------------------------------------------ motivo da revisão e rótulos da auditoria */
+
+/**
+ * Por que uma batida foi para a revisão do RH. O servidor não grava o motivo, então
+ * ele é derivado dos mesmos sinais que a mandam para revisão (api/ponto.js).
+ * `cfg`: { limiarAceite, limiarCinza }. Pura.
+ */
+export function motivosDaRevisao(m, cfg) {
+  if (!m) return [];
+  const c = Object.assign({ limiarAceite: 0.45, limiarCinza: 0.58 }, cfg || {});
+  const r = [];
+  if (m.origem === 'manual') r.push('Registro manual, sem reconhecimento facial');
+  if (m.dentro_cerca === false) r.push('Fora da cerca' + (m.distancia_cerca_m != null ? ' (' + m.distancia_cerca_m + ' m do centro)' : ''));
+  else if (m.dentro_cerca == null && m.origem !== 'manual') r.push('Sem cerca definida para a equipe ou o dia');
+  if (m.liveness_ok === false) r.push('Prova de vida não detectada (sem piscada)');
+  const deriva = Math.abs(Number(m.deriva_relogio_ms) || 0);
+  if (deriva > 120000) r.push('Relógio do aparelho ' + Math.round(deriva / 60000) + ' min fora do horário do servidor');
+  if (m.origem !== 'manual' && m.score != null && Number(m.score) > c.limiarAceite) {
+    r.push('Rosto na zona cinzenta (distância ' + Number(m.score).toFixed(2).replace('.', ',') + ', aceite até ' + String(c.limiarAceite).replace('.', ',') + ')');
+  }
+  return r;
+}
+
+/** Rótulo e cor da ação na Auditoria. `c`: { acao, alvo_tipo, motivo, marcacao_origem }. Pura. */
+export function rotuloAuditoria(c) {
+  const motivo = String(c.motivo || '');
+  if (c.alvo_tipo === 'dispositivo') {
+    if (c.acao === 'bloquear') return { txt: 'Bloqueou aparelho', cls: 'bad' };
+    if (c.acao === 'identificar') return { txt: 'Identificou aparelho', cls: 'ok' };
+  }
+  if (c.acao === 'rejeitar') {
+    if (/^anulada pelo RH/.test(motivo)) return { txt: 'Anulou', cls: 'mut' };
+    if (/^corrigida pelo RH/.test(motivo)) return { txt: 'Corrigiu', cls: 'mut' };
+    return { txt: 'Rejeitou', cls: 'bad' };
+  }
+  if (c.acao === 'aprovar') {
+    if (/^corrige /.test(motivo)) return { txt: 'Lançou (correção)', cls: 'mut' };
+    if (c.marcacao_origem === 'manual') return { txt: 'Lançou', cls: 'mut' };
+    return { txt: 'Aprovou', cls: 'ok' };
+  }
+  if (c.acao === 'atribuir') return { txt: 'Atribuiu batida', cls: 'mut' };
+  return { txt: String(c.acao || ''), cls: 'mut' };
+}
