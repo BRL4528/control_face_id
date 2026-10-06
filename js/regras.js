@@ -615,7 +615,7 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
     const todos = new Set([...b.marcas.keys(), ...b.aloc.keys()]);
     for (const dia of [...todos].sort()) {
       const marcas = b.marcas.get(dia) || [];
-      const equipeId = b.aloc.get(dia) || (marcas[0] && marcas[0].equipe_id) || null;
+      const equipeId = b.aloc.get(dia) || ((marcas.find(m => m.equipe_id) || {}).equipe_id) || null;
       const jor = jornadaDe(equipeId);
       const escalado = b.aloc.has(dia);
       const previsto = escalado ? Math.max(0, emMin(jor.saida) - emMin(jor.entrada) - jor.intervalo_min) : 0;
@@ -653,5 +653,5 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
 export function fmtMinutos(min, sinal) {
   const n = Math.round(Number(min) || 0), a = Math.abs(n);
   const t = Math.floor(a / 60) + 'h' + String(a % 60).padStart(2, '0');
-  return sinal ? (n < 0 ? '-' : '+') + t : t;
+  return sinal && n !== 0 ? (n < 0 ? '-' : '+') + t : t;
 }

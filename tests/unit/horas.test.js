@@ -55,5 +55,5 @@ test('dia escalado sem batida no passado é falta; hoje é em andamento', () => 
 test('batida sem escala conta tudo como extra; fmtMinutos', () => {
   const r = horasPorColaborador({ ...base, alocacoes: [], marcacoes: [mk('entrada', '08:00'), mk('saida', '10:00')] });
   assert.equal(dia(r).status, 'sem_escala'); assert.equal(dia(r).saldo, 120);
-  assert.equal(fmtMinutos(510), '8h30'); assert.equal(fmtMinutos(65, true), '+1h05'); assert.equal(fmtMinutos(-20, true), '-0h20');
+  assert.equal(fmtMinutos(510), '8h30'); assert.equal(fmtMinutos(65, true), '+1h05'); assert.equal(fmtMinutos(-20, true), '-0h20'); assert.equal(fmtMinutos(0, true), '0h00');
 });
