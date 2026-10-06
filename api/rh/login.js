@@ -26,7 +26,7 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     const usuario = String((req.query && req.query.usuario) || '').trim();
     if (!usuario) return erro(res, 400, 'CORPO_INVALIDO', 'usuario obrigatório');
-    const us = await sql`SELECT sal, iteracoes FROM usuario_rh WHERE usuario = ${usuario} AND ativo = true LIMIT 1`;
+    const us = await sql`SELECT sal, iteracoes FROM usuario_rh WHERE lower(usuario) = ${usuario.toLowerCase()} AND ativo = true LIMIT 1`;
     const u = us[0];
     return ok(res, { sal: u ? u.sal : salFalso(usuario), iteracoes: u ? u.iteracoes : ITER_PADRAO });
   }
@@ -39,7 +39,7 @@ export default async function handler(req, res) {
 
   const us = await sql`
     SELECT id, empresa_id, usuario, nome, chave_hash, trocar_senha FROM usuario_rh
-    WHERE usuario = ${usuario} AND ativo = true LIMIT 1`;
+    WHERE lower(usuario) = ${String(usuario).trim().toLowerCase()} AND ativo = true LIMIT 1`;
   const u = us[0];
   const confere = u ? await bcrypt.compare(chave, u.chave_hash) : false;
   if (!confere) return erro(res, 401, 'CREDENCIAL_INVALIDA', 'usuário ou senha inválidos');

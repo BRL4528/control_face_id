@@ -2398,10 +2398,11 @@ export const Rh = {
 
     const linhaUsuario = u =>
       '<tr><td><b>' + esc(u.nome) + '</b> <span style="color:#94a3b8">@' + esc(u.usuario) + '</span>' +
-        (u.trocar_senha ? ' <span class="pill warn" style="padding:0 6px">senha temporária</span>' : '') + '</td>' +
+        (u.trocar_senha ? ' <span class="pill warn" style="padding:0 6px" title="Ainda não entrou para trocar a senha temporária">senha temporária pendente</span>' : '') + '</td>' +
       '<td>' + esc(u.criado_em || '') + '</td>' +
       '<td><span class="pill ' + (u.ativo ? 'ok' : 'mut') + '"><span class="dot"></span>' + (u.ativo ? 'Ativo' : 'Inativo') + '</span></td>' +
-      '<td style="text-align:right">' + (u.usuario_id === this.dados.usuario.id ? '<span style="color:#94a3b8;font-size:12px">você</span>' :
+      '<td style="text-align:right;white-space:nowrap">' + (u.usuario_id === this.dados.usuario.id ? '<span style="color:#94a3b8;font-size:12px">você</span>' :
+        '<button class="v2btn ghost mini" data-uredefinir="' + esc(u.usuario_id) + '" data-unome="' + esc(u.nome) + '" title="Gera uma nova senha temporária">Redefinir senha</button> ' +
         '<button class="v2btn ghost mini" data-uativar="' + esc(u.usuario_id) + '" data-estado="' + (u.ativo ? 'desativar' : 'ativar') + '">' + (u.ativo ? 'Desativar' : 'Reativar') + '</button>') + '</td></tr>';
 
     $('rh-config').innerHTML =
@@ -2583,6 +2584,18 @@ export const Rh = {
       await this.recarregar();
     };
     $('btnNovoUsuario').onclick = () => this.formNovoUsuario();
+    $('rh-config').querySelectorAll('[data-uredefinir]').forEach(b => {
+      b.onclick = async () => {
+        if (!confirm('Redefinir a senha de ' + b.dataset.unome + '? A senha atual deixa de valer e uma nova senha temporária será mostrada uma única vez.')) return;
+        b.disabled = true;
+        const r = await ApiRh.usuario(this.token, { acao: 'redefinir_senha', usuario_id: b.dataset.uredefinir });
+        b.disabled = false;
+        if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+        $('areaNovoUsuario').innerHTML = '<div class="card"><h2>Senha redefinida</h2>' + this.htmlSenhaTemporaria(r.dados.usuario, r.dados.senha_temporaria, 'redefinida') + '</div>';
+        this.ligarSenhaTemporaria(r.dados.senha_temporaria);
+        $('areaNovoUsuario').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      };
+    });
     $('rh-config').querySelectorAll('[data-uativar]').forEach(b => {
       b.onclick = async () => {
         const r = await ApiRh.usuario(this.token, { acao: b.dataset.estado, usuario_id: b.dataset.uativar });
@@ -2625,6 +2638,20 @@ export const Rh = {
       '<button class="act ghost mini" id="cpTokenInteg" data-copiar="' + esc(token) + '">Copiar</button></div>';
   },
 
+  /** Caixa da senha temporária: aparece UMA vez (o sistema guarda só o hash). */
+  htmlSenhaTemporaria(login, senha, acao) {
+    return '<div class="senha-box">Usuário <b>@' + esc(login) + '</b> ' + (acao === 'criado' ? 'criado' : 'com senha redefinida') + '. ' +
+      '<b>Anote agora: esta senha não aparece de novo.</b> Repasse com segurança. No primeiro acesso, ' + esc(login) + ' entra com o login e esta senha e o sistema pede uma senha nova.' +
+      '<div class="mono" style="margin-top:8px;user-select:all">' + esc(senha) + '</div>' +
+      '<div style="margin-top:10px;display:flex;gap:8px"><button class="v2btn mini" id="btnCopiarSenhaTmp">Copiar senha</button>' +
+      '<button class="v2btn ghost mini" id="btnFecharSenha">Concluir</button></div>' +
+      '<p class="nota" style="margin:8px 0 0">O login é digitado em letras minúsculas. Se esta tela fechar antes de anotar, use <b>Redefinir senha</b> na lista.</p></div>';
+  },
+  ligarSenhaTemporaria(senha) {
+    $('btnCopiarSenhaTmp').onclick = async () => { try { await navigator.clipboard.writeText(senha); toast('Senha copiada', 'ok'); } catch (e) { toast('Selecione e copie manualmente', 'warn'); } };
+    $('btnFecharSenha').onclick = () => { this.pintarConfig(); };
+  },
+
   formNovoUsuario() {
     $('areaNovoUsuario').innerHTML =
       '<div class="card"><h2>Novo usuário RH</h2>' +
@@ -2649,12 +2676,9 @@ export const Rh = {
       const d = await ApiRh.dados(this.token, this.dias);
       if (d.ok) { this.dados = d.dados; this.aplicarConfig(); }
       // A senha temporária aparece UMA vez — mostra destacada para repassar.
-      $('nuResultado').innerHTML =
-        '<div class="senha-box">Usuário <b>@' + esc(r.dados.usuario) + '</b> criado. Senha temporária (repasse com ' +
-        'segurança; ele troca no 1º acesso):<div class="mono" style="margin-top:6px">' + esc(r.dados.senha_temporaria) + '</div>' +
-        '<button class="v2btn ghost mini" id="btnFecharSenha" style="margin-top:10px">Concluir</button></div>';
+      $('nuResultado').innerHTML = this.htmlSenhaTemporaria(r.dados.usuario, r.dados.senha_temporaria, 'criado');
       $('nuNome').value = ''; $('nuUsuario').value = '';
-      $('btnFecharSenha').onclick = () => { this.pintarConfig(); };
+      this.ligarSenhaTemporaria(r.dados.senha_temporaria);
     };
     $('areaNovoUsuario').scrollIntoView({ behavior: 'smooth', block: 'start' });
   },

@@ -6,25 +6,14 @@
 //   • criar  → servidor gera a senha, deriva PBKDF2-SHA256 (mesmo formato do
 //     navegador: 150k iter, 256 bits, HEX) e guarda só o bcrypt. Devolve a senha
 //     UMA vez ao RH criador (para repassar). Nasce com trocar_senha=true.
+//   • redefinir_senha → mesma geração, para outro usuário da empresa (esqueceu ou
+//     não anotou a temporária). Também devolve a senha UMA vez.
 //   • trocar → o cliente deriva a chave nova no navegador e envia só a chave.
 import bcrypt from 'bcryptjs';
-import { pbkdf2Sync, randomBytes } from 'node:crypto';
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
-
-const ITER = 150000;
-const derivarHex = (senha, salHex) =>
-  pbkdf2Sync(senha, Buffer.from(salHex, 'hex'), ITER, 32, 'sha256').toString('hex');
-
-// Senha temporária legível mas forte: 12 chars de um alfabeto sem ambíguos.
-function senhaTemporaria() {
-  const alf = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-  const b = randomBytes(12);
-  let s = '';
-  for (let i = 0; i < 12; i++) s += alf[b[i] % alf.length];
-  return s;
-}
+import { ITER, novaSenhaTemporaria } from '../_lib/senha-rh.js';
 
 export default async function handler(req, res) {
   if (cors(req, res)) return;
@@ -42,6 +31,19 @@ export default async function handler(req, res) {
     await sql`UPDATE usuario_rh SET ativo=${acao === 'ativar'}
               WHERE id=${b.usuario_id} AND empresa_id=${rh.empresa_id}`;
     return ok(res, { usuario_id: b.usuario_id, ativo: acao === 'ativar' });
+  }
+
+  // Redefinir a senha de OUTRO usuário da mesma empresa (esqueceu, ou a senha temporária
+  // não foi anotada): gera uma nova temporária, mostrada UMA vez, e exige troca no próximo login.
+  if (acao === 'redefinir_senha') {
+    if (!b.usuario_id) return erro(res, 400, 'CORPO_INVALIDO', 'usuario_id obrigatório');
+    if (b.usuario_id === rh.sub) return erro(res, 400, 'PROIBIDO', 'para trocar a própria senha, use a troca de senha do seu acesso');
+    const alvo = await sql`SELECT usuario, nome FROM usuario_rh WHERE id=${b.usuario_id} AND empresa_id=${rh.empresa_id} LIMIT 1`;
+    if (!alvo[0]) return erro(res, 404, 'NAO_ENCONTRADO', 'usuário não encontrado');
+    const nova = await novaSenhaTemporaria();
+    await sql`UPDATE usuario_rh SET sal=${nova.sal}, iteracoes=${ITER}, chave_hash=${nova.chaveHash}, trocar_senha=true
+              WHERE id=${b.usuario_id} AND empresa_id=${rh.empresa_id}`;
+    return ok(res, { usuario_id: b.usuario_id, usuario: alvo[0].usuario, nome: alvo[0].nome, senha_temporaria: nova.senha });
   }
 
   // Trocar a própria senha (usada no fluxo de senha temporária). O cliente já
@@ -64,9 +66,7 @@ export default async function handler(req, res) {
   const jaExiste = await sql`SELECT 1 FROM usuario_rh WHERE lower(usuario)=${usuario} LIMIT 1`;
   if (jaExiste.length) return erro(res, 409, 'USUARIO_EXISTE', 'já existe um usuário com esse login');
 
-  const senha = senhaTemporaria();
-  const sal = randomBytes(16).toString('hex');
-  const chaveHash = await bcrypt.hash(derivarHex(senha, sal), 10);
+  const { senha, sal, chaveHash } = await novaSenhaTemporaria();
   const id = novoId();
   await sql`
     INSERT INTO usuario_rh (id, empresa_id, usuario, nome, sal, iteracoes, chave_hash, trocar_senha)
