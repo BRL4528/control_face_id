@@ -9,6 +9,7 @@ import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
 import { TIPOS_OCORRENCIA } from '../../js/ocorrencias.js';
 import { anexoValido } from '../_lib/ocorrencia.js';
+import { exigeAcesso } from '../_lib/acesso.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 
 const DIA = /^\d{4}-\d{2}-\d{2}$/;
@@ -21,6 +22,8 @@ export default async function handler(req, res) {
   const b = corpo(req);
   const sql = db();
   const emp = rh.empresa_id;
+  // Foto de atestado é dado de saúde: só quem vê o módulo saúde (RH, administrador).
+  if (!(await exigeAcesso(res, sql, rh, b.acao === 'anexo' ? 'saude' : 'ocorrencias', b.acao !== 'anexo'))) return;
 
   if (b.acao === 'anexo') {
     const [o] = await sql`SELECT anexo FROM ocorrencia WHERE id=${String(b.id || '')} AND empresa_id=${emp} LIMIT 1`;

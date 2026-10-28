@@ -12,6 +12,9 @@
 import bcrypt from 'bcryptjs';
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
+import { exigeAcesso } from '../_lib/acesso.js';
+import { comTabelaNova } from '../_lib/tabela-nova.js';
+import { PERFIS } from '../../js/acessos.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 import { ITER, novaSenhaTemporaria } from '../_lib/senha-rh.js';
 
@@ -23,6 +26,23 @@ export default async function handler(req, res) {
   const b = corpo(req);
   const sql = db();
   const acao = b.acao || 'criar';
+  // Trocar a própria senha vale para qualquer perfil; o resto é de administrador.
+  if (acao !== 'trocar_senha' && !(await exigeAcesso(res, sql, rh, 'config', true))) return;
+
+  // Perfil de acesso e obras (gestor de obra) de OUTRO usuário da mesma empresa.
+  if (acao === 'acesso') {
+    if (!b.usuario_id) return erro(res, 400, 'CORPO_INVALIDO', 'usuario_id obrigatório');
+    if (b.usuario_id === rh.sub) return erro(res, 400, 'PROIBIDO', 'não é possível mudar o próprio perfil');
+    if (!PERFIS[b.perfil]) return erro(res, 400, 'CORPO_INVALIDO', 'perfil inválido');
+    const obras = b.perfil === 'gestor_obra' && Array.isArray(b.obras) ? [...new Set(b.obras.map(String))].slice(0, 200) : null;
+    if (b.perfil === 'gestor_obra' && !(obras && obras.length)) return erro(res, 400, 'CORPO_INVALIDO', 'escolha as obras do gestor');
+    return comTabelaNova(res, async () => {
+      const r = await sql`UPDATE usuario_rh SET perfil=${b.perfil}, obras=${obras ? JSON.stringify(obras) : null}::jsonb
+                          WHERE id=${b.usuario_id} AND empresa_id=${rh.empresa_id} RETURNING id`;
+      if (!r[0]) return erro(res, 404, 'USUARIO_NAO_ENCONTRADO', 'usuário não encontrado');
+      return ok(res, { usuario_id: b.usuario_id, perfil: b.perfil, obras });
+    });
+  }
 
   // Desativar / reativar um usuário da MESMA empresa (e nunca a si mesmo, p/ não se trancar fora).
   if (acao === 'ativar' || acao === 'desativar') {

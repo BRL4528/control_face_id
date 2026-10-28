@@ -3,7 +3,7 @@
 // o resto do painel nem o ponto.
 import { erro } from './http.js';
 
-export const faltaTabela = e => /relation "[^"]+" does not exist/.test(String((e && e.message) || e));
+export const faltaTabela = e => /(relation|column) "[^"]+"( of relation "[^"]+")? does not exist/.test(String((e && e.message) || e));
 
 export async function comTabelaNova(res, fn) {
   try { return await fn(); }

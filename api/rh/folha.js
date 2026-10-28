@@ -8,6 +8,8 @@
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
 import { hashDaFolha } from '../_lib/folha.js';
+import { exigeAcesso } from '../_lib/acesso.js';
+import { obrasDe } from '../../js/acessos.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 
 const MES = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -20,6 +22,9 @@ export default async function handler(req, res) {
   const b = corpo(req);
   if (!MES.test(b.mes || '')) return erro(res, 400, 'CORPO_INVALIDO', 'mes (YYYY-MM) obrigatório');
   const sql = db();
+  const acesso = await exigeAcesso(res, sql, rh, 'relatorios', b.acao !== 'listar');
+  if (!acesso) return;
+  const obras = obrasDe(acesso);
 
   if (b.acao === 'listar') {
     const folhas = await sql`
@@ -27,6 +32,10 @@ export default async function handler(req, res) {
              f.conteudo, f.assinatura - 'foto' AS assinatura
       FROM folha_assinatura f
       WHERE f.empresa_id=${rh.empresa_id} AND f.mes=${b.mes}`;
+    if (obras) {
+      const meus = new Set((await sql`SELECT id FROM colaborador WHERE empresa_id=${rh.empresa_id} AND equipe_padrao = ANY(${obras})`).map(r => r.id));
+      return ok(res, { mes: b.mes, folhas: folhas.filter(f => meus.has(f.colaborador_id)) });
+    }
     return ok(res, { mes: b.mes, folhas });
   }
 

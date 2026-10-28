@@ -10,6 +10,7 @@
 // por item, para o caso de gente no mesmo dia em locais diferentes.
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
+import { exigeAcesso } from '../_lib/acesso.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 
 export default async function handler(req, res) {
@@ -23,6 +24,7 @@ export default async function handler(req, res) {
   const equipeId = b.equipe_id;
   const cercaBase = b.cerca || {};
   const sql = db();
+  if (!(await exigeAcesso(res, sql, rh, 'operacao', true))) return;
 
   // Remover a alocação de uma equipe num dia (o card "Remover alocação").
   if (b.acao === 'remover') {

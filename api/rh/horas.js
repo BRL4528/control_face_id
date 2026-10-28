@@ -6,6 +6,8 @@
 // alocações do período (definem os dias previstos).
 import { db } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
+import { exigeAcesso } from '../_lib/acesso.js';
+import { obrasDe } from '../../js/acessos.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 
 const DIA = /^\d{4}-\d{2}-\d{2}$/;
@@ -24,6 +26,8 @@ export default async function handler(req, res) {
     return erro(res, 400, 'PERIODO_LONGO', `período máximo de ${MAX_DIAS} dias`);
   }
   const sql = db();
+  const acesso = await exigeAcesso(res, sql, rh, 'relatorios', false);
+  if (!acesso) return;
   const [marcacoes, alocacoes, ocorrencias] = await Promise.all([
     sql`SELECT m.colaborador_id AS pessoa_id, m.equipe_id, m.tipo, m.marcado_em,
                to_char(m.marcado_dia,'YYYY-MM-DD') AS marcado_dia,
@@ -48,5 +52,12 @@ export default async function handler(req, res) {
         WHERE empresa_id = ${rh.empresa_id} AND estado = 'ativa'
           AND inicio <= ${b.ate}::date AND (fim IS NULL OR fim >= ${b.de}::date)`
   ]);
+  // Gestor de obra: só quem está nas obras dele.
+  const obras = obrasDe(acesso);
+  if (obras) {
+    const meus = new Set((await sql`SELECT id FROM colaborador WHERE empresa_id=${rh.empresa_id} AND equipe_padrao = ANY(${obras})`).map(r => r.id));
+    return ok(res, { de: b.de, ate: b.ate, marcacoes: marcacoes.filter(m => meus.has(m.pessoa_id)),
+                     alocacoes: alocacoes.filter(a => meus.has(a.colaborador_id)), ocorrencias: ocorrencias.filter(o => meus.has(o.colaborador_id)) });
+  }
   return ok(res, { de: b.de, ate: b.ate, marcacoes, alocacoes, ocorrencias });
 }

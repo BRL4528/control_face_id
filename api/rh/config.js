@@ -3,6 +3,7 @@
 // empresa. Só campos conhecidos entram — não é um saco de chave-valor livre.
 import { db } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
+import { exigeAcesso } from '../_lib/acesso.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 import { gerarLinkToken } from '../_lib/dispositivos.js';
 import { hashCredencial } from '../_lib/auth.js';
@@ -53,6 +54,7 @@ export default async function handler(req, res) {
   if (!rh) return erro(res, 401, 'SESSAO_INVALIDA', 'faça login novamente');
   const b = corpo(req);
   const sql = db();
+  if (!(await exigeAcesso(res, sql, rh, 'config', true))) return;
 
   // Novo link da empresa: o antigo para de funcionar na hora (quem já abriu e
   // pareou continua — o token só serve para entrar).

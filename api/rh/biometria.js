@@ -7,6 +7,7 @@
 // configurado, guarda a própria data URL — degrada, não quebra.
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
+import { exigeAcesso } from '../_lib/acesso.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 import { guardarMiniatura } from '../_lib/blob.js';
 
@@ -23,6 +24,7 @@ export default async function handler(req, res) {
     return erro(res, 400, 'CORPO_INVALIDO', 'colaborador_id e vetores obrigatórios');
   }
   const sql = db();
+  if (!(await exigeAcesso(res, sql, rh, 'pessoas', true))) return;
 
   // Confere que o colaborador é desta empresa (isolamento de tenant).
   const donos = await sql`SELECT id FROM colaborador WHERE id=${colaboradorId} AND empresa_id=${rh.empresa_id} LIMIT 1`;

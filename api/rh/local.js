@@ -2,6 +2,7 @@
 // desativa. O RH salva uma vez e reusa na alocação diária.
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
+import { exigeAcesso } from '../_lib/acesso.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 
 export default async function handler(req, res) {
@@ -16,6 +17,7 @@ export default async function handler(req, res) {
     return erro(res, 400, 'CORPO_INVALIDO', 'nome, lat e lng obrigatórios');
   }
   const sql = db();
+  if (!(await exigeAcesso(res, sql, rh, 'pessoas', true))) return;
 
   // Sem raio informado, vale o padrão da empresa (Configurações) — 200 m se nem
   // isso estiver definido.

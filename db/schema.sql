@@ -474,3 +474,9 @@ CREATE TABLE IF NOT EXISTS entrega (
 );
 CREATE INDEX IF NOT EXISTS ix_entrega_colab ON entrega (colaborador_id, estado);
 CREATE INDEX IF NOT EXISTS ix_entrega_empresa ON entrega (empresa_id, estado);
+
+-- ═══════════════════════════════════════════════════════ perfis de acesso do painel
+-- Perfil do usuário (admin, rh, gestor_obra, sst, almox, leitura; regras em
+-- js/acessos.js) e as obras do gestor de obra. NULL = administrador (usuários de antes).
+ALTER TABLE usuario_rh ADD COLUMN IF NOT EXISTS perfil text;
+ALTER TABLE usuario_rh ADD COLUMN IF NOT EXISTS obras jsonb;

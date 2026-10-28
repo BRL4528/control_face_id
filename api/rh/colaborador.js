@@ -2,6 +2,7 @@
 // serve para cadastro novo e edição. Não mexe em biometria — isso é /rh/biometria.
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
+import { exigeAcesso } from '../_lib/acesso.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 import { sincronizarBloqueios } from '../_lib/dispositivos.js';
 
@@ -18,6 +19,7 @@ export default async function handler(req, res) {
   const papelPedido = String(b.papel || 'colaborador');
   const equipeId = b.equipe_id || null;
   const sql = db();
+  if (!(await exigeAcesso(res, sql, rh, 'pessoas', true))) return;
 
   const existentes = await sql`
     SELECT id, bitrix_contact_id, papel FROM colaborador WHERE empresa_id = ${rh.empresa_id} AND matricula = ${matricula} LIMIT 1`;

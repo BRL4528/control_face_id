@@ -20,6 +20,7 @@ import { janelaDasFolhas, escreverFolhas, htmlFichaEpi } from './folha.js';
 import { TIPOS_OCORRENCIA, ocorrenciaDoDia } from './ocorrencias.js';
 import { TIPOS_EVENTO, ESTADOS_EVENTO, situacaoCat } from './eventos.js';
 import { TIPOS_ITEM, ESTADOS_ENTREGA, alertasDaEntrega } from './almox.js';
+import { PERFIS, pode, ABA_MODULO } from './acessos.js';
 
 // Rótulo da aba na trilha do topo (breadcrumb) e no título de página.
 const TITULOS = {
@@ -209,6 +210,12 @@ export const Rh = {
     $('rhPeriodo').textContent = 'últimos ' + (this.dados.periodo_dias || this.dias) + ' dias';
 
     // marca o item ativo na sidebar
+    // Perfil de acesso: o menu só mostra o que o perfil vê (o servidor barra o resto).
+    const ac = (this.dados && this.dados.acesso) || null;
+    const ve = a => !ABA_MODULO[a] || pode(ac, ABA_MODULO[a]);
+    document.querySelectorAll('.side-nav [data-aba]').forEach(b => { b.classList.toggle('hide', !ve(b.dataset.aba)); });
+    document.querySelectorAll('.side-nav .nav-grupo').forEach(g => { g.classList.toggle('hide', ![...g.querySelectorAll('[data-aba]')].some(b => !b.classList.contains('hide'))); });
+    if (this.aba !== 'stub' && !ve(this.aba)) this.aba = Object.keys(ABA_MODULO).find(ve) || 'painel';
     const abaAtiva = this.aba === 'stub' ? null : this.aba;
     document.querySelectorAll('#rh .nav-item').forEach(b => {
       const on = b.dataset.stub ? (this.aba === 'stub' && b.dataset.stub === this.stub)
@@ -225,7 +232,7 @@ export const Rh = {
     const badgeOc = $('navBadgeOc');
     if (badgeOc) { badgeOc.textContent = nOc; badgeOc.classList.toggle('hide', nOc === 0); }
     // Acidentes sem CAT: contador no menu. A lista vem à parte (/rh/evento), sem travar o painel.
-    if (this.eventos === undefined && this.token) { this.eventos = null; this.carregarEventos(); }
+    if (this.eventos === undefined && this.token && pode(this.dados && this.dados.acesso, 'eventos')) { this.eventos = null; this.carregarEventos(); }
     const nCat = (this.eventos || []).filter(e => e.estado === 'aguardando_cat').length;
     const badgeEv = $('navBadgeEv');
     if (badgeEv) { badgeEv.textContent = nCat; badgeEv.classList.toggle('hide', nCat === 0); }
@@ -2290,6 +2297,31 @@ export const Rh = {
     });
   },
 
+  /** Perfil de acesso e obras de um usuário do painel. */
+  formAcesso(u) {
+    const eqs = (this.dados.equipes || []).filter(e => e.ativo).slice().sort((a, b) => a.nome.localeCompare(b.nome));
+    const obras = new Set(Array.isArray(u.obras) ? u.obras : []);
+    $('areaAcessoUsuario').innerHTML = '<div class="card" style="margin-bottom:12px"><h2>Acesso de ' + esc(u.nome) + '</h2>' +
+      '<label class="lb2">Perfil</label><select class="inp" id="acPerfil" style="max-width:320px">' +
+        Object.keys(PERFIS).map(k => '<option value="' + k + '"' + (k === (u.perfil || 'admin') ? ' selected' : '') + '>' + esc(PERFIS[k].rotulo) + '</option>').join('') + '</select>' +
+      '<div id="acObrasWrap" style="margin-top:10px"><label class="lb2">Obras que este gestor vê</label>' +
+        '<div style="max-height:200px;overflow:auto;border:1px solid var(--v2-linha);border-radius:8px;padding:8px;columns:2">' +
+          eqs.map(e => '<label style="display:flex;gap:6px;align-items:center;font-size:13px;break-inside:avoid"><input type="checkbox" value="' + esc(e.equipe_id) + '"' + (obras.has(e.equipe_id) ? ' checked' : '') + '> ' + esc(e.nome) + '</label>').join('') +
+        '</div></div>' +
+      '<p class="cap" style="margin:8px 0 0">A mudança vale na próxima ação do usuário (o servidor confere o perfil a cada requisição).</p>' +
+      '<div class="row2" style="margin-top:12px"><button class="act" id="btnAcOk">Salvar acesso</button><button class="act ghost" id="btnAcX">Cancelar</button></div></div>';
+    const aj = () => { $('acObrasWrap').style.display = $('acPerfil').value === 'gestor_obra' ? '' : 'none'; };
+    $('acPerfil').onchange = aj; aj();
+    $('btnAcX').onclick = () => { $('areaAcessoUsuario').innerHTML = ''; };
+    $('btnAcOk').onclick = async () => {
+      const perfil = $('acPerfil').value;
+      const sel = [...$('acObrasWrap').querySelectorAll('input:checked')].map(c => c.value);
+      const r = await ApiRh.usuario(this.token, { acao: 'acesso', usuario_id: u.usuario_id, perfil, obras: sel });
+      if (!r.ok) { toast(r.codigo === 'MIGRACAO_PENDENTE' ? 'Falta rodar a migração do banco (perfil de acesso).' : (r.erro || 'Falha'), 'bad'); return; }
+      toast('Acesso salvo', 'ok'); await this.recarregar();
+    };
+  },
+
   /** Cabeçalho e papel timbrado da folha de ponto (Relatórios → Folha de ponto para assinar). */
   htmlConfigFolha() {
     const c = window.EFRAT_CFG || {};
@@ -3144,9 +3176,11 @@ export const Rh = {
     const linhaUsuario = u =>
       '<tr><td><b>' + esc(u.nome) + '</b> <span style="color:#94a3b8">@' + esc(u.usuario) + '</span>' +
         (u.trocar_senha ? ' <span class="pill warn" style="padding:0 6px" title="Ainda não entrou para trocar a senha temporária">senha temporária pendente</span>' : '') + '</td>' +
+      '<td>' + esc((PERFIS[u.perfil] || PERFIS.admin).rotulo) + (u.perfil === 'gestor_obra' && Array.isArray(u.obras) ? '<div class="mt">' + u.obras.map(id => esc(this.nomeEquipe(id))).join(', ') + '</div>' : '') + '</td>' +
       '<td>' + esc(u.criado_em || '') + '</td>' +
       '<td><span class="pill ' + (u.ativo ? 'ok' : 'mut') + '"><span class="dot"></span>' + (u.ativo ? 'Ativo' : 'Inativo') + '</span></td>' +
       '<td style="text-align:right;white-space:nowrap">' + (u.usuario_id === this.dados.usuario.id ? '<span style="color:#94a3b8;font-size:12px">você</span>' :
+        '<button class="v2btn ghost mini" data-uacesso="' + esc(u.usuario_id) + '">Acesso</button> ' +
         '<button class="v2btn ghost mini" data-uredefinir="' + esc(u.usuario_id) + '" data-unome="' + esc(u.nome) + '" title="Gera uma nova senha temporária">Redefinir senha</button> ' +
         '<button class="v2btn ghost mini" data-uativar="' + esc(u.usuario_id) + '" data-estado="' + (u.ativo ? 'desativar' : 'ativar') + '">' + (u.ativo ? 'Desativar' : 'Reativar') + '</button>') + '</td></tr>';
 
@@ -3215,11 +3249,12 @@ export const Rh = {
         '<div class="eq-vincular"><input class="inp" id="papelNovo" maxlength="60" placeholder="Novo papel (ex.: Encarregado, Eletricista, Estagiário)" style="margin:0">' +
           '<button class="v2btn" id="btnNovoPapel">+ Adicionar papel</button></div></div>' +
 
-      '<div class="cfg-sec"><h2>Usuários do RH</h2>' +
-        '<p class="cap">Crie acessos para a equipe de RH. A senha temporária aparece uma vez — repasse com segurança.</p>' +
+      '<div class="cfg-sec"><h2>Usuários do painel</h2>' +
+        '<p class="cap">Crie acessos e defina o perfil de cada um em "Acesso": Administrador (tudo), RH (tudo menos Configurações), Gestor de obra (só as obras dele), Segurança do trabalho, Almoxarifado ou Somente leitura. Foto de atestado só RH e Administrador veem. A senha temporária aparece uma vez: repasse com segurança.</p>' +
         '<div class="tbl-wrap" style="margin-bottom:12px"><table class="adtable"><thead><tr>' +
-          '<th>Usuário</th><th>Criado</th><th>Status</th><th></th></tr></thead><tbody>' +
+          '<th>Usuário</th><th>Perfil</th><th>Criado</th><th>Status</th><th></th></tr></thead><tbody>' +
           usuarios.map(linhaUsuario).join('') + '</tbody></table></div>' +
+        '<div id="areaAcessoUsuario"></div>' +
         '<div id="areaNovoUsuario"></div>' +
         '<button class="v2btn" id="btnNovoUsuario">+ Novo usuário RH</button></div>' +
 
@@ -3334,6 +3369,9 @@ export const Rh = {
       await this.recarregar();
     };
     $('btnNovoUsuario').onclick = () => this.formNovoUsuario();
+    $('rh-config').querySelectorAll('[data-uacesso]').forEach(b => {
+      b.onclick = () => this.formAcesso(usuarios.find(u => u.usuario_id === b.dataset.uacesso));
+    });
     $('rh-config').querySelectorAll('[data-uredefinir]').forEach(b => {
       b.onclick = async () => {
         if (!confirm('Redefinir a senha de ' + b.dataset.unome + '? A senha atual deixa de valer e uma nova senha temporária será mostrada uma única vez.')) return;

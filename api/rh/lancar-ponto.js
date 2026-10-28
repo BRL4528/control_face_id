@@ -13,6 +13,7 @@ import { autenticarRh } from '../_lib/auth.js';
 import { diaNoFuso, fusoDaEmpresa, instanteNoFuso } from '../_lib/dia.js';
 import { statementsLancamento, noFuturo } from '../_lib/lancamento.js';
 import { comentarNoCard, montarComentarioLancamento } from '../_lib/bitrix-saida.js';
+import { exigeAcesso, noEscopo } from '../_lib/acesso.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 
 export default async function handler(req, res) {
@@ -29,6 +30,9 @@ export default async function handler(req, res) {
   if (!motivo) return erro(res, 400, 'JUSTIFICATIVA_OBRIGATORIA', 'informe a justificativa do lançamento');
 
   const sql = db();
+  const acesso = await exigeAcesso(res, sql, rh, 'ponto', true);
+  if (!acesso) return;
+  if (!(await noEscopo(sql, acesso, rh.empresa_id, colaboradorId))) return erro(res, 403, 'SEM_PERMISSAO', 'colaborador fora das suas obras');
   const fuso = await fusoDaEmpresa(sql, rh.empresa_id);
   const marcadoEm = (b.dia || b.hora) ? instanteNoFuso(b.dia, b.hora, fuso) : (b.marcado_em || new Date().toISOString());
   if (!marcadoEm || isNaN(Date.parse(marcadoEm))) return erro(res, 400, 'CORPO_INVALIDO', 'dia e hora inválidos');

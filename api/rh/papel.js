@@ -5,6 +5,7 @@
 // Os papéis de sistema (colaborador, líder de equipe, gestor) não são editáveis.
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
+import { exigeAcesso } from '../_lib/acesso.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 
 const RESERVADOS = ['colaborador', 'líder de equipe', 'lider de equipe', 'líder', 'lider', 'gestor'];
@@ -17,6 +18,7 @@ export default async function handler(req, res) {
 
   const b = corpo(req);
   const sql = db();
+  if (!(await exigeAcesso(res, sql, rh, 'config', true))) return;
 
   if (b.papel_id && b.excluir) {
     const uso = await sql`SELECT count(*)::int AS n FROM colaborador WHERE empresa_id=${rh.empresa_id} AND papel=${b.papel_id}`;

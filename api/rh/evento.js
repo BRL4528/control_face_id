@@ -14,6 +14,8 @@ import { autenticarRh } from '../_lib/auth.js';
 import { anexoValido } from '../_lib/ocorrencia.js';
 import { comTabelaNova } from '../_lib/tabela-nova.js';
 import { TIPOS_EVENTO } from '../../js/eventos.js';
+import { exigeAcesso, noEscopo } from '../_lib/acesso.js';
+import { obrasDe } from '../../js/acessos.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 
 const DIA = /^\d{4}-\d{2}-\d{2}$/;
@@ -30,13 +32,22 @@ export default async function handler(req, res) {
   const emp = rh.empresa_id;
   const id = String(b.id || '');
 
+  const leitura = !b.acao || b.acao === 'listar' || b.acao === 'anexo';
+  const acesso = await exigeAcesso(res, sql, rh, 'eventos', !leitura);
+  if (!acesso) return;
+  const obras = obrasDe(acesso);   // gestor de obra: só as obras dele
+
   return comTabelaNova(res, async () => {
+    if (obras && id) {
+      const [e] = await sql`SELECT equipe_id FROM evento WHERE id=${id} AND empresa_id=${emp} LIMIT 1`;
+      if (e && !obras.includes(e.equipe_id)) return erro(res, 403, 'SEM_PERMISSAO', 'registro fora das suas obras');
+    }
     if (!b.acao || b.acao === 'listar') {
       const eventos = await sql`
         SELECT id, colaborador_id, equipe_id, tipo, to_char(data,'YYYY-MM-DD') AS data, hora, descricao, dados, estado,
                (anexo IS NOT NULL) AS tem_anexo, (cat_anexo IS NOT NULL) AS tem_cat, ciencia - 'foto' AS ciencia, criado_em
         FROM evento WHERE empresa_id=${emp} ORDER BY data DESC, criado_em DESC LIMIT 1000`;
-      return ok(res, { eventos });
+      return ok(res, { eventos: obras ? eventos.filter(e => obras.includes(e.equipe_id)) : eventos });
     }
 
     if (b.acao === 'anexo') {
@@ -81,6 +92,7 @@ export default async function handler(req, res) {
     if (b.anexo != null && !anexoValido(b.anexo)) return erro(res, 400, 'ANEXO_INVALIDO', 'foto inválida ou acima de 1 MB');
     const [c] = await sql`SELECT id FROM colaborador WHERE id=${String(b.colaborador_id || '')} AND empresa_id=${emp} LIMIT 1`;
     if (!c) return erro(res, 404, 'COLABORADOR_NAO_ENCONTRADO', 'colaborador não encontrado');
+    if (obras && (!obras.includes(b.equipe_id) || !(await noEscopo(sql, acesso, emp, c.id)))) return erro(res, 403, 'SEM_PERMISSAO', 'fora das suas obras');
     const equipeId = b.equipe_id ? String(b.equipe_id) : null;
     const d = b.dados || {};
     const dados = { testemunhas: pessoasTexto(d.testemunhas), afastamento: d.afastamento === true, obito: d.obito === true };

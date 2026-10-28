@@ -12,6 +12,7 @@
 //   • acao 'remover': soft delete (ativo=false) + limpa alocações futuras do plano.
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
+import { exigeAcesso } from '../_lib/acesso.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 import { materializarPlano, normalizarPlano } from '../_lib/escala.js';
 
@@ -25,6 +26,7 @@ export default async function handler(req, res) {
 
   const b = corpo(req);
   const sql = db();
+  if (!(await exigeAcesso(res, sql, rh, 'operacao', true))) return;
   const hoje = new Date().toISOString().slice(0, 10);
 
   // ---- remover (soft) ----

@@ -15,6 +15,7 @@
 import { db, novoId } from '../_lib/db.js';
 import { realocarColaboradores } from '../_lib/escala.js';
 import { autenticarRh } from '../_lib/auth.js';
+import { exigeAcesso } from '../_lib/acesso.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 
 export default async function handler(req, res) {
@@ -25,6 +26,7 @@ export default async function handler(req, res) {
 
   const b = corpo(req);
   const sql = db();
+  if (!(await exigeAcesso(res, sql, rh, 'pessoas', true))) return;
 
   // Local da equipe: a cerca padrão de todo mundo dela. null = volta a não ter.
   if (b.acao === 'local') {

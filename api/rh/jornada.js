@@ -6,6 +6,7 @@
 //   • { equipe_id, jornada_id, supervisor_id } → associa à equipe
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
+import { exigeAcesso } from '../_lib/acesso.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 
 const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -30,6 +31,7 @@ export default async function handler(req, res) {
   if (!rh) return erro(res, 401, 'SESSAO_INVALIDA', 'faça login novamente');
   const b = corpo(req);
   const sql = db();
+  if (!(await exigeAcesso(res, sql, rh, 'ponto', true))) return;
 
   // Modo associação: liga a equipe a uma jornada/supervisor (qualquer um pode ser null).
   if (b.equipe_id && !b.nome) {

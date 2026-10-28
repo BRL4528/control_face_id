@@ -10,6 +10,7 @@ import { autenticarRh } from '../_lib/auth.js';
 import { diaNoFuso, fusoDaEmpresa, instanteNoFuso } from '../_lib/dia.js';
 import { statementsLancamento, noFuturo } from '../_lib/lancamento.js';
 import { comentarNoCard, montarComentarioLancamento } from '../_lib/bitrix-saida.js';
+import { exigeAcesso, noEscopo } from '../_lib/acesso.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 
 export default async function handler(req, res) {
@@ -25,6 +26,8 @@ export default async function handler(req, res) {
   if (!motivo) return erro(res, 400, 'JUSTIFICATIVA_OBRIGATORIA', 'informe a justificativa');
 
   const sql = db();
+  const acesso = await exigeAcesso(res, sql, rh, 'ponto', true);
+  if (!acesso) return;
   const [orig] = await sql`
     SELECT m.id_cliente, m.colaborador_id, m.equipe_id, m.tipo, m.marcado_em, c.nome, c.bitrix_card_id,
            EXISTS (SELECT 1 FROM correcao co WHERE co.alvo_tipo='marcacao' AND co.alvo_id=m.id_cliente AND co.acao='rejeitar') AS anulada
@@ -33,6 +36,7 @@ export default async function handler(req, res) {
   if (!orig) return erro(res, 404, 'ALVO_NAO_ENCONTRADO', 'marcação não encontrada');
   if (!orig.colaborador_id) return erro(res, 400, 'SEM_COLABORADOR', 'batida de aparelho não identificado: identifique o aparelho em Pendências');
   if (orig.anulada) return erro(res, 409, 'JA_ANULADA', 'esta marcação já foi anulada');
+  if (!(await noEscopo(sql, acesso, rh.empresa_id, orig.colaborador_id))) return erro(res, 403, 'SEM_PERMISSAO', 'colaborador fora das suas obras');
 
   const fuso = await fusoDaEmpresa(sql, rh.empresa_id);
   const quem = rh.nome || rh.usuario || 'RH';

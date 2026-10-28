@@ -3,6 +3,8 @@
 // de uma marcação é derivado: marcação + última correção que a referencia.
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
+import { exigeAcesso, noEscopo } from '../_lib/acesso.js';
+import { obrasDe } from '../../js/acessos.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 import { dentroDaCerca } from '../_lib/geo.js';
 import { comentarNoCard, montarComentario } from '../_lib/bitrix-saida.js';
@@ -13,7 +15,11 @@ export default async function handler(req, res) {
   const rh = autenticarRh(req);
   if (!rh) return erro(res, 401, 'SESSAO_INVALIDA', 'faça login novamente');
 
+  const acesso = await exigeAcesso(res, db(), rh, 'ponto', true);
+  if (!acesso) return;
   const b = corpo(req);
+  // Gestor de obra decide batidas da obra dele; aparelho e cadastro facial são do RH.
+  if (obrasDe(acesso) && b.tipo !== 'marcacao' && b.tipo != null) return erro(res, 403, 'SEM_PERMISSAO', 'só o RH identifica aparelhos e cadastros faciais');
   // A decisão precisa ser justificada: ela fica na auditoria e no card do Bitrix.
   b.motivo = String(b.motivo || '').trim();
   const bloqueio = b.tipo === 'dispositivo' && b.acao === 'bloquear';
@@ -43,6 +49,7 @@ export default async function handler(req, res) {
                            FROM marcacao m LEFT JOIN colaborador c ON c.id=m.colaborador_id LEFT JOIN equipe eq ON eq.id=m.equipe_id
                            WHERE m.id_cliente=${b.id} AND m.empresa_id=${rh.empresa_id} LIMIT 1`;
     alvoColab = dono[0] && dono[0].id ? dono[0] : null;
+    if (obrasDe(acesso) && !(alvoColab && await noEscopo(sql, acesso, rh.empresa_id, alvoColab.id))) return erro(res, 403, 'SEM_PERMISSAO', 'batida fora das suas obras');
     alvo = dono[0] || null;
     if (!dono[0]) return erro(res, 404, 'ALVO_NAO_ENCONTRADO', 'marcação não encontrada');
   }

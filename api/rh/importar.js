@@ -14,6 +14,7 @@
 import XLSX from 'xlsx';
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
+import { exigeAcesso } from '../_lib/acesso.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 import { sincronizarBloqueios } from '../_lib/dispositivos.js';
 
@@ -126,6 +127,7 @@ export default async function handler(req, res) {
   if (exigeMetodo(req, res, 'POST')) return;
   const b = corpo(req);
   const sql = db();
+  if (!(await exigeAcesso(res, sql, rh, 'pessoas', true))) return;
 
   if (b.acao === 'analisar') {
     if (!b.arquivo_b64) return erro(res, 400, 'CORPO_INVALIDO', 'arquivo_b64 obrigatório');

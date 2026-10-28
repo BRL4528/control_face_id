@@ -10,6 +10,7 @@ import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
 import { comTabelaNova } from '../_lib/tabela-nova.js';
 import { TIPOS_ITEM } from '../../js/almox.js';
+import { exigeAcesso } from '../_lib/acesso.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 
 const DIA = /^\d{4}-\d{2}-\d{2}$/;
@@ -23,6 +24,7 @@ export default async function handler(req, res) {
   const b = corpo(req);
   const sql = db();
   const emp = rh.empresa_id;
+  if (!(await exigeAcesso(res, sql, rh, 'almox', !!b.acao && b.acao !== 'listar'))) return;
 
   return comTabelaNova(res, async () => {
     if (!b.acao || b.acao === 'listar') {

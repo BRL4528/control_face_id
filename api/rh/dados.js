@@ -4,6 +4,8 @@
 // os testes de unidade cobrem.
 import { db } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
+import { acessoDe } from '../_lib/acesso.js';
+import { pode, obrasDe, perfilDe, PERFIS } from '../../js/acessos.js';
 import { cors, ok, erro, exigeMetodo } from '../_lib/http.js';
 
 function diaNoFuso(d, fuso) {
@@ -21,6 +23,8 @@ export default async function handler(req, res) {
   const dias = Math.min(Math.max(Number((req.body || {}).dias) || 30, 1), 365);
   const empresa = rh.empresa_id;
   const sql = db();
+  const acesso = await acessoDe(sql, rh);
+  if (!acesso) return erro(res, 401, 'SESSAO_INVALIDA', 'faça login novamente');
 
   const [equipes, pessoas, marcacoes, alocacoes, locais, jornadas, empresaRow, configRow, usuariosRh, correcoes, planos, aparelhosPendentes, papeis, ocorrencias] = await Promise.all([
     sql`SELECT id AS equipe_id, nome, ativo, jornada_id, supervisor_id, local_id, bitrix_stage_id, afastamento FROM equipe WHERE empresa_id = ${empresa} ORDER BY nome`,
@@ -52,8 +56,8 @@ export default async function handler(req, res) {
                tolerancia_min, intervalo_min, dias, ativa FROM jornada WHERE empresa_id = ${empresa} ORDER BY nome`,
     sql`SELECT nome, fuso, link_token, (integracao_token_hash IS NOT NULL) AS integracao_ativa FROM empresa WHERE id = ${empresa} LIMIT 1`,
     sql`SELECT dados FROM config_empresa WHERE empresa_id = ${empresa} LIMIT 1`,
-    sql`SELECT id AS usuario_id, usuario, nome, ativo, trocar_senha,
-               to_char(criado_em,'YYYY-MM-DD') AS criado_em FROM usuario_rh
+    sql`SELECT id AS usuario_id, usuario, nome, ativo, trocar_senha, to_jsonb(u)->>'perfil' AS perfil, to_jsonb(u)->'obras' AS obras,
+               to_char(criado_em,'YYYY-MM-DD') AS criado_em FROM usuario_rh u
         WHERE empresa_id = ${empresa} ORDER BY usuario`,
     // Trilha de auditoria: decisões do RH, com nome de quem decidiu e da pessoa alvo.
     sql`SELECT co.id, co.alvo_tipo, co.alvo_id, co.acao, co.motivo, co.criada_em,
@@ -102,20 +106,35 @@ export default async function handler(req, res) {
   const hoje = diaNoFuso(new Date(), fuso);
   // a.dia já vem 'YYYY-MM-DD' (to_char); antes era Date e String(Date).slice(0,10)
   // dava "Tue Sep 08" — a lista de hoje saía sempre vazia (mapa sem cercas).
-  const alocacoesHoje = alocacoes.filter(a => a.dia === hoje);
+  // Perfil por obra (gestor de obra): o painel inteiro recorta para as obras dele.
+  const obras = obrasDe(acesso);
+  let eqs = equipes, pes = pessoas, mar = marcacoes, alo = alocacoes, ocs = ocorrencias, pla = planos;
+  if (obras) {
+    const ok_ = new Set(obras);
+    eqs = equipes.filter(e => ok_.has(e.equipe_id));
+    pes = pessoas.filter(p => ok_.has(p.equipe_id));
+    const ids = new Set(pes.map(p => p.pessoa_id));
+    mar = marcacoes.filter(m => ids.has(m.pessoa_id));
+    alo = alocacoes.filter(a => ids.has(a.colaborador_id));
+    ocs = ocorrencias.filter(o => ids.has(o.colaborador_id));
+    pla = planos.filter(p => ok_.has(p.equipe_id));
+  }
+  const alocacoesHoje = alo.filter(a => a.dia === hoje);
+  const verConfig = pode(acesso, 'config');
 
   return ok(res, {
     usuario: { id: rh.sub, nome: rh.nome, usuario: rh.usuario },
     empresa_id: empresa,   // o app do colaborador usa como "código da empresa" no pareamento
     empresa: empresaRow[0] || { nome: '', fuso: 'America/Campo_Grande', link_token: null },
-    aparelhos_pendentes: aparelhosPendentes,
+    aparelhos_pendentes: obras || !pode(acesso, 'ponto', true) ? [] : aparelhosPendentes,
+    acesso: { perfil: perfilDe(acesso), rotulo: PERFIS[perfilDe(acesso)].rotulo, obras },
     config: (configRow[0] && configRow[0].dados) || {},
     periodo_dias: dias,
     servidor_hora: new Date().toISOString(),
     hoje,                     // 'YYYY-MM-DD' no fuso da empresa — o front usa este, não o UTC
-    equipes, pessoas, marcacoes, locais, jornadas, planos, papeis, ocorrencias,
-    usuarios_rh: usuariosRh, correcoes,
-    alocacoes,                 // janela ontem..+30 (tabs de dia + alertas de planejamento)
+    equipes: eqs, pessoas: pes, marcacoes: mar, locais, jornadas, planos: pla, papeis, ocorrencias: ocs,
+    usuarios_rh: verConfig ? usuariosRh : [], correcoes: verConfig ? correcoes : [],
+    alocacoes: alo,            // janela ontem..+30 (tabs de dia + alertas de planejamento)
     alocacoes_hoje: alocacoesHoje,
     recadastros: []  // recadastro pendente entra quando o autocadastro do gestor existir
   });
