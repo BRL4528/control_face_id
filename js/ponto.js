@@ -275,6 +275,8 @@ export const Ponto = {
       // Foto de auditoria só quando pode ir para revisão — o servidor decide, mas
       // já mandamos quando há sinal de exceção (cinza, sem liveness, sem GPS).
       foto_url: (veredito === 'revisar' || !livenessOk || !pos) ? cap.thumb : '',
+      // Prova de vida que falhou leva a medida do olho, para ajustar o detector com dado real.
+      motivo: livenessOk ? undefined : this.diagnosticoLiveness(),
       _nome: col ? col.nome : ''
     };
     // Aparelho pendente: a 1ª marcação leva o cadastro facial (descritor + miniatura)
@@ -286,6 +288,12 @@ export const Ponto = {
     await this.recarregarDia();
     this.comprovante(m);
     Api.sincronizar(this.dispositivo.credencial);
+  },
+
+  diagnosticoLiveness() {
+    const d = this.piscada ? this.piscada.diagnostico : null;
+    const f = v => v == null ? '-' : v.toFixed(3).replace('.', ',');
+    return d ? 'prova de vida: base ' + f(d.base) + ', mínimo ' + f(d.minimo) + ', ' + d.quadros + ' quadros' : 'prova de vida: sem leitura do olho';
   },
 
   comprovante(m) {

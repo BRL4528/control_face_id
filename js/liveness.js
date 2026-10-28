@@ -55,12 +55,17 @@ export function criarDetectorPiscada(base) {
   let ref = inicio.length >= MIN_BASE ? mediana(inicio) : null;
   const juntando = ref == null ? inicio.slice() : null;
   let fase = 'aguardando_fechar';   // aguardando_fechar → aguardando_abrir → completo
+  let minimo = null, quadros = 0;
   return {
     completo: false,
     get base() { return ref; },
+    /** Para diagnóstico quando reprova: linha de base, menor EAR visto e quadros analisados. */
+    get diagnostico() { return { base: ref, minimo, quadros }; },
     alimentar(valorEar) {
       if (this.completo) return true;
       if (!Number.isFinite(valorEar) || valorEar <= 0) return false;
+      quadros++;
+      if (minimo == null || valorEar < minimo) minimo = valorEar;
       if (ref == null) {
         juntando.push(valorEar);
         if (juntando.length >= MIN_BASE) ref = mediana(juntando);

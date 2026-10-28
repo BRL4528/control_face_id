@@ -27,3 +27,9 @@ test('fechou e não reabriu ainda não completa; ignora EAR inválido', () => {
   assert.equal(roda(det, [0.2, NaN, 0, 0.21]), false);
   assert.equal(det.alimentar(0.28), true);
 });
+
+test('diagnóstico: linha de base, menor abertura e quadros analisados', () => {
+  const det = criarDetectorPiscada([0.3, 0.3, 0.3]);
+  [0.29, 0.27, 0.28].forEach(v => det.alimentar(v));
+  assert.deepEqual(det.diagnostico, { base: 0.3, minimo: 0.27, quadros: 3 });
+});
