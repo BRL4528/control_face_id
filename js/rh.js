@@ -10,11 +10,12 @@ import { Store } from './store.js';
 import {
   indicadores, espelho, euclidiana,
   presencaPorEquipe, serieDiaria, pendenciasPorMotivo,
-  exceptionsDoDia, TIPOS_EXCECAO,
+  exceptionsDoDia,
   jornadaDaEquipe, horasEntradaPorEquipe, csvDe,
-  alertasDePlanejamento, horasPorColaborador, fmtMinutos, dia as diaDe, motivosDaRevisao, rotuloAuditoria
+  alertasDePlanejamento, horasPorColaborador, fmtMinutos, dia as diaDe, motivosDaRevisao, rotuloAuditoria,
+  tiposPelaOrdem, classificarPendente
 } from './regras.js';
-import { $, esc, mostrar, toast, hora, data } from './ui.js';
+import { $, esc, mostrar, toast, hora, data, definirFuso } from './ui.js';
 
 // Rótulo da aba na trilha do topo (breadcrumb) e no título de página.
 const TITULOS = {
@@ -121,10 +122,11 @@ export const Rh = {
   separarAnuladas() {
     const ms = (this.dados && this.dados.marcacoes) || [];
     this.dados.marcacoes_anuladas = ms.filter(m => m.anulada);
-    this.dados.marcacoes = ms.filter(m => !m.anulada);
+    this.dados.marcacoes = tiposPelaOrdem(ms.filter(m => !m.anulada));
   },
 
   aplicarConfig() {
+    definirFuso((this.dados && this.dados.empresa || {}).fuso || 'America/Campo_Grande');
     this.separarAnuladas();
     const c = (this.dados && this.dados.config) || {};
     window.EFRAT_CFG = Object.assign(window.EFRAT_CFG || {}, c);
@@ -237,7 +239,8 @@ export const Rh = {
     return exceptionsDoDia(
       d.marcacoes, d.pessoas, d.alocacoes_hoje, this.hojeServidor(),
       d.servidor_hora, (this.jornadaPadrao() || {}).entrada || cfg.horaEntrada || '08:00',
-      horasEntradaPorEquipe(d.equipes, d.jornadas));   // hora-limite por jornada da equipe
+      horasEntradaPorEquipe(d.equipes, d.jornadas),   // hora-limite por jornada da equipe
+      cfg.limiarAceite);
   },
 
   /** Fila de Pendências: exceções de hoje + marcações que ficaram pendentes em
@@ -252,7 +255,7 @@ export const Rh = {
         resolvida: false,
         hora: this.dataCurta(m.marcado_dia) + ' · ' + hora(m.marcado_em)
       }));
-    // Hora sempre no fuso do RH (regras.js devolve a fatia UTC do ISO, pura e testável).
+    // Hora no relógio da empresa (regras.js devolve a fatia UTC do ISO, pura e testável).
     const hojeItens = this.exceptions().map(x => x.marcacao ? Object.assign(x, { hora: hora(x.marcacao.marcado_em) }) : x);
     // Aparelhos que bateram ponto pelo link da empresa e ainda não têm dono: o RH
     // identifica (vira colaborador + cadastro facial + pontos válidos) ou bloqueia.
@@ -1113,12 +1116,8 @@ export const Rh = {
 
   /** Empacota uma marcação resolvida no mesmo formato de exceção, p/ o detalhe. */
   excDeMarcacao(m) {
-    let tipo = 'zona_cinzenta';
-    if (m.dentro_cerca === false) tipo = 'fora_da_cerca';
-    else if (m.origem === 'manual') tipo = 'registro_manual';
     return {
-      id: 'm:' + m.id_cliente, tipo, severidade: (TIPOS_EXCECAO[tipo] || {}).severidade || 'atencao',
-      rotulo: (TIPOS_EXCECAO[tipo] || {}).rotulo || 'Exceção', pessoa_id: m.pessoa_id,
+      id: 'm:' + m.id_cliente, ...classificarPendente(m, (window.EFRAT_CFG || {}).limiarAceite), pessoa_id: m.pessoa_id,
       equipe_id: m.equipe_id, hora: hora(m.marcado_em), marcacao: m, alocacao: null,
       alvo: { tipo: 'marcacao', id: m.id_cliente }, resolvida: true
     };
@@ -1141,15 +1140,15 @@ export const Rh = {
     const fotoCad = p && p.miniatura ? '<img src="' + p.miniatura + '">' : '👤';
     const fotoReg = m && m.foto_auditoria ? '<img src="' + m.foto_auditoria + '">' : '👤';
     const match = m && m.score != null
-      ? 'Distância facial ' + Number(m.score).toFixed(3) + ' (menor = melhor)'
-      : 'Sem captura de auditoria para comparar';
+      ? '✓ Distância facial ' + Number(m.score).toFixed(3) + ' (menor = melhor)'
+      : 'Batida sem foto de auditoria para comparar';
 
     const fatos = [
       ['Onde deveria estar', cerca ? (this.nomeEquipe(x.equipe_id) + ' · cerca ' + cerca.cerca_raio_m + ' m') : 'Sem alocação'],
       ['Jornada prevista', this.jornadaDe(x.equipe_id)],
-      ['Origem', m ? (m.origem === 'manual' ? 'Registro manual' : 'Biometria facial · app') : 'Ausência detectada'],
-      ['Desvio', m && m.distancia_cerca_m != null ? (m.distancia_cerca_m + ' m do centro') : '—']
+      ['Origem', m ? (m.origem === 'manual' ? 'Registro manual' : 'Biometria facial · app') : 'Ausência detectada']
     ];
+    if (m) fatos.push(['Desvio', m.distancia_cerca_m != null ? (m.distancia_cerca_m + ' m do centro') : '-']);
     const motivosRev = motivosDaRevisao(m, window.EFRAT_CFG);
     if (motivosRev.length) fatos.unshift(['Motivo da revisão', motivosRev.join(' · ')]);
 
@@ -1175,17 +1174,18 @@ export const Rh = {
         '<div style="display:flex;gap:8px;flex-wrap:wrap" id="pendAcoes">' + acoes + '</div>' +
       '</div>' +
 
+      (!m ? this.htmlAusencia(x, p, fotoCad) :
       '<div class="prova">' +
         '<section><h2>Prova biométrica</h2><div class="fotos">' +
           '<div><div class="foto">' + fotoCad + '</div><div class="cap">Cadastro</div></div>' +
           '<div><div class="foto">' + fotoReg + '</div><div class="cap">Registro' + (m ? ' · ' + x.hora : '') + '</div></div>' +
-        '</div><div class="match">✓ ' + esc(match) + '</div></section>' +
+        '</div><div class="match"' + (m && m.score != null ? '' : ' style="background:#fff7ed;color:#9a3412"') + '>' + esc(match) + '</div></section>' +
         '<section><h2>Local esperado × registrado</h2>' +
           '<div class="foto" style="aspect-ratio:auto;height:186px">' + this.svgMapaProva(m, cerca) + '</div>' +
           '<div class="cap">' + (cerca ? ('Cerca ' + cerca.cerca_raio_m + ' m') : 'Sem cerca definida') +
             (m && m.dentro_cerca === false ? ' · <b style="color:#b42318">fora da área</b>' : '') + '</div>' +
         '</section>' +
-      '</div>' +
+      '</div>') +
 
       '<div class="fatos"><h2 style="margin:0 0 11px;font-size:14px;font-weight:600">Contexto do registro</h2>' +
         '<div class="g">' + fatos.map(f =>
@@ -1193,9 +1193,23 @@ export const Rh = {
 
       (x.resolvida ? '' :
         '<div class="decisao"><h2>Decisão</h2>' +
-          '<input id="pendJust" required placeholder="Decisão (obrigatória) — fica na auditoria, no espelho de ponto e no card do Bitrix">' +
+          '<input id="pendJust" required placeholder="Decisão (obrigatória). Fica na auditoria, no espelho de ponto e no card do Bitrix">' +
           '<div class="linha"><span style="font-size:12.5px;color:#94a3b8">Registrado como ' + esc(this.dados.usuario.nome || 'RH') + ' · RH</span></div>' +
         '</div>');
+  },
+
+  /**
+   * Ausência ("Entrada não registrada"): não houve batida, então não há foto nem local
+   * para comparar. Mostra só quem é e o que o RH pode fazer.
+   */
+  htmlAusencia(x, p, fotoCad) {
+    return '<div class="prova"><section style="grid-column:1/-1"><h2>Sem batida até ' + esc(x.hora) + '</h2>' +
+      '<div style="display:flex;gap:16px;align-items:center">' +
+        '<div class="foto" style="width:96px;flex:none">' + fotoCad + '</div>' +
+        '<p style="margin:0;font-size:13.5px;color:#475569;line-height:1.5">' + esc(p ? p.nome : 'O colaborador') +
+          ' não registrou entrada hoje. Não existe foto nem localização porque não houve batida.<br>' +
+          'Se a pessoa trabalhou e esqueceu de bater, lance a entrada manual. Se faltou, registre a decisão abaixo.</p>' +
+      '</div></section></div>';
   },
 
   /** Mapa de prova (placeholder SVG): cerca + pino do registro fora, se houver. */
@@ -1349,21 +1363,9 @@ export const Rh = {
     else if (alocadoHoje) status = { cls: 'bad', txt: 'Sem entrada' };
     const ultimo = ultima
       ? (ultima.marcado_dia === hoje ? '' : (data(ultima.marcado_dia) + ' ')) +
-        (ultima.tipo === 'entrada' ? 'E ' : 'S ') + this.horaSegura(ultima.marcado_em)
+        (ultima.tipo === 'entrada' ? 'E ' : 'S ') + hora(ultima.marcado_em)
       : '— sem registro';
     return { status, ultimo };
-  },
-
-  /** Formata HH:MM de um timestamp, tolerando o formato do Postgres (sem 'T'). */
-  horaSegura(iso) {
-    if (!iso) return '';
-    let d = new Date(iso);
-    if (isNaN(d)) d = new Date(String(iso).replace(' ', 'T'));   // "2026-09-01 23:00:00" → ISO
-    if (isNaN(d)) {
-      const m = String(iso).match(/(\d{2}):(\d{2})/);   // último recurso: pega HH:MM do texto
-      return m ? m[1] + ':' + m[2] : '';
-    }
-    return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   },
 
   pintarPessoas() {
@@ -2000,11 +2002,7 @@ export const Rh = {
 
   /* ------------------------------------------------------- registros */
 
-  /** Hora e dia no relógio da empresa (o painel pode estar em outro fuso). */
-  horaFuso(iso) {
-    try { return new Intl.DateTimeFormat('pt-BR', { timeZone: (this.dados.empresa || {}).fuso || 'America/Campo_Grande', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso)); }
-    catch { return hora(iso); }
-  },
+  /** Dia no relógio da empresa (o painel pode estar em outro fuso). */
   diaFuso(iso) { return diaDe(iso, (this.dados.empresa || {}).fuso); },
 
   pintarRegistros() {
@@ -2059,7 +2057,7 @@ export const Rh = {
       const todas = (this.dados.marcacoes || []).concat(this.dados.marcacoes_anuladas || []);
       const linhas = espelho(todas, id);
       const marca = m => {
-        const rotulo = (m.tipo === 'entrada' ? 'Entrada ' : 'Saída ') + '<span class="mono">' + this.horaFuso(m.marcado_em) + '</span>';
+        const rotulo = (m.tipo === 'entrada' ? 'Entrada ' : 'Saída ') + '<span class="mono">' + hora(m.marcado_em) + '</span>';
         if (m.anulada) return '<span style="text-decoration:line-through;color:#94a3b8">' + rotulo + '</span> <span class="tag">anulada</span>';
         return rotulo + (m.origem === 'manual' ? ' <span class="tag">manual</span>' : '') + (m.pendente ? ' <span class="tag">pendente</span>' : '') +
           ' <button class="v2btn ghost mini" data-corrigir="' + esc(m.id_cliente) + '">Corrigir</button>' +
@@ -2072,8 +2070,8 @@ export const Rh = {
       $('regSaida').querySelectorAll('[data-corrigir]').forEach(b => {
         b.onclick = () => {
           const m = todas.find(x => x.id_cliente === b.dataset.corrigir); if (!m) return;
-          formulario({ titulo: 'Corrigir ' + (m.tipo === 'saida' ? 'saída' : 'entrada') + ' de ' + data(this.diaFuso(m.marcado_em)) + ' às ' + this.horaFuso(m.marcado_em),
-            tipo: m.tipo, dia: this.diaFuso(m.marcado_em), hora: this.horaFuso(m.marcado_em), original: m.id_cliente });
+          formulario({ titulo: 'Corrigir ' + (m.tipo === 'saida' ? 'saída' : 'entrada') + ' de ' + data(this.diaFuso(m.marcado_em)) + ' às ' + hora(m.marcado_em),
+            tipo: m.tipo, dia: this.diaFuso(m.marcado_em), hora: hora(m.marcado_em), original: m.id_cliente });
         };
       });
       $('regSaida').querySelectorAll('[data-anular]').forEach(b => {
@@ -2296,7 +2294,7 @@ export const Rh = {
     $('btnCsvHoras').disabled = !linhas.length;
     $('btnCsvHoras').onclick = () => this.csvHoras();
     if (!linhas.length) { $('hrSaida').innerHTML = '<p class="nota">Sem marcações nem escala no período.</p>'; return; }
-    const ST = { ok: 'OK', falta: 'Falta', incompleto: 'Incompleto', a_confirmar: 'A confirmar', sem_escala: 'Sem escala', em_andamento: 'Em andamento' };
+    const ST = { ok: 'OK', falta: 'Falta', incompleto: 'Incompleto', a_confirmar: 'A confirmar', folga: 'Folga (extra)', em_andamento: 'Em andamento' };
     const saldoCls = v => v < 0 ? ' style="color:#b42318"' : v > 0 ? ' style="color:#12805c"' : '';
     const diasHtml = l => '<tr class="hr-det hide" data-det="' + esc(l.pessoa_id) + '"><td colspan="9" style="background:#f8fafc;padding:8px 12px">' +
       '<table class="adtable"><thead><tr><th>Dia</th><th>Equipe</th><th>Previstas</th><th>Trabalhadas</th><th>Saldo</th><th>Atraso</th><th>Situação</th></tr></thead><tbody>' +
@@ -2326,7 +2324,7 @@ export const Rh = {
 
   csvHoras() {
     const h = this.horasLinhas; if (!h) return;
-    const ST = { ok: 'OK', falta: 'Falta', incompleto: 'Incompleto', a_confirmar: 'A confirmar', sem_escala: 'Sem escala', em_andamento: 'Em andamento' };
+    const ST = { ok: 'OK', falta: 'Falta', incompleto: 'Incompleto', a_confirmar: 'A confirmar', folga: 'Folga (extra)', em_andamento: 'Em andamento' };
     const linhas = [];
     for (const l of h.linhas) for (const x of l.dias) {
       linhas.push([l.nome, l.matricula, x.dia, this.nomeEquipe(x.equipe_id), fmtMinutos(x.previsto), fmtMinutos(x.trabalhado),
@@ -2618,7 +2616,7 @@ export const Rh = {
     }
     const r = ib.resumo || {}, eq = r.equipes || {}, co = r.colaboradores || {};
     const q = new Date(ib.ultima_sync);
-    const quando = isNaN(q) ? esc(ib.ultima_sync) : q.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const quando = isNaN(q) ? esc(ib.ultima_sync) : data(this.diaFuso(q.toISOString())) + ' ' + hora(q.toISOString());
     const avisos = (ib.avisos || []);
     const descAviso = a => {
       if (a.tipo === 'contato_em_mais_de_um_card') return 'Contato ' + esc(a.contato) + ' está em ' + (a.cards || []).length + ' cards (' + (a.cards || []).map(esc).join(', ') + ') — vale o aberto mais recente';

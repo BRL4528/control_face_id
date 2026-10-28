@@ -9,6 +9,28 @@ export function tipoDaVez(marcacoesDoDiaDaPessoa) {
 }
 
 /**
+ * Entrada/saída pela ordem do dia: a 1ª batida válida da pessoa no dia é entrada, a 2ª
+ * saída, e assim por diante. O tipo gravado vem do celular, que conta só o que ele
+ * mesmo bateu e não vê o que o RH lança ou anula; por isso pode sair trocado e aqui
+ * vira só referência (`tipo_gravado`). Recebe batidas válidas (sem anuladas nem
+ * rejeitadas) de qualquer pessoa e dia; devolve na mesma ordem. Pura.
+ */
+export function tiposPelaOrdem(marcacoes) {
+  const grupos = new Map();
+  for (const m of (marcacoes || [])) {
+    const k = (m.pessoa_id || 'disp:' + (m.dispositivo_id || '')) + '|' + m.marcado_dia;
+    if (!grupos.has(k)) grupos.set(k, []);
+    grupos.get(k).push(m);
+  }
+  const tipo = new Map();
+  for (const g of grupos.values()) {
+    g.slice().sort((a, b) => String(a.marcado_em).localeCompare(String(b.marcado_em)))
+      .forEach((m, i) => tipo.set(m, i % 2 === 0 ? 'entrada' : 'saida'));
+  }
+  return (marcacoes || []).map(m => tipo.get(m) === m.tipo ? m : Object.assign({}, m, { tipo: tipo.get(m), tipo_gravado: m.tipo }));
+}
+
+/**
  * Os 4 pontos padrão do dia: manhã (entrada/saída) e tarde (entrada/saída).
  * A sequência é automática — a 1ª marcação do dia é a entrada da manhã, a 2ª a
  * saída da manhã, e assim por diante. Recebe as marcações do dia (qualquer
@@ -122,6 +144,23 @@ export function dia(iso, fuso) {
     catch { /* fuso inválido: cai no UTC */ }
   }
   return String(iso).slice(0, 10);
+}
+
+/**
+ * HH:MM de um instante no relógio de `fuso` (o da empresa). Sem fuso, no relógio do
+ * aparelho. Aceita o formato do Postgres ("2026-09-01 23:00:00+00"). Pura.
+ */
+export function horaNoFuso(iso, fuso) {
+  if (!iso) return '';
+  let d = new Date(iso);
+  if (isNaN(d)) d = new Date(String(iso).replace(' ', 'T'));
+  if (isNaN(d)) { const m = String(iso).match(/(\d{2}):(\d{2})/); return m ? m[1] + ':' + m[2] : ''; }
+  const op = { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' };
+  if (fuso) {
+    try { return new Intl.DateTimeFormat('pt-BR', Object.assign({ timeZone: fuso }, op)).format(d); }
+    catch { /* fuso inválido: cai no relógio do aparelho */ }
+  }
+  return new Intl.DateTimeFormat('pt-BR', op).format(d);
 }
 
 /* ---------------------------------------------------- painel do RH */
@@ -307,6 +346,7 @@ export const TIPOS_EXCECAO = {
   sem_entrada:     { rotulo: 'Entrada não registrada', severidade: 'atencao' },
   registro_manual: { rotulo: 'Registro manual sem biometria', severidade: 'atencao' },
   zona_cinzenta:   { rotulo: 'Similaridade na zona cinzenta', severidade: 'atencao' },
+  sem_prova_de_vida: { rotulo: 'Rosto confere, faltou piscar', severidade: 'atencao' },
   // Alertas de PLANEJAMENTO (não são do dia; são de gestão da escala).
   pessoa_em_2_equipes: { rotulo: 'Alocada em duas equipes no mesmo dia', severidade: 'critico' },
   cerca_sem_gente:     { rotulo: 'Equipe com cerca e sem colaboradores', severidade: 'atencao' },
@@ -334,7 +374,7 @@ export const HORA_ENTRADA_PADRAO = '08:00';
  * vez de ler o relógio. `hoje` é 'YYYY-MM-DD'. Retorna ordenado por severidade
  * (crítico primeiro) e, dentro disso, por horário.
  */
-export function exceptionsDoDia(marcacoes, pessoas, alocacoesHoje, hoje, agoraISO, horaEntrada, horaPorEquipe) {
+export function exceptionsDoDia(marcacoes, pessoas, alocacoesHoje, hoje, agoraISO, horaEntrada, horaPorEquipe, limiarAceite) {
   const ativos = {};
   for (const p of (pessoas || [])) ativos[p.pessoa_id] = p;
   const porEquipe = horaPorEquipe || {};   // equipe_id -> 'HH:MM' (jornada real); senão cai no default
@@ -346,14 +386,10 @@ export function exceptionsDoDia(marcacoes, pessoas, alocacoesHoje, hoje, agoraIS
     if (!m || m.marcado_dia !== hoje) continue;
     marcadasHoje[m.pessoa_id] = true;
     if (!m.pendente) continue;
-    let tipo = null;
-    if (m.dentro_cerca === false) tipo = 'fora_da_cerca';
-    else if (m.origem === 'manual') tipo = 'registro_manual';
-    else if (m.veredito === 'revisar') tipo = 'zona_cinzenta';
-    else continue;   // pendente por outro motivo sutil não vira card próprio
+    if (m.dentro_cerca !== false && m.origem !== 'manual' && m.veredito !== 'revisar') continue;   // pendente por outro motivo sutil não vira card próprio
     itens.push({
       id: 'm:' + m.id_cliente,
-      tipo, severidade: TIPOS_EXCECAO[tipo].severidade, rotulo: TIPOS_EXCECAO[tipo].rotulo,
+      ...classificarPendente(m, limiarAceite),
       pessoa_id: m.pessoa_id, equipe_id: m.equipe_id,
       hora: String(m.marcado_em).slice(11, 16),
       marcacao: m, alocacao: null, alvo: { tipo: 'marcacao', id: m.id_cliente }
@@ -382,6 +418,23 @@ export function exceptionsDoDia(marcacoes, pessoas, alocacoesHoje, hoje, agoraIS
   const peso = { critico: 0, atencao: 1 };
   return itens.sort((x, y) =>
     (peso[x.severidade] - peso[y.severidade]) || String(x.hora).localeCompare(String(y.hora)));
+}
+
+/**
+ * Por que uma batida pendente está na fila, em uma linha: tipo, rótulo e severidade.
+ * Fora da cerca só é crítico quando o rosto não está confirmado; com o rosto
+ * confirmado (distância até `limiarAceite`) é a pessoa certa em outro lugar, como
+ * um líder em viagem, e vira atenção. Batida que só falhou na prova de vida, com o
+ * rosto confirmado, ganha rótulo próprio em vez de "zona cinzenta". Pura.
+ */
+export function classificarPendente(m, limiarAceite = 0.45) {
+  const rostoConfere = m.origem !== 'manual' && m.score != null && Number(m.score) <= limiarAceite;
+  let tipo = 'zona_cinzenta';
+  if (m.dentro_cerca === false) tipo = 'fora_da_cerca';
+  else if (m.origem === 'manual') tipo = 'registro_manual';
+  else if (m.liveness_ok === false && rostoConfere) tipo = 'sem_prova_de_vida';
+  const t = TIPOS_EXCECAO[tipo];
+  return { tipo, rotulo: t.rotulo, severidade: tipo === 'fora_da_cerca' && rostoConfere ? 'atencao' : t.severidade };
 }
 
 /* ------------------------------------------------ jornada + relatórios */
@@ -544,6 +597,7 @@ function alerta(tipo, id, pessoaId, equipeId, alvo) {
 const LIMITE_INTERVALO_MIN = 360;   // turno contínuo acima de 6h exige pausa
 const JORNADA_FIXA = { entrada: '07:00', saida: '17:00', tolerancia_min: 10, intervalo_min: 60 };
 const emMin = hhmm => { const [h, m] = String(hhmm).split(':'); return Number(h) * 60 + Number(m); };
+const diaUtil = d => { const w = new Date(d + 'T12:00:00Z').getUTCDay(); return w >= 1 && w <= 5; };
 
 /** Minutos desde 00:00 do relógio local no fuso informado. */
 function minutoLocal(iso, fuso) {
@@ -575,8 +629,8 @@ export function minutosTrabalhados(marcacoes) {
 
 /**
  * Relatório de horas por colaborador no período [de, ate] (YYYY-MM-DD).
- * Previsto = (saída − entrada − intervalo) da jornada da equipe, só em dia com
- * alocação. Trabalhado = pares entrada→saída; com só 2 batidas (>6h) desconta o
+ * Previsto = (saída − entrada − intervalo) da jornada da equipe, em dia com
+ * alocação ou em dia útil com batida (sem escala vale a jornada da equipe). Trabalhado = pares entrada→saída; com só 2 batidas (>6h) desconta o
  * intervalo da jornada. Saldo dentro da tolerância da jornada vira 0. Só contam marcações aceitas;
  * `estado:'pendente'` fica fora do saldo (a_confirmar) e `'rejeitada'` é ignorada.
  * Dia sem saldo calculável (incompleto ou com pendência) não entra nos totais de
@@ -601,8 +655,8 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
     return porPessoa.get(id);
   };
   const dentro = d => d >= de && d <= ate;
-  for (const m of (marcacoes || [])) {
-    if (!m.pessoa_id || m.estado === 'rejeitada' || !dentro(m.marcado_dia)) continue;
+  for (const m of tiposPelaOrdem((marcacoes || []).filter(m => m.estado !== 'rejeitada'))) {
+    if (!m.pessoa_id || !dentro(m.marcado_dia)) continue;
     if (pessoaId && m.pessoa_id !== pessoaId) continue;
     const b = bolsa(m.pessoa_id);
     if (!b.marcas.has(m.marcado_dia)) b.marcas.set(m.marcado_dia, []);
@@ -624,7 +678,10 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
       const marcas = b.marcas.get(dia) || [];
       const equipeId = b.aloc.get(dia) || ((marcas.find(m => m.equipe_id) || {}).equipe_id) || null;
       const jor = jornadaDe(equipeId);
-      const escalado = b.aloc.has(dia);
+      // Sem escala, o dia útil em que a pessoa bateu ponto tem a jornada da equipe dela
+      // (a equipe é a obra; a escala virou exceção). Fim de semana sem escala é folga e
+      // o que for batido ali é extra.
+      const escalado = b.aloc.has(dia) || (marcas.length > 0 && diaUtil(dia));
       const previsto = escalado ? Math.max(0, emMin(jor.saida) - emMin(jor.entrada) - jor.intervalo_min) : 0;
       const aceitas = marcas.filter(m => m.estado !== 'pendente');
       const pendentes = marcas.length - aceitas.length;
@@ -642,8 +699,8 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
       if (!marcas.length) status = dia >= hoje ? 'em_andamento' : 'falta';
       else if (pendentes) status = 'a_confirmar';
       else if (ok.incompleto) status = dia >= hoje ? 'em_andamento' : 'incompleto';
-      else if (!escalado) status = 'sem_escala';
-      if (status === 'ok' || status === 'sem_escala' || status === 'falta') saldo = ok.minutos - previsto;
+      else if (!escalado) status = 'folga';
+      if (status === 'ok' || status === 'folga' || status === 'falta') saldo = ok.minutos - previsto;
       // Tolerância: diferença pequena (≤ tolerância da jornada) não vira extra nem desconto.
       const naTolerancia = status === 'ok' && escalado && saldo !== 0 && Math.abs(saldo) <= jor.tolerancia_min;
       if (naTolerancia) saldo = 0;

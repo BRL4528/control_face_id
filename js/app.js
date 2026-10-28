@@ -12,7 +12,7 @@ import { Api, ApiRh } from './api.js';
 import { Face } from './face.js';
 import { Ponto } from './ponto.js';
 import { Rh } from './rh.js';
-import { $, mostrar, toast } from './ui.js';
+import { $, mostrar, toast, definirFuso } from './ui.js';
 
 const cfg = () => window.EFRAT_CFG;
 const S = { dispositivo: null, carga: null, empresa: null, bloqueado: false };
@@ -241,7 +241,7 @@ async function abrirPonto() {
         await Store.set('template', template);
         await Store.set('alocacao', alocacao);
         await Store.set('deriva', deriva);
-        if (r.fuso) await Store.set('fuso', r.fuso);
+        if (r.fuso) { await Store.set('fuso', r.fuso); definirFuso(r.fuso); }
       } else if (r.status === 403 && r.codigo === 'BLOQUEADO') {
         await marcarBloqueado(); return irParaPorta();
       } else if (r.status === 401) {
@@ -321,6 +321,7 @@ async function boot() {
   try { await Store.fixar(); } catch (e) { /* persist bloqueado — segue */ }
   try { S.dispositivo = await identidadeSalva(); } catch (e) { S.dispositivo = null; }
   try { S.bloqueado = !!(await Store.get('bloqueado')); } catch (e) { S.bloqueado = false; }
+  try { definirFuso(await Store.get('fuso')); } catch (e) { /* sem fuso salvo: relógio do aparelho */ }
   try { await resolverEmpresa(); } catch (e) { /* segue sem empresa */ }
 
   try { setInterval(() => sincronizarFundo(), cfg().syncIntervalMs); } catch (e) { /* ok */ }

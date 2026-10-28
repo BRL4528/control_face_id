@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { minutosTrabalhados, horasPorColaborador, fmtMinutos, dia as diaDe } from '../../js/regras.js';
+import { minutosTrabalhados, horasPorColaborador, fmtMinutos, dia as diaDe, tiposPelaOrdem } from '../../js/regras.js';
 
 // Fuso -04 (Campo Grande): 07:00 local = 11:00Z.
 const z = (hhmmLocal) => { const [h, m] = hhmmLocal.split(':').map(Number); return `2026-10-05T${String(h + 4).padStart(2, '0')}:${String(m).padStart(2, '0')}:00Z`; };
@@ -68,9 +68,14 @@ test('dia escalado sem batida no passado é falta; hoje é em andamento', () => 
   assert.equal(dia(h).status, 'em_andamento'); assert.equal(h[0].totais.faltas, 0);
 });
 
-test('batida sem escala conta tudo como extra; fmtMinutos', () => {
-  const r = horasPorColaborador({ ...base, alocacoes: [], marcacoes: [mk('entrada', '08:00'), mk('saida', '10:00')] });
-  assert.equal(dia(r).status, 'sem_escala'); assert.equal(dia(r).saldo, 120);
+test('sem escala: dia útil com batida usa a jornada da equipe (caso Valmir +48h44); fim de semana é folga e vira extra', () => {
+  const util = horasPorColaborador({ ...base, alocacoes: [], marcacoes: [mk('entrada', '07:00'), mk('saida', '11:00'), mk('entrada', '12:00'), mk('saida', '17:00')] });
+  assert.equal(dia(util).status, 'ok'); assert.equal(dia(util).previsto, 540); assert.equal(dia(util).saldo, 0);
+  const domingo = { marcado_dia: '2026-10-04' };
+  const r = horasPorColaborador({ ...base, alocacoes: [], marcacoes: [
+    mk('entrada', '08:00', { ...domingo, marcado_em: '2026-10-04T12:00:00Z' }), mk('saida', '10:00', { ...domingo, marcado_em: '2026-10-04T14:00:00Z' })] });
+  const dom = r[0].dias.find(d => d.dia === '2026-10-04');
+  assert.equal(dom.status, 'folga'); assert.equal(dom.previsto, 0); assert.equal(dom.saldo, 120);
   assert.equal(fmtMinutos(510), '8h30'); assert.equal(fmtMinutos(65, true), '+1h05'); assert.equal(fmtMinutos(-20, true), '-0h20'); assert.equal(fmtMinutos(0, true), '0h00');
 });
 
@@ -79,4 +84,25 @@ test('dia no fuso da empresa: 21h em Campo Grande ainda é o mesmo dia (UTC já 
   assert.equal(diaDe('2026-10-06T01:30:00Z', 'America/Campo_Grande'), '2026-10-05');  // 21:30 do dia 5
   assert.equal(diaDe('2026-10-05T14:00:00Z', 'America/Campo_Grande'), '2026-10-05');
   assert.equal(diaDe('2026-10-05T14:00:00Z', 'fuso/invalido'), '2026-10-05');        // inválido cai no UTC
+});
+
+test('entrada/saída pela ordem do dia: tipo trocado no celular não quebra as horas (caso Valmir 07/10)', () => {
+  // O celular gravou Entrada, Entrada, Saída, Entrada (o RH tinha anulado uma e lançado outra).
+  const ms = [mk('entrada', '07:00', { origem: 'manual' }), mk('entrada', '11:47'), mk('saida', '12:59'), mk('entrada', '17:01')];
+  const r = horasPorColaborador({ ...base, marcacoes: ms });
+  assert.equal(dia(r).status, 'ok');
+  assert.equal(dia(r).trabalhado, 287 + 242);   // 07:00–11:47 + 12:59–17:01
+  const t = tiposPelaOrdem(ms);
+  assert.deepEqual(t.map(m => m.tipo), ['entrada', 'saida', 'entrada', 'saida']);
+  assert.equal(t[1].tipo_gravado, 'entrada');
+  assert.equal(t[0], ms[0]);   // tipo já certo: mesmo objeto, sem cópia
+});
+
+test('tiposPelaOrdem separa por pessoa e por dia e ignora a ordem de chegada', () => {
+  const ms = [
+    mk('saida', '12:00'), mk('saida', '07:00'),
+    mk('saida', '08:00', { pessoa_id: 'p2' }),
+    mk('saida', '09:00', { marcado_dia: '2026-10-06', marcado_em: '2026-10-06T13:00:00Z' })
+  ];
+  assert.deepEqual(tiposPelaOrdem(ms).map(m => m.tipo), ['saida', 'entrada', 'entrada', 'entrada']);
 });

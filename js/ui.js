@@ -1,4 +1,6 @@
 // Utilidades de tela compartilhadas pelas três áreas.
+import { horaNoFuso } from './regras.js';
+
 export const $ = id => document.getElementById(id);
 
 export const esc = s => {
@@ -26,5 +28,9 @@ export function toast(msg, tipo) {
   tid = setTimeout(() => t.classList.add('hide'), 3400);
 }
 
-export const hora = iso => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+// Hora sempre no relógio da empresa: o RH pode estar em outro fuso (ex.: Brasília
+// olhando Campo Grande) e a batida tem de aparecer como o colaborador viu no celular.
+let fusoEmpresa = null;
+export const definirFuso = fuso => { fusoEmpresa = fuso || null; };
+export const hora = iso => horaNoFuso(iso, fusoEmpresa);
 export const data = iso => new Date(iso + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });

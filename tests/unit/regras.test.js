@@ -7,7 +7,7 @@ import {
   presencaPorEquipe, statusPresenca, serieDiaria, pendenciasPorMotivo, LIMIAR_PRESENCA
 , pontosDoDia, exceptionsDoDia, TIPOS_EXCECAO,
   jornadaDaEquipe, horaEntradaDaEquipe, horasEntradaPorEquipe, csvDe,
-  materializarDias, alertasDePlanejamento } from '../../js/regras.js';
+  materializarDias, alertasDePlanejamento, horaNoFuso, classificarPendente } from '../../js/regras.js';
 
 const CFG = { limiarAceite: 0.45, limiarCinza: 0.58 };
 
@@ -599,4 +599,28 @@ test('alertasDePlanejamento: itens têm o mesmo shape das exceções (id, tipo, 
   const x = al[0];
   assert.ok(x.id && x.tipo && x.severidade && x.alvo && 'pessoa_id' in x && 'equipe_id' in x);
   assert.equal(x.hora, '');
+});
+
+test('horaNoFuso: mostra a batida no relógio da empresa, não no do painel', () => {
+  // 10:55Z = 06:55 em Campo Grande (UTC-4) e 07:55 em Brasília (UTC-3)
+  assert.equal(horaNoFuso('2026-10-28T10:55:00Z', 'America/Campo_Grande'), '06:55');
+  assert.equal(horaNoFuso('2026-10-28T10:55:00Z', 'America/Sao_Paulo'), '07:55');
+  assert.equal(horaNoFuso('2026-10-28 10:55:00+00', 'America/Campo_Grande'), '06:55');   // formato do Postgres
+  assert.equal(horaNoFuso('', 'America/Campo_Grande'), '');
+  assert.equal(horaNoFuso('2026-10-28T10:55:00Z', 'Fuso/Invalido').length, 5);
+});
+
+test('classificarPendente: fora da cerca com rosto confirmado é atenção (líder em viagem); sem rosto é crítico', () => {
+  const diego = { dentro_cerca: false, origem: 'biometria', veredito: 'revisar', score: 0.345, liveness_ok: false };
+  assert.deepEqual(classificarPendente(diego), { tipo: 'fora_da_cerca', rotulo: 'Registro fora da área', severidade: 'atencao' });
+  assert.equal(classificarPendente({ ...diego, score: 0.52 }).severidade, 'critico');
+  assert.equal(classificarPendente({ ...diego, score: null }).severidade, 'critico');
+});
+
+test('classificarPendente: só faltou piscar, com rosto confirmado, ganha rótulo próprio (caso Raíssa)', () => {
+  const raissa = { dentro_cerca: true, origem: 'biometria', veredito: 'revisar', score: 0.383, liveness_ok: false };
+  assert.equal(classificarPendente(raissa).tipo, 'sem_prova_de_vida');
+  assert.equal(classificarPendente(raissa).rotulo, 'Rosto confere, faltou piscar');
+  assert.equal(classificarPendente({ ...raissa, score: 0.5 }).tipo, 'zona_cinzenta');
+  assert.equal(classificarPendente({ ...raissa, origem: 'manual' }).tipo, 'registro_manual');
 });
