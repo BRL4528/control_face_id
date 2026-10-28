@@ -28,6 +28,14 @@ function sanear(dados) {
   if (d.jornadaPadrao != null) out.jornadaPadrao = String(d.jornadaPadrao).slice(0, 20);
   // Jornada padrão da empresa: vale para toda equipe sem jornada própria.
   if (d.jornadaPadraoId !== undefined) out.jornadaPadraoId = d.jornadaPadraoId ? String(d.jornadaPadraoId).slice(0, 40) : null;
+  // Folha de ponto: razão social e CNPJ do cabeçalho, papel timbrado (imagem A4 de
+  // fundo) e logo, como data URL de imagem. null apaga.
+  if (d.razaoSocial !== undefined) out.razaoSocial = d.razaoSocial ? String(d.razaoSocial).trim().slice(0, 120) : null;
+  if (d.cnpj !== undefined) out.cnpj = d.cnpj ? String(d.cnpj).trim().slice(0, 20) : null;
+  for (const k of ['timbrado', 'logo']) {
+    if (d[k] === null) out[k] = null;
+    else if (typeof d[k] === 'string' && /^data:image\/(png|jpeg|webp);base64,/.test(d[k]) && d[k].length <= 700000) out[k] = d[k];
+  }
   // Feriados estaduais e municipais (os nacionais o sistema já conhece): [{ dia, nome }].
   if (Array.isArray(d.feriados)) {
     out.feriados = d.feriados

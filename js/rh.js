@@ -13,9 +13,10 @@ import {
   exceptionsDoDia,
   jornadaDaEquipe, horasEntradaPorEquipe, csvDe,
   alertasDePlanejamento, horasPorColaborador, fmtMinutos, dia as diaDe, motivosDaRevisao, rotuloAuditoria,
-  tiposPelaOrdem, classificarPendente, diasDeFeriado, feriadosNacionais, horarioDoDia
+  tiposPelaOrdem, classificarPendente, diasDeFeriado, feriadosNacionais, horarioDoDia, folhaDoMes
 } from './regras.js';
 import { $, esc, mostrar, toast, hora, data, definirFuso } from './ui.js';
+import { janelaDasFolhas, escreverFolhas } from './folha.js';
 
 // Rótulo da aba na trilha do topo (breadcrumb) e no título de página.
 const TITULOS = {
@@ -2270,6 +2271,55 @@ export const Rh = {
     });
   },
 
+  /** Cabeçalho e papel timbrado da folha de ponto (Relatórios → Folha de ponto para assinar). */
+  htmlConfigFolha() {
+    const c = window.EFRAT_CFG || {};
+    const prev = (k, alt) => c[k]
+      ? '<img src="' + c[k] + '" alt="' + alt + '" style="max-height:120px;max-width:100%;border:1px solid var(--v2-linha);border-radius:6px;display:block;margin:6px 0">' +
+        '<button class="v2btn ghost mini" data-folha-rm="' + k + '">Remover</button>'
+      : '<p class="nota" style="margin:6px 0">Nenhuma imagem.</p>';
+    return '<div class="cfg-sec"><h2>Folha de ponto</h2>' +
+      '<p class="cap">Cabeçalho da folha que o colaborador assina. O papel timbrado é uma imagem do tamanho de uma folha A4 (em pé) com a marca d\'água e o rodapé da empresa; a tabela é impressa por cima.</p>' +
+      '<div class="form-grid">' +
+        '<div><label class="lb2">Razão social</label><input class="inp" id="cfRazao" value="' + esc(c.razaoSocial || '') + '" placeholder="Ex.: RT ENGENHARIA E CONSTRUÇÃO LTDA"></div>' +
+        '<div><label class="lb2">CNPJ</label><input class="inp" id="cfCnpj" value="' + esc(c.cnpj || '') + '" placeholder="00.000.000/0000-00"></div>' +
+      '</div>' +
+      '<div class="form-grid" style="margin-top:10px">' +
+        '<div><label class="lb2">Papel timbrado (PNG ou JPG, A4)</label><input class="inp" type="file" accept="image/png,image/jpeg,image/webp" id="cfTimbrado">' + prev('timbrado', 'Papel timbrado') + '</div>' +
+        '<div><label class="lb2">Logo (opcional)</label><input class="inp" type="file" accept="image/png,image/jpeg,image/webp" id="cfLogo">' + prev('logo', 'Logo') + '</div>' +
+      '</div>' +
+      '<button class="act" id="btnSalvarFolha" style="margin-top:14px;width:auto;padding:10px 18px">Salvar folha de ponto</button></div>';
+  },
+
+  ligarConfigFolha() {
+    const ler = input => new Promise((ok, falha) => {
+      const f = input.files && input.files[0];
+      if (!f) return ok(undefined);
+      if (f.size > 500 * 1024) return falha(new Error('Imagem acima de 500 KB. Exporte em resolução menor.'));
+      const r = new FileReader();
+      r.onload = () => ok(r.result); r.onerror = () => falha(new Error('Não consegui ler a imagem'));
+      r.readAsDataURL(f);
+    });
+    const salvar = async dados => {
+      const r = await ApiRh.config(this.token, { dados });
+      if (!r.ok) { toast(r.erro || 'Falha ao salvar', 'bad'); return; }
+      toast('Folha de ponto salva', 'ok');
+      await this.recarregar();
+    };
+    $('btnSalvarFolha').onclick = async () => {
+      let timbrado, logo;
+      try { timbrado = await ler($('cfTimbrado')); logo = await ler($('cfLogo')); }
+      catch (e) { toast(e.message, 'warn'); return; }
+      const dados = { razaoSocial: $('cfRazao').value.trim() || null, cnpj: $('cfCnpj').value.trim() || null };
+      if (timbrado) dados.timbrado = timbrado;
+      if (logo) dados.logo = logo;
+      salvar(dados);
+    };
+    $('rh-config').querySelectorAll('[data-folha-rm]').forEach(b => {
+      b.onclick = () => salvar({ [b.dataset.folhaRm]: null });
+    });
+  },
+
   /** Horário do dia da semana `w` (0 = domingo) da jornada, ou null se folga. */
   horarioDaSemana(j, w) {
     if (!j || !j.entrada) return w >= 1 && w <= 5 ? { entrada: '07:00', saida: '17:00' } : null;
@@ -2344,6 +2394,21 @@ export const Rh = {
             '<tr><td>Ativos sem biometria</td><td style="text-align:right"><b>' + ind.semBiometria + '</b></td></tr>' +
           '</tbody></table></div>' +
       '</div>' +
+      '<div class="v2card" style="padding:15px;margin-top:16px" id="folhaCard">' +
+        '<h2 style="margin:0 0 4px;font-size:14px;font-weight:600">Folha de ponto para assinar</h2>' +
+        '<p style="font-size:12px;color:#64748b;margin:0 0 12px">Uma página por colaborador no modelo da empresa (timbrado, batidas do mês, horas extras, faltas e rateio por obra). ' +
+          'Abre numa janela própria: "Imprimir / Salvar em PDF" gera o lote inteiro. Timbrado e CNPJ em Configurações → Folha de ponto.</p>' +
+        '<div class="form-grid" style="margin-bottom:4px">' +
+          '<div><label class="lb2">Mês</label><input class="inp" type="month" id="flMes" value="' + hoje.slice(0, 7) + '"></div>' +
+          '<div><label class="lb2">Obra</label><select class="inp" id="flObra"><option value="">Todas</option>' +
+            (d.equipes || []).filter(e => e.ativo && !e.afastamento).slice().sort((a, b) => a.nome.localeCompare(b.nome))
+              .map(e => '<option value="' + esc(e.equipe_id) + '">' + esc(e.nome) + '</option>').join('') + '</select></div>' +
+          '<div><label class="lb2">Colaborador</label><select class="inp" id="flPessoa"><option value="">Todos</option>' +
+            pessoasF.slice().sort((a, b) => a.nome.localeCompare(b.nome))
+              .map(p => '<option value="' + p.pessoa_id + '">' + esc(p.nome) + '</option>').join('') + '</select></div>' +
+          '<div style="display:flex;align-items:flex-end"><button class="v2btn" id="btnFolhas">Gerar folhas</button></div>' +
+        '</div>' +
+      '</div>' +
       '<div class="v2card" style="padding:15px;margin-top:16px" id="hrCard">' +
         '<h2 style="margin:0 0 4px;font-size:14px;font-weight:600">Horas por colaborador</h2>' +
         '<p style="font-size:12px;color:#64748b;margin:0 0 12px">Trabalhadas × previstas pela jornada da equipe (descontado o intervalo). ' +
@@ -2362,6 +2427,7 @@ export const Rh = {
 
     this.ligarFiltroFuncao('rFuncao', () => this.pintarRelatorios());
     $('btnHoras').onclick = () => this.gerarHoras();
+    $('btnFolhas').onclick = () => this.gerarFolhas();
     $('btnCsvMarc').onclick = () => {
       const linhas = marcacoesF.map(m => [
         m.marcado_dia, hora(m.marcado_em), this.nomeDe(m.pessoa_id),
@@ -2378,6 +2444,45 @@ export const Rh = {
     };
 
     this.carregarGraficos({ serie, equipes: ind.equipes, motivos, alarme: cfg.alarmeManual || 20 });
+  },
+
+  /**
+   * Folhas de ponto do mês: busca as batidas na API, calcula horas e folha no
+   * cliente (regras.js) e abre o lote para imprimir. Obra: quem trabalhou nela no
+   * mês ou está nela hoje.
+   */
+  async gerarFolhas() {
+    const mes = $('flMes').value, obra = $('flObra').value, pessoaId = $('flPessoa').value;
+    if (!/^\d{4}-\d{2}$/.test(mes)) { toast('Escolha o mês', 'warn'); return; }
+    const [a, m] = mes.split('-').map(Number);
+    const de = mes + '-01', ate = mes + '-' + String(new Date(Date.UTC(a, m, 0)).getUTCDate()).padStart(2, '0');
+    // A janela abre já no clique (depois de um await o navegador bloqueia o pop-up)
+    // e recebe o lote quando ficar pronto.
+    const w = janelaDasFolhas();
+    if (!w) { toast('O navegador bloqueou a janela. Libere pop-ups para este site e gere de novo.', 'warn'); return; }
+    const btn = $('btnFolhas'); btn.disabled = true;
+    const r = await ApiRh.horas(this.token, { de, ate });
+    btn.disabled = false;
+    if (!r.ok) { w.close(); toast(r.erro || 'Falha ao buscar as batidas', 'bad'); return; }
+    const d = this.dados, cfg = window.EFRAT_CFG || {}, fuso = (d.empresa || {}).fuso;
+    const validas = (r.dados.marcacoes || []).filter(x => x.estado !== 'rejeitada');
+    const linhas = horasPorColaborador({
+      marcacoes: r.dados.marcacoes, alocacoes: r.dados.alocacoes, pessoas: d.pessoas, equipes: d.equipes, jornadas: d.jornadas,
+      jornadaPadrao: this.jornadaPadrao(), de, ate, hoje: this.hojeServidor(), fuso, pessoaId: pessoaId || null, feriados: cfg.feriados
+    });
+    const folhas = linhas
+      .map(l => ({ l, p: d.pessoas.find(p => p.pessoa_id === l.pessoa_id) || {} }))
+      .filter(({ l, p }) => this.passaFuncao(p) && (!obra || p.equipe_id === obra || l.dias.some(x => x.equipe_id === obra)))
+      .map(({ l, p }) => Object.assign(folhaDoMes({
+        linha: l, marcacoes: validas.filter(x => x.pessoa_id === l.pessoa_id), mes, fuso,
+        nomeEquipe: id => this.nomeEquipe(id), feriados: cfg.feriados
+      }), { nome: l.nome, matricula: l.matricula, funcao: p.papel && p.papel !== 'colaborador' ? this.nomePapel(p.papel) : '' }))
+      .sort((x, y) => x.nome.localeCompare(y.nome));
+    if (!folhas.length) { w.close(); toast('Ninguém com batida ou jornada nesse mês e filtro', 'warn'); return; }
+    escreverFolhas(w, folhas, {
+      empresa: { nome: (d.empresa || {}).nome, razao: cfg.razaoSocial, cnpj: cfg.cnpj },
+      timbrado: cfg.timbrado || null, logo: cfg.logo || null
+    });
   },
 
   /** Relatório de horas: busca o período na API e calcula no cliente (regras.js). */
@@ -2549,6 +2654,7 @@ export const Rh = {
         '</div></div>' +
 
       this.htmlFeriados() +
+      this.htmlConfigFolha() +
 
       '<div class="cfg-sec"><h2>Empresa</h2>' +
         '<p class="cap">Nome exibido no painel e no pareamento do colaborador.</p>' +
@@ -2654,6 +2760,7 @@ export const Rh = {
       await this.recarregar();
     };
     this.ligarFeriados();
+    this.ligarConfigFolha();
     $('btnCopiarLink').onclick = async () => { try { await navigator.clipboard.writeText(this.linkEmpresa()); toast('Link copiado', 'ok'); } catch (e) { toast('Selecione e copie manualmente', 'warn'); } };
     $('btnWaLink').onclick = () => window.open('https://wa.me/?text=' + encodeURIComponent(this.mensagemLink()), '_blank', 'noopener');
     $('btnNovoLink').onclick = async () => {

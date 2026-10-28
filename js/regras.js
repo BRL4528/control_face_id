@@ -850,3 +850,64 @@ export function rotuloAuditoria(c) {
   if (c.acao === 'atribuir') return { txt: 'Atribuiu batida', cls: 'mut' };
   return { txt: String(c.acao || ''), cls: 'mut' };
 }
+
+/* ------------------------------------------------ folha de ponto (modelo para assinar) */
+
+const SEMANA_FOLHA = ['DOMINGO', 'SEGUNDA', 'TERÇA', 'QUARTA', 'QUINTA', 'SEXTA', 'SÁBADO'];
+const OCORRENCIA_FOLHA = { falta: 'FALTA', afastado: 'AFASTADO', feriado: 'FERIADO', incompleto: 'INCOMPLETO', a_confirmar: 'A CONFIRMAR' };
+
+/** "Obra 574 - Rio Verde (Elevatórias)" → "574 - RIO VERDE (ELEVATÓRIAS)"; demais nomes em maiúsculas. Pura. */
+export function rotuloObra(nome) {
+  if (!nome) return '';
+  return String(nome).replace(/^\s*obra\s+(?=\d)/i, '').trim().toLocaleUpperCase('pt-BR');
+}
+
+/**
+ * Folha de ponto de UMA pessoa num mês ('YYYY-MM'), no formato da folha assinada:
+ * uma linha por dia com as 4 primeiras batidas, total, extra, ocorrência e obra;
+ * mais totais e rateio por obra (dias e horas em cada uma). `linha`: item de
+ * horasPorColaborador do mesmo período. `marcacoes`: batidas não rejeitadas da
+ * pessoa. `nomeEquipe(id)` dá o nome da obra. `feriados`: os da empresa
+ * (os nacionais já entram). Pura.
+ */
+export function folhaDoMes({ linha, marcacoes, mes, fuso, nomeEquipe, feriados }) {
+  const [ano, m] = mes.split('-').map(Number);
+  const ultimo = new Date(Date.UTC(ano, m, 0)).getUTCDate();
+  const ehFeriado = feriados instanceof Set ? feriados : diasDeFeriado(mes + '-01', mes + '-' + ultimo, feriados);
+  const porDia = new Map(((linha && linha.dias) || []).map(d => [d.dia, d]));
+  const batidas = new Map();
+  for (const b of tiposPelaOrdem(marcacoes || [])) {
+    if (!batidas.has(b.marcado_dia)) batidas.set(b.marcado_dia, []);
+    batidas.get(b.marcado_dia).push(b);
+  }
+  const obra = id => rotuloObra(id && nomeEquipe ? nomeEquipe(id) : '');
+  const rateio = new Map();
+  const tot = { trabalhado: 0, extra: 0, a_menos: 0, faltas: 0, dias_trabalhados: 0, a_confirmar: 0, batidas_alem_de_4: 0 };
+  const dias = [];
+  for (let d = 1; d <= ultimo; d++) {
+    const dia = mes + '-' + String(d).padStart(2, '0');
+    const x = porDia.get(dia) || null;
+    const bs = (batidas.get(dia) || []).slice().sort((a, b) => String(a.marcado_em).localeCompare(String(b.marcado_em)));
+    const trabalhado = x ? x.trabalhado : 0;
+    const extra = x && x.saldo > 0 ? x.saldo : 0;
+    if (x && x.saldo < 0) tot.a_menos += -x.saldo;
+    if (x && x.status === 'falta') tot.faltas++;
+    if (x && x.status === 'a_confirmar') tot.a_confirmar++;
+    if (bs.length > 4) tot.batidas_alem_de_4++;
+    tot.trabalhado += trabalhado; tot.extra += extra;
+    if (trabalhado > 0) {
+      tot.dias_trabalhados++;
+      const k = (x && x.equipe_id) || '';
+      const r = rateio.get(k) || { obra: obra(k) || 'SEM OBRA', dias: 0, minutos: 0 };
+      r.dias++; r.minutos += trabalhado; rateio.set(k, r);
+    }
+    dias.push({
+      dia, num: d, semana: SEMANA_FOLHA[new Date(dia + 'T12:00:00Z').getUTCDay()],
+      batidas: [0, 1, 2, 3].map(i => bs[i] ? horaNoFuso(bs[i].marcado_em, fuso) : ''),
+      mais_batidas: Math.max(0, bs.length - 4),
+      trabalhado, extra, ocorrencia: x ? (OCORRENCIA_FOLHA[x.status] || '') : ehFeriado.has(dia) ? 'FERIADO' : '',
+      obra: bs.length || trabalhado ? obra(x && x.equipe_id) : ''
+    });
+  }
+  return { mes, dias, totais: tot, rateio: [...rateio.values()].sort((a, b) => b.minutos - a.minutos) };
+}
