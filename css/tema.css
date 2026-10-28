@@ -672,3 +672,12 @@ button.linha-item{border:0;background:none;font:inherit;color:inherit;cursor:poi
 #rh .eqp-quem .mt{font-size:12px;color:var(--v2-mut);margin-top:2px}
 #rh .eqp-acoes{display:flex;gap:6px;flex:none;flex-wrap:wrap;justify-content:flex-end}
 @media (max-width:700px){#rh .eqp-row{flex-wrap:wrap} #rh .eqp-acoes{width:100%;justify-content:flex-start}}
+
+/* folha de ponto no app: conferir e assinar */
+.folha-mini{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0}
+.folha-mini td{padding:6px 4px;border-bottom:1px solid var(--linha);text-align:left}
+.folha-mini td:last-child{text-align:right}
+.folha-dias{margin:8px 0;font-size:13px}
+.folha-dias summary{cursor:pointer;color:var(--azul);padding:6px 0}
+.folha-termo{display:flex;gap:10px;align-items:flex-start;font-size:12.5px;line-height:1.45;color:var(--ink);margin:12px 0;text-align:left}
+.folha-termo input{width:20px;height:20px;flex:none;margin:1px 0 0}

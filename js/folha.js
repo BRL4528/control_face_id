@@ -4,7 +4,7 @@
 // janela própria; "Imprimir / Salvar em PDF" gera o lote inteiro de uma vez.
 //
 // Os números vêm prontos de regras.js (folhaDoMes); aqui é só apresentação.
-import { esc } from './ui.js';
+import { esc, hora } from './ui.js';
 
 const MESES = ['JANEIRO', 'FEVEREIRO', 'MARÇO', 'ABRIL', 'MAIO', 'JUNHO', 'JULHO', 'AGOSTO', 'SETEMBRO', 'OUTUBRO', 'NOVEMBRO', 'DEZEMBRO'];
 const hm = min => { const n = Math.round(Number(min) || 0); return Math.floor(n / 60) + ':' + String(n % 60).padStart(2, '0'); };
@@ -39,9 +39,20 @@ td.oc.neutro { color: #475569 }
 .resumo td:first-child { text-align: left }
 .nota { font-size: 6.8pt; color: #475569; margin-top: 1.5mm }
 .ass { margin-top: 9mm; display: flex; justify-content: space-between; align-items: flex-end; font-size: 7.8pt }
+.selo { margin-top: 7mm; padding: 2.5mm 3mm; border: 0.3mm solid #16a34a; border-radius: 2mm; font-size: 7.4pt; line-height: 1.5; background: rgba(240,253,244,.9) }
+.selo .mono { font-family: 'Courier New', monospace; letter-spacing: .5px }
 .ass .linha { width: 85mm; border-top: 0.25mm solid #111; text-align: center; padding-top: 1mm; font-weight: 700 }
 @media print { body { background: #fff } .barra { display: none } .pagina { margin: 0; box-shadow: none } }
 `;
+
+/** Selo da assinatura eletrônica no lugar da linha de assinatura em papel. */
+function seloAssinatura(f, nomeLinha) {
+  const a = f.assinatura, d = new Date(a.em);
+  const data = isNaN(d) ? '' : String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear();
+  return '<div class="selo"><b>Assinado eletronicamente</b> por ' + nomeLinha + ' em ' + data + ' às ' + hora(a.em) +
+    ', no aplicativo de ponto, com reconhecimento facial' + (a.liveness_ok ? ' e prova de vida' : '') + '.' +
+    '<br>Código de verificação da folha: <span class="mono">' + esc(String(a.hash || '').slice(0, 16).toUpperCase()) + '</span></div>';
+}
 
 function pagina(f, ctx) {
   const { empresa, timbrado, logo } = ctx;
@@ -87,7 +98,8 @@ function pagina(f, ctx) {
         '<table><thead><tr><th>RATEIO POR OBRA</th><th>DIAS</th><th>HORAS</th></tr></thead><tbody>' + rateio + '</tbody></table>' +
       '</div>' +
       (notas.length ? '<div class="nota">' + notas.join(' ') + '</div>' : '') +
-      '<div class="ass"><span>Data: ____/____/________</span><div class="linha">' + nomeLinha + '</div></div>' +
+      (f.assinatura ? seloAssinatura(f, nomeLinha)
+        : '<div class="ass"><span>Data: ____/____/________</span><div class="linha">' + nomeLinha + '</div></div>') +
     '</div></section>';
 }
 

@@ -117,6 +117,38 @@ async function irParaPorta() {
   else if (fila.length) statusPorta(fila.length + ' marcação(ões) esperando envio.', 'warnfg');
   else statusPorta('Olá, ' + S.dispositivo.colaborador.nome.split(' ')[0] + '.');
   if (pareado && navigator.onLine) sincronizarFundo();
+  avisarFolha();
+}
+
+// Folha de ponto aguardando assinatura: botão na porta. Só com rede e cadastro confirmado.
+async function avisarFolha() {
+  const btn = $('btnFolha');
+  if (!btn) return;
+  btn.classList.add('hide');
+  if (!S.dispositivo || !S.dispositivo.colaborador || S.bloqueado || !navigator.onLine) return;
+  const r = await Api.folha(S.dispositivo.credencial, { acao: 'listar' });
+  const f = r.ok && (r.folhas || []).find(x => x.estado === 'aguardando');
+  if (!f || $('porta').classList.contains('hide')) return;
+  const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  btn.textContent = 'Assinar folha de ponto de ' + MESES[Number(f.mes.slice(5, 7)) - 1];
+  btn.classList.remove('hide');
+  btn.onclick = () => abrirAssinatura(f, r.termo);
+}
+
+async function abrirAssinatura(folha, termo) {
+  if (!Face.pronto) {
+    statusPorta('Carregando o reconhecimento facial…');
+    if (!(await esperarFace(25000))) { statusPorta('Não consegui carregar o reconhecimento. Tente de novo.', 'badfg'); return; }
+    statusPorta('');
+  }
+  let template = null, deriva = 0;
+  try { template = await Store.get('template'); deriva = (await Store.get('deriva')) || 0; } catch (e) { /* segue */ }
+  if (!template) {
+    const r = await Api.cargaDia(S.dispositivo.credencial);
+    if (r.ok) { template = r.template; deriva = r.deriva; await Store.set('template', template); }
+  }
+  if (!template) { toast('Seu cadastro facial ainda não foi feito. Procure o RH.', 'bad'); return; }
+  await Ponto.assinarFolha(S.dispositivo, { template, deriva }, folha, termo, irParaPorta);
 }
 
 async function sincronizarFundo() {

@@ -2408,6 +2408,7 @@ export const Rh = {
               .map(p => '<option value="' + p.pessoa_id + '">' + esc(p.nome) + '</option>').join('') + '</select></div>' +
           '<div style="display:flex;align-items:flex-end"><button class="v2btn" id="btnFolhas">Gerar folhas</button></div>' +
         '</div>' +
+        '<div id="flSaida"></div>' +
       '</div>' +
       '<div class="v2card" style="padding:15px;margin-top:16px" id="hrCard">' +
         '<h2 style="margin:0 0 4px;font-size:14px;font-weight:600">Horas por colaborador</h2>' +
@@ -2461,9 +2462,11 @@ export const Rh = {
     const w = janelaDasFolhas();
     if (!w) { toast('O navegador bloqueou a janela. Libere pop-ups para este site e gere de novo.', 'warn'); return; }
     const btn = $('btnFolhas'); btn.disabled = true;
-    const r = await ApiRh.horas(this.token, { de, ate });
+    const [r, sit] = await Promise.all([ApiRh.horas(this.token, { de, ate }), ApiRh.folha(this.token, { acao: 'listar', mes })]);
     btn.disabled = false;
     if (!r.ok) { w.close(); toast(r.erro || 'Falha ao buscar as batidas', 'bad'); return; }
+    // Folha já assinada sai com o conteúdo que a pessoa assinou, não com o recalculado.
+    const enviadas = new Map(((sit.ok && sit.dados.folhas) || []).map(f => [f.colaborador_id, f]));
     const d = this.dados, cfg = window.EFRAT_CFG || {}, fuso = (d.empresa || {}).fuso;
     const validas = (r.dados.marcacoes || []).filter(x => x.estado !== 'rejeitada');
     const linhas = horasPorColaborador({
@@ -2476,13 +2479,55 @@ export const Rh = {
       .map(({ l, p }) => Object.assign(folhaDoMes({
         linha: l, marcacoes: validas.filter(x => x.pessoa_id === l.pessoa_id), mes, fuso,
         nomeEquipe: id => this.nomeEquipe(id), feriados: cfg.feriados
-      }), { nome: l.nome, matricula: l.matricula, funcao: p.papel && p.papel !== 'colaborador' ? this.nomePapel(p.papel) : '' }))
+      }), { pessoa_id: l.pessoa_id, nome: l.nome, matricula: l.matricula, funcao: p.papel && p.papel !== 'colaborador' ? this.nomePapel(p.papel) : '' }))
+      .map(f => {
+        const e = enviadas.get(f.pessoa_id);
+        if (e && e.estado === 'assinada') return Object.assign({}, e.conteudo, { pessoa_id: f.pessoa_id, assinatura: e.assinatura, situacao: 'assinada' });
+        return Object.assign(f, { situacao: e ? e.estado : 'nao_enviada', contestacao: e && e.contestacao });
+      })
       .sort((x, y) => x.nome.localeCompare(y.nome));
     if (!folhas.length) { w.close(); toast('Ninguém com batida ou jornada nesse mês e filtro', 'warn'); return; }
     escreverFolhas(w, folhas, {
       empresa: { nome: (d.empresa || {}).nome, razao: cfg.razaoSocial, cnpj: cfg.cnpj },
       timbrado: cfg.timbrado || null, logo: cfg.logo || null
     });
+    this.folhasGeradas = { mes, folhas };
+    this.pintarSituacaoFolhas();
+  },
+
+  /** Situação das assinaturas do lote gerado + "Enviar para assinatura no app". */
+  pintarSituacaoFolhas() {
+    const g = this.folhasGeradas, el = $('flSaida');
+    if (!g || !el) return;
+    const ROT = { assinada: ['Assinada', 'ok'], aguardando: ['Aguardando no app', 'mut'], contestada: ['Contestada', 'bad'], nao_enviada: ['Não enviada', 'mut'] };
+    const conta = k => g.folhas.filter(f => f.situacao === k).length;
+    const aEnviar = g.folhas.filter(f => f.situacao !== 'assinada');
+    el.innerHTML = '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0">' +
+        '<span class="nota" style="margin:0">' + conta('assinada') + ' assinada(s) · ' + conta('aguardando') + ' aguardando · ' +
+          conta('contestada') + ' contestada(s) · ' + conta('nao_enviada') + ' não enviada(s)</span>' +
+        (aEnviar.length ? '<button class="v2btn" id="btnEnviarFolhas">Enviar ' + aEnviar.length + ' para assinatura no app</button>' : '') +
+      '</div>' +
+      '<div class="tbl-wrap"><table class="adtable"><thead><tr><th>Colaborador</th><th>Situação</th><th>Detalhe</th></tr></thead><tbody>' +
+        g.folhas.map(f => {
+          const [txt, cls] = ROT[f.situacao] || ROT.nao_enviada;
+          const det = f.situacao === 'contestada' ? esc(f.contestacao || '')
+            : f.assinatura ? 'em ' + esc(this.dataCurta(String(f.assinatura.em).slice(0, 10))) + ' às ' + hora(f.assinatura.em) +
+                (f.assinatura.liveness_ok ? '' : ' · sem prova de vida') : '';
+          return '<tr><td>' + esc(f.nome) + '</td><td><span class="pill ' + cls + '"><span class="dot"></span>' + txt + '</span></td><td>' + det + '</td></tr>';
+        }).join('') +
+      '</tbody></table></div>';
+    const b = $('btnEnviarFolhas');
+    if (b) b.onclick = async () => {
+      if (!confirm('Enviar ' + aEnviar.length + ' folha(s) de ' + g.mes + ' para assinatura no app? Folha já enviada e ainda não assinada é substituída por esta versão.')) return;
+      b.disabled = true;
+      const conteudo = f => { const c = Object.assign({}, f); delete c.situacao; delete c.contestacao; delete c.pessoa_id; delete c.assinatura; return c; };
+      const r = await ApiRh.folha(this.token, { acao: 'fechar', mes: g.mes, folhas: aEnviar.map(f => ({ colaborador_id: f.pessoa_id, conteudo: conteudo(f) })) });
+      b.disabled = false;
+      if (!r.ok) { toast(r.erro || 'Falha ao enviar', 'bad'); return; }
+      toast(r.dados.enviadas + ' folha(s) enviada(s) para o app', 'ok');
+      for (const f of aEnviar) { f.situacao = 'aguardando'; f.contestacao = null; }
+      this.pintarSituacaoFolhas();
+    };
   },
 
   /** Relatório de horas: busca o período na API e calcula no cliente (regras.js). */

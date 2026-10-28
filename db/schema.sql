@@ -364,3 +364,26 @@ ALTER TABLE equipe ADD COLUMN IF NOT EXISTS afastamento boolean NOT NULL DEFAULT
 -- os dias trabalhados (0 = domingo). NULL = segunda a sexta no horário base.
 -- Ex. Efrat: segunda 07:00–16:00, terça a sexta 07:00–17:00 (44h/semana).
 ALTER TABLE jornada ADD COLUMN IF NOT EXISTS dias jsonb;
+
+-- ═══════════════════════════════════════════════════════ assinatura da folha de ponto
+-- O RH fecha o mês: o conteúdo da folha de cada colaborador fica congelado aqui
+-- (conteudo + hash sha256 do JSON canônico) e vai para o app. O colaborador confere
+-- e assina com o rosto (mesmo 1:1 + prova de vida da batida) ou contesta com o
+-- motivo. A assinatura guarda a prova: hora, GPS, distância facial, prova de vida,
+-- foto e o hash da folha que ele viu. Assinada não é sobrescrita por um novo fechamento.
+CREATE TABLE IF NOT EXISTS folha_assinatura (
+  id             text PRIMARY KEY,
+  empresa_id     text NOT NULL REFERENCES empresa(id) ON DELETE CASCADE,
+  colaborador_id text NOT NULL REFERENCES colaborador(id) ON DELETE CASCADE,
+  mes            text NOT NULL,                       -- 'YYYY-MM'
+  conteudo       jsonb NOT NULL,                      -- folhaDoMes + nome/função/matrícula
+  hash           text NOT NULL,
+  estado         text NOT NULL DEFAULT 'aguardando',  -- aguardando | assinada | contestada
+  fechada_em     timestamptz NOT NULL DEFAULT now(),
+  fechada_por    text REFERENCES usuario_rh(id),
+  respondida_em  timestamptz,
+  assinatura     jsonb,                               -- prova da assinatura (ver api/folha.js)
+  contestacao    text,
+  UNIQUE (empresa_id, colaborador_id, mes)
+);
+CREATE INDEX IF NOT EXISTS ix_folha_assinatura_colab ON folha_assinatura (colaborador_id, estado);

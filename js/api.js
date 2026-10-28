@@ -76,6 +76,13 @@ export const Api = {
     };
   },
 
+  /** Folha de ponto do colaborador: listar, assinar ou contestar (api/folha.js). */
+  async folha(credencial, corpo) {
+    const r = await req('/folha', corpo, { bearer: credencial });
+    if (!r.ok || !r.json || !r.json.ok) return { ok: false, status: r.status, codigo: codErro(r), erro: msgErro(r, 'falha na folha') };
+    return Object.assign({ ok: true }, r.json);
+  },
+
   /* Esvaziamento da fila. Envio único em voo: dedup depende de nunca haver dois
      lotes simultâneos. O banco tem PK única em id_cliente, mas o cadeado local
      evita corrida e trabalho duplicado. */
@@ -138,6 +145,7 @@ export const ApiRh = {
   biometria(token, d) { return reqRh('/rh/biometria', token, d); },
   papel(token, d) { return reqRh('/rh/papel', token, d); },
   horas(token, d) { return reqRh('/rh/horas', token, d); },
+  folha(token, d) { return reqRh('/rh/folha', token, d); },
   decidir(token, d) { return reqRh('/rh/decidir', token, d); },
   corrigirPonto(token, d) { return reqRh('/rh/corrigir-ponto', token, d); },
   lancarPonto(token, d) { return reqRh('/rh/lancar-ponto', token, d); },

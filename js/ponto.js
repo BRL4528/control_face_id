@@ -29,6 +29,7 @@ export const Ponto = {
   piscada: null,
   earsAbertos: [],     // EAR dos últimos quadros enquadrando o rosto: linha de base da prova de vida
   aoSair: null,
+  aoProvar: null,      // assinatura da folha: recebe a prova do rosto em vez de registrar batida
 
   async abrir(dispositivo, carga, aoSair) {
     this.dispositivo = dispositivo;
@@ -115,6 +116,7 @@ export const Ponto = {
     this.estado = 'aguardando';
     this.piscada = null;
     this.earsAbertos = [];
+    if (this.aoProvar) { $('dica').textContent = 'Assinando a folha. Olhe para a câmera'; return; }
     const { slots, proximo } = pontosDoDia(this.doDia);
     const rot = proximo != null ? slots[proximo].rotulo : 'ponto';
     $('dica').textContent = 'Registrando ' + rot + '. Olhe para a câmera';
@@ -199,7 +201,7 @@ export const Ponto = {
     }
 
     const pid = this.dispositivo.colaborador ? this.dispositivo.colaborador.id : null;
-    if (emCooldown(pid, this.doDia, Date.now(), cfg().cooldownMs)) {
+    if (!this.aoProvar && emCooldown(pid, this.doDia, Date.now(), cfg().cooldownMs)) {
       this.estado = 'aguardando';
       toast('Você já marcou agora há pouco', 'warn');
       return;
@@ -221,6 +223,17 @@ export const Ponto = {
     clearTimeout(this._livenessTimer);
     const passou = this.piscada ? this.piscada.completo : true;
     this.estado = 'processando';
+    if (this.aoProvar) {
+      const fn = this.aoProvar, { cap, dist } = this.capPendente;
+      this.capPendente = null;
+      const pos = await this.posicao();
+      this.pararCamera();
+      $('areaCamera').classList.add('hide');
+      await fn({ score: dist == null ? null : Number(dist.toFixed(4)), liveness_ok: passou, foto: cap.thumb || null,
+                 lat: pos ? pos.coords.latitude : null, lng: pos ? pos.coords.longitude : null,
+                 precisao_m: pos ? pos.coords.accuracy : null, deriva_ms: this.deriva });
+      return;
+    }
     await this.registrar(this.capPendente, passou);
     this.capPendente = null;
   },
@@ -342,8 +355,105 @@ export const Ponto = {
     clearTimeout(this._t); clearTimeout(this._livenessTimer);
   },
 
+  /* ------------------------------------------- assinatura da folha de ponto */
+
+  /**
+   * Conferir e assinar a folha do mês. Mesma câmera, 1:1 e prova de vida da batida;
+   * no fim, em vez de registrar ponto, manda a prova para api/folha. `folha`: linha
+   * de folha_assinatura (conteudo = folhaDoMes). `termo`: texto do aceite.
+   */
+  async assinarFolha(dispositivo, carga, folha, termo, aoSair) {
+    this.dispositivo = dispositivo;
+    this.template = carga.template;
+    this.alocacao = null;
+    this.deriva = carga.deriva || 0;
+    this.aoSair = aoSair;
+    this.modoCadastro = false;
+    this.aoProvar = null;
+    mostrar('fila');
+    $('cartao').innerHTML = '';
+    $('quemFila') && ($('quemFila').textContent = dispositivo.colaborador.nome.split(' ')[0]);
+    $('btnFecharCamera').onclick = () => this.fecharCamera();
+    await this.recarregarDia();
+    this.pintarFolha(folha, termo);
+  },
+
+  pintarFolha(folha, termo) {
+    this.fecharCamera();
+    const c = folha.conteudo || {}, t = c.totais || {};
+    const hm = m => { const n = Math.round(Number(m) || 0); return Math.floor(n / 60) + 'h' + String(n % 60).padStart(2, '0'); };
+    const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+    const [ano, mes] = String(folha.mes).split('-').map(Number);
+    const dias = (c.dias || []).filter(d => d.batidas.some(Boolean) || d.ocorrencia);
+    $('painelDia').innerHTML =
+      '<div class="card diacard">' +
+        '<div class="dia-topo"><span class="lb">Folha de ' + MESES[mes - 1] + ' de ' + ano + '</span></div>' +
+        '<table class="folha-mini"><tbody>' +
+          '<tr><td>Dias trabalhados</td><td><b>' + (t.dias_trabalhados || 0) + '</b></td></tr>' +
+          '<tr><td>Horas trabalhadas</td><td><b>' + hm(t.trabalhado) + '</b></td></tr>' +
+          '<tr><td>Horas extras</td><td><b>' + hm(t.extra) + '</b></td></tr>' +
+          '<tr><td>Faltas</td><td><b>' + (t.faltas || 0) + '</b></td></tr>' +
+        '</tbody></table>' +
+        ((c.rateio || []).length ? '<p class="nota" style="text-align:left">' + c.rateio.map(r => esc(r.obra) + ': ' + r.dias + ' dia(s)').join('<br>') + '</p>' : '') +
+        '<details class="folha-dias"><summary>Ver dia a dia (' + dias.length + ')</summary><table class="folha-mini"><tbody>' +
+          dias.map(d => '<tr><td>' + String(d.num).padStart(2, '0') + ' ' + d.semana.slice(0, 3).toLowerCase() + '</td>' +
+            '<td class="mono">' + d.batidas.filter(Boolean).join(' ') + '</td>' +
+            '<td>' + (d.ocorrencia ? '<b>' + esc(d.ocorrencia.toLowerCase()) + '</b>' : hm(d.trabalhado) + (d.extra ? ' +' + hm(d.extra) : '')) + '</td></tr>').join('') +
+        '</tbody></table></details>' +
+        '<label class="folha-termo"><input type="checkbox" id="folhaAceite"><span>' + esc(termo) + '</span></label>' +
+        '<button class="act big" id="btnAssinarFolha" disabled>Assinar com o rosto</button>' +
+        '<button class="act ghost" id="btnContestarFolha" style="margin-top:8px">Não concordo</button>' +
+      '</div>';
+    $('folhaAceite').onchange = () => { $('btnAssinarFolha').disabled = !$('folhaAceite').checked; };
+    $('btnAssinarFolha').onclick = () => {
+      this.aoProvar = prova => this.enviarAssinatura(folha, termo, prova);
+      this.abrirCamera();
+    };
+    $('btnContestarFolha').onclick = () => this.pintarContestacao(folha, termo);
+  },
+
+  pintarContestacao(folha, termo) {
+    $('painelDia').innerHTML =
+      '<div class="card diacard"><div class="dia-topo"><span class="lb">O que não confere?</span></div>' +
+        '<textarea class="inp" id="folhaMotivo" rows="4" placeholder="Ex.: dia 15 eu trabalhei na obra 574 e aparece falta"></textarea>' +
+        '<button class="act big" id="btnEnviarContestacao">Enviar ao RH</button>' +
+        '<button class="act ghost" id="btnVoltarFolha" style="margin-top:8px">Voltar</button></div>';
+    $('btnVoltarFolha').onclick = () => this.pintarFolha(folha, termo);
+    $('btnEnviarContestacao').onclick = async () => {
+      const motivo = $('folhaMotivo').value.trim();
+      if (!motivo) { toast('Escreva o que não confere', 'warn'); return; }
+      $('btnEnviarContestacao').disabled = true;
+      const r = await Api.folha(this.dispositivo.credencial, { acao: 'contestar', id: folha.id, hash: folha.hash, motivo });
+      if (!r.ok) { $('btnEnviarContestacao').disabled = false; toast(r.erro || 'Não consegui enviar. Tente com sinal.', 'bad'); return; }
+      this.fimFolha('O RH recebeu sua contestação e vai corrigir a folha.', 'warn');
+    };
+  },
+
+  async enviarAssinatura(folha, termo, prova) {
+    $('painelDia').classList.remove('hide');
+    $('cartao').innerHTML = '<div class="cartao"><div class="tit">Enviando assinatura…</div></div>';
+    const r = await Api.folha(this.dispositivo.credencial, { acao: 'assinar', id: folha.id, hash: folha.hash, prova });
+    if (!r.ok) {
+      $('cartao').innerHTML = '';
+      toast(r.codigo === 'FOLHA_ALTERADA' ? 'O RH atualizou a folha. Volte e confira de novo.' : (r.erro || 'Não consegui enviar. Tente com sinal.'), 'bad');
+      this.pintarFolha(folha, termo);
+      return;
+    }
+    this.fimFolha('Folha assinada. Obrigado!', 'ok', r.em);
+  },
+
+  fimFolha(msg, tipo, em) {
+    this.aoProvar = null;
+    $('painelDia').innerHTML = '';
+    $('cartao').innerHTML = '<div class="cartao ' + tipo + '"><div class="tit">' + esc(msg) + '</div>' +
+      (em ? '<div class="sub">Registrado às ' + hora(em) + '</div>' : '') +
+      '<button class="act ghost" id="btnFimFolha" style="margin-top:12px">Voltar</button></div>';
+    $('btnFimFolha').onclick = () => this.sair();
+  },
+
   sair() {
     this.pararCamera();
+    this.aoProvar = null;
     $('cartao').innerHTML = '';
     this.estado = 'parado';
     this.capPendente = null;
