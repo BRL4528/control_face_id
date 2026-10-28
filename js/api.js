@@ -70,6 +70,7 @@ export const Api = {
       colaborador: c.colaborador,
       template: c.template,       // { versao, vetores } ou null
       alocacao: c.alocacao,       // { equipe_id, equipe_nome, cerca } ou null
+      afastado: c.afastado === true,   // equipe de afastamento (INSS, licença): não bate ponto
       deriva: calcularDeriva(t0, t1, c.servidor_hora),
       fuso: c.fuso || null
     };

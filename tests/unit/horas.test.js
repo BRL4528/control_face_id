@@ -106,3 +106,8 @@ test('tiposPelaOrdem separa por pessoa e por dia e ignora a ordem de chegada', (
   ];
   assert.deepEqual(tiposPelaOrdem(ms).map(m => m.tipo), ['saida', 'entrada', 'entrada', 'entrada']);
 });
+
+test('equipe de afastamento (INSS): sem previsto, sem falta, dia aparece como afastado', () => {
+  const r = horasPorColaborador({ ...base, equipes: [{ equipe_id: 'e1', jornada_id: 'j1', afastamento: true }], marcacoes: [], pessoaId: 'p1' });
+  assert.equal(dia(r).status, 'afastado'); assert.equal(dia(r).previsto, 0); assert.equal(r[0].totais.faltas, 0); assert.equal(dia(r).saldo, null);
+});

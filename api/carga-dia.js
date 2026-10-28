@@ -9,6 +9,9 @@
 // servidor_hora vai junto para o cliente medir a deriva do relógio. Se nem a
 // equipe tem local, o app ainda deixa bater ponto, mas a marcação vai sem cerca
 // e cai em revisão do RH — o ponto nunca é negado por falta de cerca.
+//
+// `afastado`: a pessoa está numa equipe de afastamento (INSS, licença). O app
+// mostra o aviso e não abre a câmera.
 import { db } from './_lib/db.js';
 import { cercaVigente } from './_lib/escala.js';
 import { autenticarDispositivo } from './_lib/auth.js';
@@ -48,6 +51,7 @@ export default async function handler(req, res) {
     estado: 'ativo',
     colaborador: { id: vinc.colaborador_id, nome: vinc.nome, papel: vinc.papel },
     template: t ? { versao: t.versao, vetores: t.vetores } : null,
+    afastado: !!(a && a.afastado),   // equipe de afastamento (INSS, licença): o app não deixa bater
     alocacao: (a && a.cerca_lat != null) ? {
       equipe_id: a.equipe_id, equipe_nome: a.equipe_nome, cerca_origem: a.cerca_origem,
       cerca: { lat: a.cerca_lat, lng: a.cerca_lng, raio_m: a.cerca_raio_m }

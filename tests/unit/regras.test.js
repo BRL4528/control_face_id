@@ -624,3 +624,9 @@ test('classificarPendente: só faltou piscar, com rosto confirmado, ganha rótul
   assert.equal(classificarPendente({ ...raissa, score: 0.5 }).tipo, 'zona_cinzenta');
   assert.equal(classificarPendente({ ...raissa, origem: 'manual' }).tipo, 'registro_manual');
 });
+
+test('presencaPorEquipe: equipe de afastamento não entra em operação', () => {
+  const pessoas = [{ pessoa_id: 'a', equipe_id: 'inss', ativo: true }, { pessoa_id: 'b', equipe_id: 'obra', ativo: true }];
+  const equipes = [{ equipe_id: 'inss', nome: 'Afastado INSS', afastamento: true }, { equipe_id: 'obra', nome: 'Obra 574' }];
+  assert.deepEqual(presencaPorEquipe(pessoas, [], equipes, '2026-10-28').map(c => c.equipe_id), ['obra']);
+});

@@ -81,6 +81,7 @@ export async function cercaVigente(sql, empresaId, colaboradorId, dia) {
   const [r] = await sql`
     SELECT COALESCE(a.equipe_id, c.equipe_padrao)        AS equipe_id,
            e.nome                                        AS equipe_nome,
+           COALESCE(e.afastamento, false)                AS afastado,
            COALESCE(a.cerca_lat,    l.lat)               AS cerca_lat,
            COALESCE(a.cerca_lng,    l.lng)               AS cerca_lng,
            COALESCE(a.cerca_raio_m, l.raio_m)            AS cerca_raio_m,

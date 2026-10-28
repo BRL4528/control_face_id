@@ -15,7 +15,7 @@ import { Rh } from './rh.js';
 import { $, mostrar, toast, definirFuso } from './ui.js';
 
 const cfg = () => window.EFRAT_CFG;
-const S = { dispositivo: null, carga: null, empresa: null, bloqueado: false };
+const S = { dispositivo: null, carga: null, empresa: null, bloqueado: false, afastado: false };
 
 /* --------------------------------------------- link da empresa (/e/<token>) */
 
@@ -73,6 +73,8 @@ async function marcarBloqueado() {
 
 /* --------------------------------------------------------- porta */
 
+const MSG_AFASTADO = 'Você está afastado e não precisa registrar ponto. Dúvidas, fale com o RH.';
+
 function statusPorta(txt, classe) {
   $('portaStatus').textContent = txt || '';
   $('portaStatus').className = 'nota ' + (classe || '');
@@ -109,6 +111,7 @@ async function irParaPorta() {
   try { fila = await Store.fila(); } catch (e) { /* storage bloqueado — segue */ }
   if (!Face.pronto) statusPorta('Preparando o reconhecimento… já pode tocar.');
   else if (pendente) statusPorta('Seu cadastro aguarda confirmação do RH. Pode bater o ponto normalmente.');
+  else if (S.afastado) statusPorta(MSG_AFASTADO, 'warnfg');
   else if (pelaEmpresa) statusPorta('Primeira vez? Só olhar para a câmera. Sem código, sem senha.');
   else if (!pareado) statusPorta('Primeira vez? Toque para ativar seu ponto.');
   else if (fila.length) statusPorta(fila.length + ' marcação(ões) esperando envio.', 'warnfg');
@@ -242,6 +245,7 @@ async function abrirPonto() {
         await Store.set('alocacao', alocacao);
         await Store.set('deriva', deriva);
         if (r.fuso) { await Store.set('fuso', r.fuso); definirFuso(r.fuso); }
+        S.afastado = !!r.afastado; await Store.set('afastado', S.afastado);
       } else if (r.status === 403 && r.codigo === 'BLOQUEADO') {
         await marcarBloqueado(); return irParaPorta();
       } else if (r.status === 401) {
@@ -253,6 +257,9 @@ async function abrirPonto() {
         toast('Sem rede — usando os dados salvos', 'warn');
       }
     }
+    // Afastado (INSS, licença): o RH tirou a batida; a câmera nem abre. Ao voltar,
+    // a próxima carga com rede já libera.
+    if (S.afastado) { statusPorta(MSG_AFASTADO, 'warnfg'); return; }
     const pendente = !S.dispositivo.colaborador;
     if (!template && !pendente) { toast('Seu cadastro facial ainda não foi feito. Bata o ponto pelo link da empresa ou procure o RH.', 'bad'); return; }
     await Ponto.abrir(S.dispositivo, { template, alocacao, deriva }, irParaPorta);
@@ -322,6 +329,7 @@ async function boot() {
   try { S.dispositivo = await identidadeSalva(); } catch (e) { S.dispositivo = null; }
   try { S.bloqueado = !!(await Store.get('bloqueado')); } catch (e) { S.bloqueado = false; }
   try { definirFuso(await Store.get('fuso')); } catch (e) { /* sem fuso salvo: relógio do aparelho */ }
+  try { S.afastado = !!(await Store.get('afastado')); } catch (e) { S.afastado = false; }
   try { await resolverEmpresa(); } catch (e) { /* segue sem empresa */ }
 
   try { setInterval(() => sincronizarFundo(), cfg().syncIntervalMs); } catch (e) { /* ok */ }

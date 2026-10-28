@@ -5,6 +5,8 @@
 //
 //   • sem acao (default): cria (sem equipe_id) ou renomeia (com equipe_id)
 //   • acao 'local'       { equipe_id, local_id|null }: define/limpa a cerca da equipe
+//   • acao 'afastamento' { equipe_id, afastamento }: marca a equipe como etapa de
+//     afastamento (INSS, licença): quem está nela não bate ponto nem conta falta
 //   • acao 'vincular'    { equipe_id, colaborador_id }: colaborador.equipe_padrao = equipe
 //   • acao 'desvincular' { colaborador_id }: equipe_padrao = NULL
 // O vínculo é a equipe PADRÃO da pessoa e, desde a integração com o Bitrix,
@@ -35,6 +37,14 @@ export default async function handler(req, res) {
                         WHERE id=${b.equipe_id} AND empresa_id=${rh.empresa_id} RETURNING id`;
     if (!r[0]) return erro(res, 404, 'EQUIPE_NAO_ENCONTRADA', 'equipe não encontrada');
     return ok(res, { equipe_id: b.equipe_id, local_id: b.local_id || null });
+  }
+
+  if (b.acao === 'afastamento') {
+    if (!b.equipe_id) return erro(res, 400, 'CORPO_INVALIDO', 'equipe_id obrigatório');
+    const r = await sql`UPDATE equipe SET afastamento=${b.afastamento === true}
+                        WHERE id=${b.equipe_id} AND empresa_id=${rh.empresa_id} RETURNING id`;
+    if (!r[0]) return erro(res, 404, 'EQUIPE_NAO_ENCONTRADA', 'equipe não encontrada');
+    return ok(res, { equipe_id: b.equipe_id, afastamento: b.afastamento === true });
   }
 
   if (b.acao === 'vincular' || b.acao === 'desvincular') {

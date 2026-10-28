@@ -353,3 +353,9 @@ CREATE TABLE IF NOT EXISTS papel (
   criado_em  timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_papel_nome ON papel (empresa_id, lower(nome));
+
+-- ═══════════════════════════════════════════════════════ equipe de afastamento
+-- Etapa onde fica quem está afastado (INSS, licença): na Efrat é a etapa
+-- "Afastado INSS" do Bitrix. Quem está nela não bate ponto (o app avisa e não
+-- abre a câmera), não conta falta nem gera pendência de ausência.
+ALTER TABLE equipe ADD COLUMN IF NOT EXISTS afastamento boolean NOT NULL DEFAULT false;

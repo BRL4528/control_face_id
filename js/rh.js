@@ -236,8 +236,10 @@ export const Rh = {
   exceptions() {
     const d = this.dados || {};
     const cfg = window.EFRAT_CFG || {};
+    // Quem está em equipe de afastamento (INSS, licença) não é cobrado de entrada.
+    const afastadas = new Set((d.equipes || []).filter(e => e.afastamento).map(e => e.equipe_id));
     return exceptionsDoDia(
-      d.marcacoes, d.pessoas, d.alocacoes_hoje, this.hojeServidor(),
+      d.marcacoes, d.pessoas, (d.alocacoes_hoje || []).filter(a => !afastadas.has(a.equipe_id)), this.hojeServidor(),
       d.servidor_hora, (this.jornadaPadrao() || {}).entrada || cfg.horaEntrada || '08:00',
       horasEntradaPorEquipe(d.equipes, d.jornadas),   // hora-limite por jornada da equipe
       cfg.limiarAceite);
@@ -1786,8 +1788,9 @@ export const Rh = {
     // A fila de trabalho do RH: obra ativa, com gente ou não, ainda sem cerca.
     const busca = (this.buscaEquipes || '').trim().toLowerCase();
     const casa = e => (!busca || e.nome.toLowerCase().includes(busca)) && (!this.filtroFuncao || membros(e.equipe_id).length > 0);
-    const precisam = eqs.filter(e => e.ativo && !e.local_id).filter(casa);
-    const prontas = eqs.filter(e => e.ativo && e.local_id).filter(casa);
+    // Equipe de afastamento não tem obra nem cerca: nunca "precisa de local".
+    const precisam = eqs.filter(e => e.ativo && !e.local_id && !e.afastamento).filter(casa);
+    const prontas = eqs.filter(e => e.ativo && (e.local_id || e.afastamento)).filter(casa);
     const inativas = eqs.filter(e => !e.ativo).filter(casa);
 
     // Seleção inicial: a primeira que precisa de local — é o que o RH veio fazer.
@@ -1910,10 +1913,12 @@ export const Rh = {
           '<h1>' + esc(e.nome) + '</h1>' +
           (e.bitrix_stage_id ? '<span class="pill mut" style="padding:0 7px">Bitrix</span>' : '') +
           (e.ativo ? '' : '<span class="pill bad" style="padding:0 7px">Inativa</span>') +
-          (e.ativo && !loc ? '<span class="pill bad" style="padding:0 7px">Sem local</span>' : '') +
+          (e.afastamento ? '<span class="pill mut" style="padding:0 7px">Afastamento</span>' : '') +
+          (e.ativo && !loc && !e.afastamento ? '<span class="pill bad" style="padding:0 7px">Sem local</span>' : '') +
         '</div>' +
         '<p class="sub" style="margin:4px 0 0">' +
-          (loc ? 'Quem está nesta equipe bate ponto em <b>' + esc(loc.nome) + '</b> (raio ' + loc.raio_m + ' m), todo dia, sem precisar de escala.'
+          (e.afastamento ? 'Equipe de afastamento (INSS, licença): quem está aqui não bate ponto, não conta falta e não gera pendência.'
+           : loc ? 'Quem está nesta equipe bate ponto em <b>' + esc(loc.nome) + '</b> (raio ' + loc.raio_m + ' m), todo dia, sem precisar de escala.'
                : 'Enquanto não tiver local, o ponto de quem está aqui cai em revisão.') +
         '</p></div></div>' +
 
@@ -1927,6 +1932,8 @@ export const Rh = {
           : '<span style="color:var(--v2-mut2)">nenhuma — usa o local</span>',
           '<button class="v2btn ghost mini" id="eqIrEscala">' + (escalas.length ? 'Ver' : 'Criar') + '</button>') +
         fato('Supervisor', sup ? esc(sup.nome) : '<span style="color:var(--v2-mut2)">—</span>') +
+        fato('Afastamento', e.afastamento ? 'Sim: não bate ponto' : 'Não',
+          '<button class="v2btn ghost mini" id="eqAfastamento">' + (e.afastamento ? 'Voltar a ser equipe de trabalho' : 'Marcar como afastamento') + '</button>') +
       '</div></div>' +
 
       '<div class="fatos">' +
@@ -1966,6 +1973,17 @@ export const Rh = {
     if (jor) jor.onclick = () => { this.aba = 'jornadas'; this.pintar(); };
     const esc2 = $('eqIrEscala');
     if (esc2) esc2.onclick = () => { this.aba = 'planos'; this.pintar(); };
+    const afa = $('eqAfastamento');
+    if (afa) afa.onclick = async () => {
+      const marcar = !e.afastamento;
+      if (marcar && !confirm('Marcar "' + e.nome + '" como afastamento? Quem está nela deixa de bater ponto e não conta falta.')) return;
+      afa.disabled = true;
+      const r = await ApiRh.equipe(this.token, { acao: 'afastamento', equipe_id: e.equipe_id, afastamento: marcar });
+      afa.disabled = false;
+      if (!r.ok) { toast(r.erro || 'Falha ao salvar', 'bad'); return; }
+      toast(marcar ? e.nome + ' agora é equipe de afastamento' : e.nome + ' voltou a ser equipe de trabalho', 'ok');
+      await this.recarregar();
+    };
 
     const sel = $('eqVincSel'), btn = $('eqVincBtn');
     if (btn) btn.onclick = async () => {
@@ -2294,7 +2312,7 @@ export const Rh = {
     $('btnCsvHoras').disabled = !linhas.length;
     $('btnCsvHoras').onclick = () => this.csvHoras();
     if (!linhas.length) { $('hrSaida').innerHTML = '<p class="nota">Sem marcações nem escala no período.</p>'; return; }
-    const ST = { ok: 'OK', falta: 'Falta', incompleto: 'Incompleto', a_confirmar: 'A confirmar', folga: 'Folga (extra)', em_andamento: 'Em andamento' };
+    const ST = { ok: 'OK', falta: 'Falta', incompleto: 'Incompleto', a_confirmar: 'A confirmar', folga: 'Folga (extra)', afastado: 'Afastado', em_andamento: 'Em andamento' };
     const saldoCls = v => v < 0 ? ' style="color:#b42318"' : v > 0 ? ' style="color:#12805c"' : '';
     const diasHtml = l => '<tr class="hr-det hide" data-det="' + esc(l.pessoa_id) + '"><td colspan="9" style="background:#f8fafc;padding:8px 12px">' +
       '<table class="adtable"><thead><tr><th>Dia</th><th>Equipe</th><th>Previstas</th><th>Trabalhadas</th><th>Saldo</th><th>Atraso</th><th>Situação</th></tr></thead><tbody>' +
@@ -2324,7 +2342,7 @@ export const Rh = {
 
   csvHoras() {
     const h = this.horasLinhas; if (!h) return;
-    const ST = { ok: 'OK', falta: 'Falta', incompleto: 'Incompleto', a_confirmar: 'A confirmar', folga: 'Folga (extra)', em_andamento: 'Em andamento' };
+    const ST = { ok: 'OK', falta: 'Falta', incompleto: 'Incompleto', a_confirmar: 'A confirmar', folga: 'Folga (extra)', afastado: 'Afastado', em_andamento: 'Em andamento' };
     const linhas = [];
     for (const l of h.linhas) for (const x of l.dias) {
       linhas.push([l.nome, l.matricula, x.dia, this.nomeEquipe(x.equipe_id), fmtMinutos(x.previsto), fmtMinutos(x.trabalhado),

@@ -107,7 +107,8 @@ export default async function handler(req, res) {
       m.liveness_ok === false ||
       (!temCerca && !visitado) ||
       cerca.dentro === false ||
-      derivaFora;
+      derivaFora ||
+      !!(aloc && aloc.afastado);   // afastado não bate; se chegar (fila offline), o RH decide
 
     const equipeId = (aloc && aloc.equipe_id) || m.equipe_id || null;
 
@@ -119,7 +120,7 @@ export default async function handler(req, res) {
       ) VALUES (
         ${m.id_cliente}, ${vinc.empresa_id}, ${colaboradorId}, ${vinc.dispositivo_id}, ${equipeId},
         ${m.tipo}, ${m.origem || 'biometria'}, ${revisar ? 'revisar' : 'aceito'},
-        ${m.score ?? null}, ${m.liveness_ok ?? null}, ${visitado ? 'gestor em outro local: ' + visitado.nome : (m.motivo || null)},
+        ${m.score ?? null}, ${m.liveness_ok ?? null}, ${aloc && aloc.afastado ? 'colaborador afastado' : visitado ? 'gestor em outro local: ' + visitado.nome : (m.motivo || null)},
         ${m.marcado_em}, ${dia}, ${Number(m.deriva_ms) || 0},
         ${m.lat ?? null}, ${m.lng ?? null}, ${m.precisao_m ?? null},
         ${cerca.dentro}, ${cerca.distancia_m}, ${revisar ? (m.foto_url || null) : null}, ${revisar}

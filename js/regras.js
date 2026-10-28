@@ -249,7 +249,8 @@ export function presencaPorEquipe(pessoas, marcacoes, equipes, hoje) {
   }
   for (const k of Object.keys(nomesPresentes)) presentesPorEquipe[k] = nomesPresentes[k];
 
-  return (equipes || []).map(e => {
+  // Equipe de afastamento (INSS, licença) não está em operação: ninguém ali é esperado.
+  return (equipes || []).filter(e => !e.afastamento).map(e => {
     const doTime = ativos.filter(p => p.equipe_id === e.equipe_id);
     const esperados = doTime.length;
     const marcaram = presentesPorEquipe[e.equipe_id] || new Set();
@@ -640,6 +641,7 @@ export function minutosTrabalhados(marcacoes) {
  * alocacoes: { dia, colaborador_id, equipe_id }
  */
 export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jornadas, jornadaPadrao, de, ate, hoje, fuso, pessoaId }) {
+  const afastamento = equipeId => !!((equipes || []).find(e => e.equipe_id === equipeId) || {}).afastamento;
   const jornadaDe = equipeId => {
     const eq = (equipes || []).find(e => e.equipe_id === equipeId);
     const j = (eq && eq.jornada_id && (jornadas || []).find(x => x.jornada_id === eq.jornada_id)) || jornadaPadrao || null;
@@ -681,7 +683,9 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
       // Sem escala, o dia útil em que a pessoa bateu ponto tem a jornada da equipe dela
       // (a equipe é a obra; a escala virou exceção). Fim de semana sem escala é folga e
       // o que for batido ali é extra.
-      const escalado = b.aloc.has(dia) || (marcas.length > 0 && diaUtil(dia));
+      // Equipe de afastamento (INSS, licença): não tem jornada nem falta.
+      const afastado = afastamento(equipeId);
+      const escalado = !afastado && (b.aloc.has(dia) || (marcas.length > 0 && diaUtil(dia)));
       const previsto = escalado ? Math.max(0, emMin(jor.saida) - emMin(jor.entrada) - jor.intervalo_min) : 0;
       const aceitas = marcas.filter(m => m.estado !== 'pendente');
       const pendentes = marcas.length - aceitas.length;
@@ -696,7 +700,7 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
       const atrasado = atraso > jor.tolerancia_min;
 
       let status = 'ok', saldo = null;
-      if (!marcas.length) status = dia >= hoje ? 'em_andamento' : 'falta';
+      if (!marcas.length) status = afastado ? 'afastado' : dia >= hoje ? 'em_andamento' : 'falta';
       else if (pendentes) status = 'a_confirmar';
       else if (ok.incompleto) status = dia >= hoje ? 'em_andamento' : 'incompleto';
       else if (!escalado) status = 'folga';
