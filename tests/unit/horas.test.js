@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { minutosTrabalhados, horasPorColaborador, fmtMinutos, dia as diaDe, tiposPelaOrdem } from '../../js/regras.js';
+import { minutosTrabalhados, horasPorColaborador, fmtMinutos, dia as diaDe, tiposPelaOrdem, horarioDoDia, horasEntradaPorEquipe, diasDeFeriado, feriadosNacionais } from '../../js/regras.js';
 
 // Fuso -04 (Campo Grande): 07:00 local = 11:00Z.
 const z = (hhmmLocal) => { const [h, m] = hhmmLocal.split(':').map(Number); return `2026-10-05T${String(h + 4).padStart(2, '0')}:${String(m).padStart(2, '0')}:00Z`; };
@@ -110,4 +110,49 @@ test('tiposPelaOrdem separa por pessoa e por dia e ignora a ordem de chegada', (
 test('equipe de afastamento (INSS): sem previsto, sem falta, dia aparece como afastado', () => {
   const r = horasPorColaborador({ ...base, equipes: [{ equipe_id: 'e1', jornada_id: 'j1', afastamento: true }], marcacoes: [], pessoaId: 'p1' });
   assert.equal(dia(r).status, 'afastado'); assert.equal(dia(r).previsto, 0); assert.equal(r[0].totais.faltas, 0); assert.equal(dia(r).saldo, null);
+});
+
+// Jornada da Efrat: segunda 07:00–16:00, terça a sexta 07:00–17:00, 1h de almoço (44h/semana).
+const EFRAT = { jornada_id: 'j1', entrada: '07:00', saida: '17:00', tolerancia_min: 10, intervalo_min: 60,
+  dias: { 1: { entrada: '07:00', saida: '16:00' }, 2: { entrada: '07:00', saida: '17:00' }, 3: { entrada: '07:00', saida: '17:00' },
+          4: { entrada: '07:00', saida: '17:00' }, 5: { entrada: '07:00', saida: '17:00' } } };
+
+test('horarioDoDia: jornada por dia da semana, folga no fim de semana, feriado sempre folga', () => {
+  const fer = diasDeFeriado('2026-10-01', '2026-10-31');
+  assert.deepEqual(horarioDoDia(EFRAT, '2026-10-05', fer), { entrada: '07:00', saida: '16:00', intervalo_min: 60 });   // segunda
+  assert.equal(horarioDoDia(EFRAT, '2026-10-06', fer).saida, '17:00');   // terça
+  assert.equal(horarioDoDia(EFRAT, '2026-10-10', fer), null);            // sábado
+  assert.equal(horarioDoDia(EFRAT, '2026-10-10', fer, true).saida, '17:00');   // sábado escalado: horário base
+  assert.equal(horarioDoDia(EFRAT, '2026-10-12', fer, true), null);      // N. Sra. Aparecida
+  const legado = { entrada: '07:00', saida: '17:00', intervalo_min: 60 };
+  assert.equal(horarioDoDia(legado, '2026-10-05', fer).saida, '17:00'); assert.equal(horarioDoDia(legado, '2026-10-11', fer), null);
+  assert.equal(feriadosNacionais(2026).length, 9);
+  assert.ok(diasDeFeriado('2026-08-01', '2026-08-31', [{ dia: '2026-08-26', nome: 'Aniversário de Campo Grande' }]).has('2026-08-26'));
+});
+
+test('segunda prevê 8h e terça 9h; feriado com batida é extra', () => {
+  const ms = [mk('entrada', '07:00'), mk('saida', '11:00'), mk('entrada', '12:00'), mk('saida', '16:00')];
+  const r = horasPorColaborador({ ...base, jornadas: [EFRAT], marcacoes: ms });
+  assert.equal(dia(r).previsto, 480); assert.equal(dia(r).saldo, 0);
+  const fer = '2026-10-12';
+  const f = horasPorColaborador({ ...base, jornadas: [EFRAT], alocacoes: [], marcacoes: [
+    mk('entrada', '07:00', { marcado_dia: fer, marcado_em: fer + 'T11:00:00Z' }), mk('saida', '11:00', { marcado_dia: fer, marcado_em: fer + 'T15:00:00Z' })] });
+  const d = f[0].dias.find(x => x.dia === fer);
+  assert.equal(d.status, 'feriado'); assert.equal(d.previsto, 0); assert.equal(d.saldo, 240);
+});
+
+test('falta sem escala: quem está na equipe deve os dias de trabalho desde que entrou, até hoje', () => {
+  const pessoas = [{ pessoa_id: 'p1', nome: 'Ana', matricula: '1', ativo: true, equipe_id: 'e1', desde: '2026-10-06' }];
+  const r = horasPorColaborador({ ...base, pessoas, jornadas: [EFRAT], alocacoes: [], marcacoes: [], de: '2026-10-01', ate: '2026-10-31', hoje: '2026-10-14' });
+  const dias = r[0].dias.map(x => x.dia + ':' + x.status);
+  assert.deepEqual(dias, ['2026-10-06:falta', '2026-10-07:falta', '2026-10-08:falta', '2026-10-09:falta',
+                          '2026-10-13:falta', '2026-10-14:em_andamento']);   // 10–11 fim de semana, 12 feriado
+  assert.equal(r[0].totais.faltas, 5); assert.equal(r[0].totais.saldo, -540 * 5 + 0);
+});
+
+test('horasEntradaPorEquipe: hora de entrada do dia; feriado = null (ninguém é cobrado)', () => {
+  const eqs = [{ equipe_id: 'e1', jornada_id: 'j1' }];
+  const fer = diasDeFeriado('2026-10-01', '2026-10-31');
+  assert.deepEqual(horasEntradaPorEquipe(eqs, [EFRAT], '2026-10-06', fer), { e1: '07:00' });
+  assert.deepEqual(horasEntradaPorEquipe(eqs, [EFRAT], '2026-10-12', fer), { e1: null });
 });

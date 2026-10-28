@@ -359,3 +359,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_papel_nome ON papel (empresa_id, lower(nome
 -- "Afastado INSS" do Bitrix. Quem está nela não bate ponto (o app avisa e não
 -- abre a câmera), não conta falta nem gera pendência de ausência.
 ALTER TABLE equipe ADD COLUMN IF NOT EXISTS afastamento boolean NOT NULL DEFAULT false;
+
+-- Horário por dia da semana: { "1": { entrada, saida, intervalo_min }, ... } só com
+-- os dias trabalhados (0 = domingo). NULL = segunda a sexta no horário base.
+-- Ex. Efrat: segunda 07:00–16:00, terça a sexta 07:00–17:00 (44h/semana).
+ALTER TABLE jornada ADD COLUMN IF NOT EXISTS dias jsonb;

@@ -1,12 +1,27 @@
 // Jornadas (turnos) da empresa. Cria, edita ou desativa uma jornada; e associa
 // uma jornada + supervisor a uma equipe. Mesmo endpoint para os dois papéis:
-//   • { nome, entrada, saida, tolerancia_min, intervalo_min } → cria/edita jornada
+//   • { nome, entrada, saida, tolerancia_min, intervalo_min, dias } → cria/edita jornada
+//     `dias` (opcional): { "0".. "6": { entrada, saida, intervalo_min } } só dos dias
+//     trabalhados (0 = domingo); null = segunda a sexta no horário base
 //   • { equipe_id, jornada_id, supervisor_id } → associa à equipe
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 
 const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** Horário por dia da semana saneado; null quando não veio ou ficou vazio. */
+function sanearDias(dias) {
+  if (!dias || typeof dias !== 'object') return null;
+  const out = {};
+  for (const k of ['0', '1', '2', '3', '4', '5', '6']) {
+    const d = dias[k];
+    if (!d || !HORA.test(d.entrada) || !HORA.test(d.saida) || d.saida <= d.entrada) continue;
+    out[k] = { entrada: d.entrada, saida: d.saida };
+    if (d.intervalo_min != null && d.intervalo_min !== '') out[k].intervalo_min = Math.max(0, Math.min(Number(d.intervalo_min) || 0, 240));
+  }
+  return Object.keys(out).length ? out : null;
+}
 
 export default async function handler(req, res) {
   if (cors(req, res)) return;
@@ -29,16 +44,18 @@ export default async function handler(req, res) {
   const entrada = HORA.test(b.entrada) ? b.entrada : '07:00';
   const saida = HORA.test(b.saida) ? b.saida : '17:00';
   const tol = Math.max(0, Math.min(Number(b.tolerancia_min) || 10, 120));
+  const dias = sanearDias(b.dias);
+  const diasJson = dias ? JSON.stringify(dias) : null;
   const intervalo = b.intervalo_min === 0 || b.intervalo_min === '0' ? 0 : Math.max(0, Math.min(Number(b.intervalo_min) || 60, 240));
 
   if (b.jornada_id) {
     await sql`UPDATE jornada SET nome=${nome}, entrada=${entrada}, saida=${saida},
-              tolerancia_min=${tol}, intervalo_min=${intervalo}, ativa=${b.ativa === false ? false : true}
+              tolerancia_min=${tol}, intervalo_min=${intervalo}, dias=${diasJson}::jsonb, ativa=${b.ativa === false ? false : true}
               WHERE id=${b.jornada_id} AND empresa_id=${rh.empresa_id}`;
     return ok(res, { jornada_id: b.jornada_id, atualizado: true });
   }
   const id = novoId();
-  await sql`INSERT INTO jornada (id, empresa_id, nome, entrada, saida, tolerancia_min, intervalo_min)
-            VALUES (${id}, ${rh.empresa_id}, ${nome}, ${entrada}, ${saida}, ${tol}, ${intervalo})`;
+  await sql`INSERT INTO jornada (id, empresa_id, nome, entrada, saida, tolerancia_min, intervalo_min, dias)
+            VALUES (${id}, ${rh.empresa_id}, ${nome}, ${entrada}, ${saida}, ${tol}, ${intervalo}, ${diasJson}::jsonb)`;
   return ok(res, { jornada_id: id, criado: true });
 }

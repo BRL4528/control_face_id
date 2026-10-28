@@ -13,7 +13,7 @@ import {
   exceptionsDoDia,
   jornadaDaEquipe, horasEntradaPorEquipe, csvDe,
   alertasDePlanejamento, horasPorColaborador, fmtMinutos, dia as diaDe, motivosDaRevisao, rotuloAuditoria,
-  tiposPelaOrdem, classificarPendente
+  tiposPelaOrdem, classificarPendente, diasDeFeriado, feriadosNacionais, horarioDoDia
 } from './regras.js';
 import { $, esc, mostrar, toast, hora, data, definirFuso } from './ui.js';
 
@@ -25,6 +25,9 @@ const TITULOS = {
   relatorios: 'Relatórios', auditoria: 'Auditoria', config: 'Configurações'
 };
 // Item fixo da lista de Equipes: quem está fora de qualquer equipe.
+const DIAS_SEMANA = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+// Uma data de cada dia da semana (semana de 04/10/2026, sem feriado), para consultar a jornada por dia.
+const DIA_DA_SEMANA_REF = ['2026-10-04', '2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09', '2026-10-10'];
 const SEM_EQUIPE = '__sem_equipe__';
 
 const ABAS = ['painel', 'alocacao', 'planos', 'mapa', 'pendencias', 'pessoas', 'equipes',
@@ -241,7 +244,8 @@ export const Rh = {
     return exceptionsDoDia(
       d.marcacoes, d.pessoas, (d.alocacoes_hoje || []).filter(a => !afastadas.has(a.equipe_id)), this.hojeServidor(),
       d.servidor_hora, (this.jornadaPadrao() || {}).entrada || cfg.horaEntrada || '08:00',
-      horasEntradaPorEquipe(d.equipes, d.jornadas),   // hora-limite por jornada da equipe
+      horasEntradaPorEquipe(d.equipes, d.jornadas, this.hojeServidor(),   // hora-limite do dia pela jornada; feriado não cobra
+        diasDeFeriado(this.hojeServidor(), this.hojeServidor(), cfg.feriados), this.jornadaPadrao()),
       cfg.limiarAceite);
   },
 
@@ -2132,7 +2136,7 @@ export const Rh = {
 
     const linhaJornada = j =>
       '<tr><td><b>' + esc(j.nome) + '</b></td>' +
-      '<td class="mono">' + esc(j.entrada) + ' → ' + esc(j.saida) + '</td>' +
+      '<td class="mono">' + esc(this.resumoJornada(j)) + '</td>' +
       '<td>' + j.tolerancia_min + ' min</td>' +
       '<td>' + (j.intervalo_min != null ? j.intervalo_min : 60) + ' min</td>' +
       '<td><span class="pill ' + (j.ativa ? 'ok' : 'mut') + '"><span class="dot"></span>' + (j.ativa ? 'Ativa' : 'Inativa') + '</span></td>' +
@@ -2194,6 +2198,18 @@ export const Rh = {
           '<div><label class="lb2">Tolerância (min)</label><input class="inp" id="jTol" type="number" min="0" max="120" value="' + (j.tolerancia_min != null ? j.tolerancia_min : 10) + '"></div>' +
           '<div><label class="lb2">Intervalo / almoço (min)</label><input class="inp" id="jInt" type="number" min="0" max="240" value="' + (j.intervalo_min != null ? j.intervalo_min : 60) + '"></div>' +
         '</div>' +
+        '<h3 style="font-size:13.5px;margin:16px 0 4px">Horário por dia da semana</h3>' +
+        '<p class="cap" style="margin:0 0 8px">Desmarque os dias de folga. Feriados nunca contam como dia de trabalho.</p>' +
+        '<div class="tbl-wrap"><table class="adtable"><thead><tr><th>Dia</th><th>Trabalha</th><th>Entrada</th><th>Saída</th><th>Intervalo (min)</th></tr></thead><tbody>' +
+          [1, 2, 3, 4, 5, 6, 0].map(w => {
+            const h = this.horarioDaSemana(j, w);
+            return '<tr><td>' + DIAS_SEMANA[w] + '</td>' +
+              '<td><input type="checkbox" data-jdia="' + w + '"' + (h ? ' checked' : '') + ' style="width:18px;height:18px"></td>' +
+              '<td><input class="inp" type="time" data-jent="' + w + '" value="' + esc((h || j).entrada || '07:00') + '"></td>' +
+              '<td><input class="inp" type="time" data-jsai="' + w + '" value="' + esc((h || j).saida || '17:00') + '"></td>' +
+              '<td><input class="inp" type="number" min="0" max="240" data-jint="' + w + '" value="' + ((h && h.intervalo_min != null) ? h.intervalo_min : (j.intervalo_min != null ? j.intervalo_min : 60)) + '"></td></tr>';
+          }).join('') +
+        '</tbody></table></div>' +
         '<div class="row2" style="margin-top:14px">' +
           '<button class="act" id="btnSalvarJornada">Salvar</button>' +
           '<button class="act ghost" id="btnCancelarJornada">Cancelar</button></div>' +
@@ -2205,7 +2221,8 @@ export const Rh = {
       const r = await ApiRh.jornada(this.token, {
         jornada_id: j.jornada_id, nome, entrada: $('jEntrada').value, saida: $('jSaida').value,
         tolerancia_min: Number($('jTol').value) || 10,
-        intervalo_min: Math.max(0, Number($('jInt').value) || 0)
+        intervalo_min: Math.max(0, Number($('jInt').value) || 0),
+        dias: this.lerDiasJornada()
       });
       if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
       toast('Jornada salva', 'ok');
@@ -2213,6 +2230,75 @@ export const Rh = {
       await this.recarregar();
     };
     $('areaJornada').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
+
+  /** Feriados: os nacionais o sistema conhece; estaduais e municipais o RH cadastra. */
+  htmlFeriados() {
+    const ano = Number(this.hojeServidor().slice(0, 4));
+    const daEmpresa = (window.EFRAT_CFG || {}).feriados || [];
+    const dm = d => d.slice(8, 10) + '/' + d.slice(5, 7);
+    return '<div class="cfg-sec"><h2>Feriados</h2>' +
+      '<p class="cap">Feriado não conta falta nem previsto, e o que for batido nele é hora extra. Os nacionais já estão incluídos. ' +
+        'Cadastre os do estado e da cidade (ex.: Campo Grande 26/08, MS 11/10, Sexta-feira Santa, Corpus Christi).</p>' +
+      '<p class="cap" style="margin:0 0 10px"><b>Nacionais ' + ano + ':</b> ' + feriadosNacionais(ano).map(f => dm(f.dia) + ' ' + esc(f.nome)).join(' · ') + '</p>' +
+      (daEmpresa.length
+        ? '<div class="tbl-wrap" style="margin-bottom:10px"><table class="adtable"><thead><tr><th>Data</th><th>Feriado</th><th></th></tr></thead><tbody>' +
+            daEmpresa.map(f => '<tr><td class="mono">' + esc(dm(f.dia) + '/' + f.dia.slice(0, 4)) + '</td><td>' + esc(f.nome) + '</td>' +
+              '<td style="text-align:right"><button class="v2btn ghost mini" data-fer-rm="' + esc(f.dia) + '">Remover</button></td></tr>').join('') +
+          '</tbody></table></div>'
+        : '<p class="nota" style="margin:0 0 10px">Nenhum feriado estadual ou municipal cadastrado.</p>') +
+      '<div class="eq-vincular"><input class="inp" id="ferDia" type="date" style="margin:0;max-width:180px">' +
+        '<input class="inp" id="ferNome" placeholder="Nome do feriado" style="margin:0">' +
+        '<button class="v2btn" id="btnAddFeriado">Adicionar</button></div></div>';
+  },
+
+  ligarFeriados() {
+    const salvar = async lista => {
+      const r = await ApiRh.config(this.token, { dados: { feriados: lista } });
+      if (!r.ok) { toast(r.erro || 'Falha ao salvar feriados', 'bad'); return; }
+      toast('Feriados salvos', 'ok');
+      await this.recarregar();
+    };
+    const atual = () => ((window.EFRAT_CFG || {}).feriados || []).slice();
+    $('btnAddFeriado').onclick = () => {
+      const dia = $('ferDia').value, nome = $('ferNome').value.trim();
+      if (!dia || !nome) { toast('Informe a data e o nome', 'warn'); return; }
+      salvar(atual().filter(f => f.dia !== dia).concat([{ dia, nome }]));
+    };
+    $('rh-config').querySelectorAll('[data-fer-rm]').forEach(b => {
+      b.onclick = () => salvar(atual().filter(f => f.dia !== b.dataset.ferRm));
+    });
+  },
+
+  /** Horário do dia da semana `w` (0 = domingo) da jornada, ou null se folga. */
+  horarioDaSemana(j, w) {
+    if (!j || !j.entrada) return w >= 1 && w <= 5 ? { entrada: '07:00', saida: '17:00' } : null;
+    return horarioDoDia(j, DIA_DA_SEMANA_REF[w], null, false);
+  },
+
+  /** Lê a grade de dias do formulário de jornada: { "1": { entrada, saida, intervalo_min }, ... }. */
+  lerDiasJornada() {
+    const dias = {};
+    $('areaJornada').querySelectorAll('[data-jdia]').forEach(cb => {
+      if (!cb.checked) return;
+      const w = cb.dataset.jdia, q = s => $('areaJornada').querySelector('[' + s + '="' + w + '"]').value;
+      dias[w] = { entrada: q('data-jent'), saida: q('data-jsai'), intervalo_min: Math.max(0, Number(q('data-jint')) || 0) };
+    });
+    return dias;
+  },
+
+  /** "Seg 07:00→16:00 · Ter a Sex 07:00→17:00": agrupa dias seguidos com o mesmo horário. */
+  resumoJornada(j) {
+    const ordem = [1, 2, 3, 4, 5, 6, 0], grupos = [];
+    for (const w of ordem) {
+      const h = horarioDoDia(j, DIA_DA_SEMANA_REF[w], null, false);
+      if (!h) continue;
+      const txt = h.entrada + '→' + h.saida, ult = grupos[grupos.length - 1];
+      if (ult && ult.txt === txt && ordem.indexOf(ult.fim) === ordem.indexOf(w) - 1) ult.fim = w;
+      else grupos.push({ ini: w, fim: w, txt });
+    }
+    const curto = w => DIAS_SEMANA[w].slice(0, 3);
+    return grupos.map(g => (g.ini === g.fim ? curto(g.ini) : curto(g.ini) + ' a ' + curto(g.fim)) + ' ' + g.txt).join(' · ') || 'sem dias de trabalho';
   },
 
   /* --------------------------------------------------------- relatórios */
@@ -2306,13 +2392,14 @@ export const Rh = {
     const d = this.dados, jp = this.jornadaPadrao();
     const linhas = horasPorColaborador({
       marcacoes: r.dados.marcacoes, alocacoes: r.dados.alocacoes, pessoas: d.pessoas, equipes: d.equipes, jornadas: d.jornadas,
-      jornadaPadrao: jp, de, ate, hoje: this.hojeServidor(), fuso: (d.empresa || {}).fuso, pessoaId: pessoaId || null
+      jornadaPadrao: jp, de, ate, hoje: this.hojeServidor(), fuso: (d.empresa || {}).fuso, pessoaId: pessoaId || null,
+      feriados: (window.EFRAT_CFG || {}).feriados
     }).filter(l => this.passaFuncao(d.pessoas.find(p => p.pessoa_id === l.pessoa_id) || {}));
     this.horasLinhas = { linhas, de, ate };
     $('btnCsvHoras').disabled = !linhas.length;
     $('btnCsvHoras').onclick = () => this.csvHoras();
     if (!linhas.length) { $('hrSaida').innerHTML = '<p class="nota">Sem marcações nem escala no período.</p>'; return; }
-    const ST = { ok: 'OK', falta: 'Falta', incompleto: 'Incompleto', a_confirmar: 'A confirmar', folga: 'Folga (extra)', afastado: 'Afastado', em_andamento: 'Em andamento' };
+    const ST = { ok: 'OK', falta: 'Falta', incompleto: 'Incompleto', a_confirmar: 'A confirmar', folga: 'Folga (extra)', feriado: 'Feriado', afastado: 'Afastado', em_andamento: 'Em andamento' };
     const saldoCls = v => v < 0 ? ' style="color:#b42318"' : v > 0 ? ' style="color:#12805c"' : '';
     const diasHtml = l => '<tr class="hr-det hide" data-det="' + esc(l.pessoa_id) + '"><td colspan="9" style="background:#f8fafc;padding:8px 12px">' +
       '<table class="adtable"><thead><tr><th>Dia</th><th>Equipe</th><th>Previstas</th><th>Trabalhadas</th><th>Saldo</th><th>Atraso</th><th>Situação</th></tr></thead><tbody>' +
@@ -2342,7 +2429,7 @@ export const Rh = {
 
   csvHoras() {
     const h = this.horasLinhas; if (!h) return;
-    const ST = { ok: 'OK', falta: 'Falta', incompleto: 'Incompleto', a_confirmar: 'A confirmar', folga: 'Folga (extra)', afastado: 'Afastado', em_andamento: 'Em andamento' };
+    const ST = { ok: 'OK', falta: 'Falta', incompleto: 'Incompleto', a_confirmar: 'A confirmar', folga: 'Folga (extra)', feriado: 'Feriado', afastado: 'Afastado', em_andamento: 'Em andamento' };
     const linhas = [];
     for (const l of h.linhas) for (const x of l.dias) {
       linhas.push([l.nome, l.matricula, x.dia, this.nomeEquipe(x.equipe_id), fmtMinutos(x.previsto), fmtMinutos(x.trabalhado),
@@ -2461,6 +2548,8 @@ export const Rh = {
           (emp.integracao_ativa ? '<button class="v2btn ghost" id="btnRevogarInteg">Revogar</button>' : '') +
         '</div></div>' +
 
+      this.htmlFeriados() +
+
       '<div class="cfg-sec"><h2>Empresa</h2>' +
         '<p class="cap">Nome exibido no painel e no pareamento do colaborador.</p>' +
         '<div class="form-grid">' +
@@ -2564,6 +2653,7 @@ export const Rh = {
       toast('Parâmetros salvos', 'ok');
       await this.recarregar();
     };
+    this.ligarFeriados();
     $('btnCopiarLink').onclick = async () => { try { await navigator.clipboard.writeText(this.linkEmpresa()); toast('Link copiado', 'ok'); } catch (e) { toast('Selecione e copie manualmente', 'warn'); } };
     $('btnWaLink').onclick = () => window.open('https://wa.me/?text=' + encodeURIComponent(this.mensagemLink()), '_blank', 'noopener');
     $('btnNovoLink').onclick = async () => {

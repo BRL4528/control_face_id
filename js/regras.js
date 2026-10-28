@@ -404,6 +404,7 @@ export function exceptionsDoDia(marcacoes, pessoas, alocacoesHoje, hoje, agoraIS
     const p = ativos[a.colaborador_id];
     if (!p || !p.ativo) continue;
     if (marcadasHoje[a.colaborador_id]) continue;   // apareceu: não é exceção
+    if (porEquipe[a.equipe_id] === null) continue;   // feriado: ninguém é cobrado
     const limiteHora = porEquipe[a.equipe_id] || horaEntrada || HORA_ENTRADA_PADRAO;
     if (agora16 < (hoje + 'T' + limiteHora)) continue;   // ainda não passou da hora dessa equipe
     itens.push({
@@ -452,6 +453,58 @@ export function jornadaDaEquipe(equipeId, equipes, jornadas, jornadaPadrao) {
   return jornadaPadrao || '07:00–17:00';
 }
 
+/* ------------------------------------------------ jornada por dia da semana e feriados */
+
+const FERIADOS_NACIONAIS_FIXOS = [
+  ['01-01', 'Confraternização Universal'], ['04-21', 'Tiradentes'], ['05-01', 'Dia do Trabalho'],
+  ['09-07', 'Independência'], ['10-12', 'Nossa Senhora Aparecida'], ['11-02', 'Finados'],
+  ['11-15', 'Proclamação da República'], ['11-20', 'Dia da Consciência Negra'], ['12-25', 'Natal']
+];
+
+/** Feriados nacionais de um ano ({ dia, nome }). Estaduais e municipais o RH cadastra. Pura. */
+export function feriadosNacionais(ano) {
+  return FERIADOS_NACIONAIS_FIXOS.map(([md, nome]) => ({ dia: ano + '-' + md, nome, nacional: true }));
+}
+
+/** Conjunto de dias (YYYY-MM-DD) de feriado: nacionais dos anos tocados + os da empresa. Pura. */
+export function diasDeFeriado(deDia, ateDia, daEmpresa) {
+  const s = new Set();
+  for (let a = Number(String(deDia).slice(0, 4)); a <= Number(String(ateDia).slice(0, 4)); a++) {
+    for (const f of feriadosNacionais(a)) s.add(f.dia);
+  }
+  for (const f of (daEmpresa || [])) if (f && /^\d{4}-\d{2}-\d{2}$/.test(f.dia)) s.add(f.dia);
+  return s;
+}
+
+const DIA_SEMANA = d => new Date(d + 'T12:00:00Z').getUTCDay();   // 0 = domingo
+const proximoDia = d => new Date(Date.parse(d + 'T12:00:00Z') + 86400000).toISOString().slice(0, 10);
+
+/**
+ * Horário de um dia para uma jornada: { entrada, saida, intervalo_min } ou null
+ * (folga/feriado). `j.dias` = { "1": { entrada, saida, intervalo_min }, ... } com só
+ * os dias trabalhados (0 = domingo); sem `dias`, segunda a sexta no horário base.
+ * Feriado é sempre folga. `alocado`: a escala marcou o dia, então dia sem horário
+ * próprio usa o horário base (ex.: sábado escalado). Pura.
+ */
+export function horarioDoDia(j, dia, feriados, alocado) {
+  if (feriados && feriados.has(dia)) return null;
+  const base = { entrada: j.entrada, saida: j.saida, intervalo_min: j.intervalo_min != null ? j.intervalo_min : 60 };
+  const w = DIA_SEMANA(dia);
+  let h = null;
+  if (j.dias && typeof j.dias === 'object') {
+    const d = j.dias[String(w)];
+    if (d && d.entrada && d.saida) h = { entrada: d.entrada, saida: d.saida, intervalo_min: d.intervalo_min != null ? d.intervalo_min : base.intervalo_min };
+  } else if (w >= 1 && w <= 5) h = base;
+  return h || (alocado ? base : null);
+}
+
+/** Minutos previstos de um horário (saída − entrada − intervalo). */
+export function minutosPrevistos(h) {
+  if (!h) return 0;
+  const m = s => { const [a, b] = String(s).split(':'); return Number(a) * 60 + Number(b); };
+  return Math.max(0, m(h.saida) - m(h.entrada) - (h.intervalo_min || 0));
+}
+
 /** Hora de entrada (HH:MM) da jornada da equipe, p/ a exceção "sem entrada". */
 export function horaEntradaDaEquipe(equipeId, equipes, jornadas, horaPadrao) {
   const eq = (equipes || []).find(e => e.equipe_id === equipeId);
@@ -459,12 +512,18 @@ export function horaEntradaDaEquipe(equipeId, equipes, jornadas, horaPadrao) {
   return (j && j.entrada) || horaPadrao || HORA_ENTRADA_PADRAO;
 }
 
-/** Mapa equipe_id → hora de entrada, para alimentar exceptionsDoDia. */
-export function horasEntradaPorEquipe(equipes, jornadas) {
+/**
+ * Mapa equipe_id → hora de entrada de `dia`, para alimentar exceptionsDoDia.
+ * null = feriado: ninguém é cobrado de entrada. Sem `dia`, a entrada base. A lista
+ * vem das alocações do dia, então todo mundo ali está escalado.
+ */
+export function horasEntradaPorEquipe(equipes, jornadas, dia, feriados, jornadaPadrao) {
   const m = {};
   for (const e of (equipes || [])) {
-    const j = e.jornada_id ? (jornadas || []).find(x => x.jornada_id === e.jornada_id) : null;
-    if (j && j.entrada) m[e.equipe_id] = j.entrada;
+    const j = (e.jornada_id ? (jornadas || []).find(x => x.jornada_id === e.jornada_id) : null) || jornadaPadrao || null;
+    if (dia && feriados && feriados.has(dia)) { m[e.equipe_id] = null; continue; }
+    if (!j || !j.entrada) continue;
+    m[e.equipe_id] = dia ? horarioDoDia(j, dia, feriados, true).entrada : j.entrada;
   }
   return m;
 }
@@ -598,7 +657,6 @@ function alerta(tipo, id, pessoaId, equipeId, alvo) {
 const LIMITE_INTERVALO_MIN = 360;   // turno contínuo acima de 6h exige pausa
 const JORNADA_FIXA = { entrada: '07:00', saida: '17:00', tolerancia_min: 10, intervalo_min: 60 };
 const emMin = hhmm => { const [h, m] = String(hhmm).split(':'); return Number(h) * 60 + Number(m); };
-const diaUtil = d => { const w = new Date(d + 'T12:00:00Z').getUTCDay(); return w >= 1 && w <= 5; };
 
 /** Minutos desde 00:00 do relógio local no fuso informado. */
 function minutoLocal(iso, fuso) {
@@ -640,20 +698,21 @@ export function minutosTrabalhados(marcacoes) {
  * marcacoes: { pessoa_id, equipe_id, tipo, marcado_em, marcado_dia, estado }
  * alocacoes: { dia, colaborador_id, equipe_id }
  */
-export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jornadas, jornadaPadrao, de, ate, hoje, fuso, pessoaId }) {
+export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jornadas, jornadaPadrao, de, ate, hoje, fuso, pessoaId, feriados }) {
+  const ehFeriado = feriados instanceof Set ? feriados : diasDeFeriado(de, ate, feriados);
   const afastamento = equipeId => !!((equipes || []).find(e => e.equipe_id === equipeId) || {}).afastamento;
   const jornadaDe = equipeId => {
     const eq = (equipes || []).find(e => e.equipe_id === equipeId);
     const j = (eq && eq.jornada_id && (jornadas || []).find(x => x.jornada_id === eq.jornada_id)) || jornadaPadrao || null;
     return Object.assign({}, JORNADA_FIXA, j ? {
-      entrada: j.entrada, saida: j.saida,
+      entrada: j.entrada, saida: j.saida, dias: j.dias || null,
       tolerancia_min: j.tolerancia_min != null ? j.tolerancia_min : JORNADA_FIXA.tolerancia_min,
       intervalo_min: j.intervalo_min != null ? j.intervalo_min : JORNADA_FIXA.intervalo_min
     } : {});
   };
   const porPessoa = new Map();
   const bolsa = id => {
-    if (!porPessoa.has(id)) porPessoa.set(id, { marcas: new Map(), aloc: new Map() });
+    if (!porPessoa.has(id)) porPessoa.set(id, { marcas: new Map(), aloc: new Map(), equipe: new Map() });
     return porPessoa.get(id);
   };
   const dentro = d => d >= de && d <= ate;
@@ -669,42 +728,58 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
     if (pessoaId && a.colaborador_id !== pessoaId) continue;
     bolsa(a.colaborador_id).aloc.set(a.dia, a.equipe_id);
   }
+  // Sem escala, quem está numa equipe (a obra) deve o horário da jornada dela em todo
+  // dia de trabalho do período, desde que entrou na empresa (`desde`) e até hoje: é
+  // o que faz a falta aparecer. Sem histórico de equipe, vale a equipe atual.
+  for (const p of (pessoas || [])) {
+    if (!p.ativo || !p.equipe_id || afastamento(p.equipe_id)) continue;
+    if (pessoaId && p.pessoa_id !== pessoaId) continue;
+    const jor = jornadaDe(p.equipe_id);
+    const fim = ate < hoje ? ate : hoje;
+    for (let d = p.desde && p.desde > de ? p.desde : de; d <= fim; d = proximoDia(d)) {
+      if (horarioDoDia(jor, d, ehFeriado, false)) bolsa(p.pessoa_id).equipe.set(d, p.equipe_id);
+    }
+  }
 
   const linhas = [];
   for (const [id, b] of porPessoa) {
     const pessoa = (pessoas || []).find(p => p.pessoa_id === id) || { nome: id, matricula: '' };
     const tot = { previsto: 0, trabalhado: 0, saldo: 0, a_confirmar: 0, faltas: 0, atrasos: 0, atraso_min: 0, incompletos: 0, dias_a_confirmar: 0, dias: 0 };
     const dias = [];
-    const todos = new Set([...b.marcas.keys(), ...b.aloc.keys()]);
+    const todos = new Set([...b.marcas.keys(), ...b.aloc.keys(), ...b.equipe.keys()]);
     for (const dia of [...todos].sort()) {
       const marcas = b.marcas.get(dia) || [];
-      const equipeId = b.aloc.get(dia) || ((marcas.find(m => m.equipe_id) || {}).equipe_id) || null;
+      const equipeId = b.aloc.get(dia) || ((marcas.find(m => m.equipe_id) || {}).equipe_id) || b.equipe.get(dia) || null;
       const jor = jornadaDe(equipeId);
-      // Sem escala, o dia útil em que a pessoa bateu ponto tem a jornada da equipe dela
-      // (a equipe é a obra; a escala virou exceção). Fim de semana sem escala é folga e
-      // o que for batido ali é extra.
+      // Sem escala, o dia em que a pessoa bateu ponto tem o horário da jornada da equipe
+      // dela naquele dia da semana (a equipe é a obra; a escala virou exceção). Folga e
+      // feriado não têm horário: o que for batido ali é extra.
       // Equipe de afastamento (INSS, licença): não tem jornada nem falta.
       const afastado = afastamento(equipeId);
-      const escalado = !afastado && (b.aloc.has(dia) || (marcas.length > 0 && diaUtil(dia)));
-      const previsto = escalado ? Math.max(0, emMin(jor.saida) - emMin(jor.entrada) - jor.intervalo_min) : 0;
+      // Horário do dia pela jornada (dia da semana); feriado e folga não têm.
+      const horario = afastado ? null : horarioDoDia(jor, dia, ehFeriado, b.aloc.has(dia));
+      const escalado = !!horario && (b.aloc.has(dia) || marcas.length > 0 || b.equipe.has(dia));
+      const previsto = escalado ? minutosPrevistos(horario) : 0;
       const aceitas = marcas.filter(m => m.estado !== 'pendente');
       const pendentes = marcas.length - aceitas.length;
       const ok = minutosTrabalhados(aceitas);
       // Só 2 batidas (entrada e saída) num turno longo: ninguém bateu o almoço, então
       // o intervalo da jornada é descontado (CLT: >6h pede pausa). Com 4 batidas vale o batido.
-      const semBaterIntervalo = !ok.incompleto && aceitas.length === 2 && ok.minutos > LIMITE_INTERVALO_MIN && jor.intervalo_min > 0;
-      if (semBaterIntervalo) ok.minutos -= jor.intervalo_min;
+      const intervalo = horario ? horario.intervalo_min : jor.intervalo_min;
+      const semBaterIntervalo = !ok.incompleto && aceitas.length === 2 && ok.minutos > LIMITE_INTERVALO_MIN && intervalo > 0;
+      if (semBaterIntervalo) ok.minutos -= intervalo;
       const todas = minutosTrabalhados(marcas);
       const primeira = marcas.filter(m => m.tipo === 'entrada').map(m => m.marcado_em).sort()[0];
-      const atraso = escalado && primeira ? Math.max(0, minutoLocal(primeira, fuso) - emMin(jor.entrada)) : 0;
+      const atraso = escalado && primeira ? Math.max(0, minutoLocal(primeira, fuso) - emMin(horario.entrada)) : 0;
       const atrasado = atraso > jor.tolerancia_min;
 
       let status = 'ok', saldo = null;
-      if (!marcas.length) status = afastado ? 'afastado' : dia >= hoje ? 'em_andamento' : 'falta';
+      const folga = ehFeriado.has(dia) ? 'feriado' : 'folga';
+      if (!marcas.length) status = afastado ? 'afastado' : !horario ? folga : dia >= hoje ? 'em_andamento' : 'falta';
       else if (pendentes) status = 'a_confirmar';
       else if (ok.incompleto) status = dia >= hoje ? 'em_andamento' : 'incompleto';
-      else if (!escalado) status = 'folga';
-      if (status === 'ok' || status === 'folga' || status === 'falta') saldo = ok.minutos - previsto;
+      else if (!escalado) status = folga;
+      if (status === 'ok' || status === 'folga' || status === 'feriado' || status === 'falta') saldo = ok.minutos - previsto;
       // Tolerância: diferença pequena (≤ tolerância da jornada) não vira extra nem desconto.
       const naTolerancia = status === 'ok' && escalado && saldo !== 0 && Math.abs(saldo) <= jor.tolerancia_min;
       if (naTolerancia) saldo = 0;
@@ -718,7 +793,7 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
       if (marcas.length) tot.dias++;
       dias.push({ dia, equipe_id: equipeId, status, previsto, trabalhado: ok.minutos, saldo, a_confirmar: aConfirmar,
                   atraso: atrasado ? atraso : 0, marcacoes: marcas.length,
-                  intervalo_descontado: semBaterIntervalo ? jor.intervalo_min : 0, na_tolerancia: naTolerancia });
+                  intervalo_descontado: semBaterIntervalo ? intervalo : 0, na_tolerancia: naTolerancia });
     }
     linhas.push({ pessoa_id: id, nome: pessoa.nome, matricula: pessoa.matricula, totais: tot, dias });
   }

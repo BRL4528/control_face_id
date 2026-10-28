@@ -28,6 +28,13 @@ function sanear(dados) {
   if (d.jornadaPadrao != null) out.jornadaPadrao = String(d.jornadaPadrao).slice(0, 20);
   // Jornada padrão da empresa: vale para toda equipe sem jornada própria.
   if (d.jornadaPadraoId !== undefined) out.jornadaPadraoId = d.jornadaPadraoId ? String(d.jornadaPadraoId).slice(0, 40) : null;
+  // Feriados estaduais e municipais (os nacionais o sistema já conhece): [{ dia, nome }].
+  if (Array.isArray(d.feriados)) {
+    out.feriados = d.feriados
+      .filter(f => f && /^\d{4}-\d{2}-\d{2}$/.test(f.dia))
+      .map(f => ({ dia: f.dia, nome: String(f.nome || 'Feriado').trim().slice(0, 60) || 'Feriado' }))
+      .sort((a, b) => a.dia.localeCompare(b.dia)).slice(0, 200);
+  }
   return out;
 }
 
