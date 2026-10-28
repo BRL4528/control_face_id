@@ -15,14 +15,15 @@ import {
   alertasDePlanejamento, horasPorColaborador, fmtMinutos, dia as diaDe, motivosDaRevisao, rotuloAuditoria,
   tiposPelaOrdem, classificarPendente, diasDeFeriado, feriadosNacionais, horarioDoDia, folhaDoMes
 } from './regras.js';
-import { $, esc, mostrar, toast, hora, data, definirFuso } from './ui.js';
+import { $, esc, mostrar, toast, hora, data, definirFuso, reduzirImagem } from './ui.js';
 import { janelaDasFolhas, escreverFolhas } from './folha.js';
+import { TIPOS_OCORRENCIA, ocorrenciaDoDia } from './ocorrencias.js';
 
 // Rótulo da aba na trilha do topo (breadcrumb) e no título de página.
 const TITULOS = {
   painel: 'Central operacional', alocacao: 'Ajustes do dia', planos: 'Escala', mapa: 'Mapa',
   pendencias: 'Pendências', registros: 'Espelho de ponto', jornadas: 'Jornadas',
-  pessoas: 'Colaboradores', equipes: 'Equipes',
+  pessoas: 'Colaboradores', equipes: 'Equipes', ocorrencias: 'Ocorrências',
   relatorios: 'Relatórios', auditoria: 'Auditoria', config: 'Configurações'
 };
 // Item fixo da lista de Equipes: quem está fora de qualquer equipe.
@@ -31,7 +32,7 @@ const DIAS_SEMANA = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta'
 const DIA_DA_SEMANA_REF = ['2026-10-04', '2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09', '2026-10-10'];
 const SEM_EQUIPE = '__sem_equipe__';
 
-const ABAS = ['painel', 'alocacao', 'planos', 'mapa', 'pendencias', 'pessoas', 'equipes',
+const ABAS = ['painel', 'alocacao', 'planos', 'mapa', 'pendencias', 'pessoas', 'equipes', 'ocorrencias',
   'registros', 'jornadas', 'relatorios', 'auditoria', 'config', 'stub'];
 
 export const Rh = {
@@ -216,6 +217,9 @@ export const Rh = {
     const nExc = this.pendenciasAbertas().length;
     const badge = $('navBadgePend');
     if (badge) { badge.textContent = nExc; badge.classList.toggle('hide', nExc === 0); }
+    const nOc = ((this.dados && this.dados.ocorrencias) || []).filter(o => o.estado === 'pendente').length;
+    const badgeOc = $('navBadgeOc');
+    if (badgeOc) { badgeOc.textContent = nOc; badgeOc.classList.toggle('hide', nOc === 0); }
 
     // trilha do topo
     $('rhCrumb').textContent = this.aba === 'stub' ? this.stub : (TITULOS[this.aba] || '');
@@ -227,6 +231,7 @@ export const Rh = {
     if (this.aba === 'pendencias') this.pintarPendencias();
     if (this.aba === 'pessoas') this.pintarPessoas();
     if (this.aba === 'equipes') this.pintarEquipes();
+    if (this.aba === 'ocorrencias') this.pintarOcorrencias();
     if (this.aba === 'registros') this.pintarRegistros();
     if (this.aba === 'jornadas') this.pintarJornadas();
     if (this.aba === 'relatorios') this.pintarRelatorios();
@@ -242,8 +247,10 @@ export const Rh = {
     const cfg = window.EFRAT_CFG || {};
     // Quem está em equipe de afastamento (INSS, licença) não é cobrado de entrada.
     const afastadas = new Set((d.equipes || []).filter(e => e.afastamento).map(e => e.equipe_id));
+    // Nem quem está de férias, atestado, licença ou abono hoje.
+    const fora = a => afastadas.has(a.equipe_id) || this.abonadoHoje(a.colaborador_id);
     return exceptionsDoDia(
-      d.marcacoes, d.pessoas, (d.alocacoes_hoje || []).filter(a => !afastadas.has(a.equipe_id)), this.hojeServidor(),
+      d.marcacoes, d.pessoas, (d.alocacoes_hoje || []).filter(a => !fora(a)), this.hojeServidor(),
       d.servidor_hora, (this.jornadaPadrao() || {}).entrada || cfg.horaEntrada || '08:00',
       horasEntradaPorEquipe(d.equipes, d.jornadas, this.hojeServidor(),   // hora-limite do dia pela jornada; feriado não cobra
         diasDeFeriado(this.hojeServidor(), this.hojeServidor(), cfg.feriados), this.jornadaPadrao()),
@@ -719,7 +726,8 @@ export const Rh = {
     const cfg = window.EFRAT_CFG || {};
 
     const ind = indicadores(d.marcacoes, d.pessoas, d.equipes);
-    const cards = presencaPorEquipe(d.pessoas, d.marcacoes, d.equipes, hoje);
+    // Quem está de férias, atestado ou licença hoje não é esperado na obra.
+    const cards = presencaPorEquipe((d.pessoas || []).filter(p => !this.abonadoHoje(p.pessoa_id)), d.marcacoes, d.equipes, hoje);
     const serie = serieDiaria(d.marcacoes, d.periodo_dias || this.dias, hoje);
     const motivos = pendenciasPorMotivo(d.marcacoes, d.recadastros, d.pessoas);
     const exc = this.pendenciasAbertas();   // mesmo número do badge e da aba Pendências
@@ -2471,7 +2479,8 @@ export const Rh = {
     const validas = (r.dados.marcacoes || []).filter(x => x.estado !== 'rejeitada');
     const linhas = horasPorColaborador({
       marcacoes: r.dados.marcacoes, alocacoes: r.dados.alocacoes, pessoas: d.pessoas, equipes: d.equipes, jornadas: d.jornadas,
-      jornadaPadrao: this.jornadaPadrao(), de, ate, hoje: this.hojeServidor(), fuso, pessoaId: pessoaId || null, feriados: cfg.feriados
+      jornadaPadrao: this.jornadaPadrao(), de, ate, hoje: this.hojeServidor(), fuso, pessoaId: pessoaId || null, feriados: cfg.feriados,
+      ocorrencias: r.dados.ocorrencias
     });
     const folhas = linhas
       .map(l => ({ l, p: d.pessoas.find(p => p.pessoa_id === l.pessoa_id) || {} }))
@@ -2543,7 +2552,7 @@ export const Rh = {
     const linhas = horasPorColaborador({
       marcacoes: r.dados.marcacoes, alocacoes: r.dados.alocacoes, pessoas: d.pessoas, equipes: d.equipes, jornadas: d.jornadas,
       jornadaPadrao: jp, de, ate, hoje: this.hojeServidor(), fuso: (d.empresa || {}).fuso, pessoaId: pessoaId || null,
-      feriados: (window.EFRAT_CFG || {}).feriados
+      feriados: (window.EFRAT_CFG || {}).feriados, ocorrencias: r.dados.ocorrencias
     }).filter(l => this.passaFuncao(d.pessoas.find(p => p.pessoa_id === l.pessoa_id) || {}));
     this.horasLinhas = { linhas, de, ate };
     $('btnCsvHoras').disabled = !linhas.length;
@@ -2557,7 +2566,7 @@ export const Rh = {
         '<td class="mono">' + fmtMinutos(x.previsto) + '</td><td class="mono">' + fmtMinutos(x.trabalhado) + '</td>' +
         '<td class="mono"' + (x.saldo != null ? saldoCls(x.saldo) : '') + '>' + (x.saldo != null ? fmtMinutos(x.saldo, true) : '—') + '</td>' +
         '<td class="mono">' + (x.atraso ? fmtMinutos(x.atraso) : '—') + '</td>' +
-        '<td>' + ST[x.status] + (x.a_confirmar ? ' · ' + fmtMinutos(x.a_confirmar) + ' pendentes' : '') +
+        '<td>' + (x.ocorrencia && x.status === 'ocorrencia' ? TIPOS_OCORRENCIA[x.ocorrencia].rotulo : ST[x.status]) + (x.a_confirmar ? ' · ' + fmtMinutos(x.a_confirmar) + ' pendentes' : '') +
           (x.intervalo_descontado ? ' · <span class="nota" title="Só 2 batidas: o intervalo da jornada foi descontado">intervalo ' + fmtMinutos(x.intervalo_descontado) + ' descontado</span>' : '') +
           (x.na_tolerancia ? ' · <span class="nota">dentro da tolerância</span>' : '') + '</td></tr>').join('') +
       '</tbody></table></td></tr>';
@@ -2583,7 +2592,7 @@ export const Rh = {
     const linhas = [];
     for (const l of h.linhas) for (const x of l.dias) {
       linhas.push([l.nome, l.matricula, x.dia, this.nomeEquipe(x.equipe_id), fmtMinutos(x.previsto), fmtMinutos(x.trabalhado),
-        x.saldo != null ? fmtMinutos(x.saldo, true) : '', x.atraso ? fmtMinutos(x.atraso) : '', ST[x.status],
+        x.saldo != null ? fmtMinutos(x.saldo, true) : '', x.atraso ? fmtMinutos(x.atraso) : '', x.ocorrencia && x.status === 'ocorrencia' ? TIPOS_OCORRENCIA[x.ocorrencia].rotulo : ST[x.status],
         x.a_confirmar ? fmtMinutos(x.a_confirmar) : '']);
     }
     this.baixarCsv('horas-' + h.de + '_' + h.ate + '.csv',
@@ -2601,6 +2610,137 @@ export const Rh = {
   },
 
   /* --------------------------------------------------------- auditoria */
+
+/* ------------------------------------------------------- ocorrências */
+
+  /** Férias, atestado, licença ou abono hoje: não é cobrado nem esperado na obra. */
+  abonadoHoje(pessoaId) {
+    const o = ocorrenciaDoDia((this.dados || {}).ocorrencias, pessoaId, this.hojeServidor());
+    return !!(o && TIPOS_OCORRENCIA[o.tipo].abona);
+  },
+
+  pintarOcorrencias() {
+    const d = this.dados, hoje = this.hojeServidor();
+    const todas = (d.ocorrencias || []).slice();
+    const pendentes = todas.filter(o => o.estado === 'pendente');
+    const filtroTipo = this.ocFiltroTipo || '', busca = (this.ocBusca || '').trim().toLowerCase();
+    const lista = todas.filter(o => o.estado !== 'pendente' && (!filtroTipo || o.tipo === filtroTipo) &&
+      (!busca || this.nomeDe(o.colaborador_id).toLowerCase().includes(busca)));
+    const dm = s => s ? s.slice(8, 10) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4) : '';
+    const periodo = o => dm(o.inicio) + (o.fim ? (o.fim !== o.inicio ? ' a ' + dm(o.fim) : '') : ' em diante');
+    const situacao = o => o.estado === 'recusada' ? ['Recusada', 'bad']
+      : o.inicio > hoje ? ['Agendada', 'mut'] : (!o.fim || o.fim >= hoje) ? ['Em andamento', 'ok'] : ['Encerrada', 'mut'];
+    const doc = o => o.tem_anexo ? '<button class="v2btn ghost mini" data-oc-foto="' + esc(o.id) + '">Ver foto</button>' : '';
+    const linha = o => {
+      const [txt, cls] = situacao(o);
+      return '<tr><td><b>' + esc(this.nomeDe(o.colaborador_id)) + '</b></td><td>' + esc(TIPOS_OCORRENCIA[o.tipo] ? TIPOS_OCORRENCIA[o.tipo].rotulo : o.tipo) + '</td>' +
+        '<td class="mono">' + periodo(o) + '</td><td><span class="pill ' + cls + '"><span class="dot"></span>' + txt + '</span></td>' +
+        '<td>' + esc(o.observacao || '') + '</td><td style="text-align:right;white-space:nowrap">' + doc(o) +
+          (o.estado === 'ativa' ? ' <button class="v2btn ghost mini" data-oc-ed="' + esc(o.id) + '">Editar</button>' +
+            ' <button class="v2btn ghost mini" data-oc-cancel="' + esc(o.id) + '">Cancelar</button>' : '') + '</td></tr>';
+    };
+
+    $('rh-ocorrencias').innerHTML =
+      '<div class="pg-head"><div><h1 class="tit">Ocorrências</h1>' +
+        '<p class="sub">Férias, atestado, afastamento, licença, falta justificada e viagem. O período abona as faltas, bloqueia a batida quando for o caso e aparece na folha de ponto.</p></div>' +
+        '<div class="acoes"><button class="v2btn" id="btnNovaOc">+ Nova ocorrência</button></div></div>' +
+      '<div id="areaOc"></div>' +
+      (pendentes.length
+        ? '<div class="v2card" style="padding:15px;margin-bottom:16px"><h2 style="margin:0 0 10px;font-size:14px">Enviadas pelo app, aguardando o RH (' + pendentes.length + ')</h2>' +
+            '<div class="tbl-wrap"><table class="adtable"><thead><tr><th>Colaborador</th><th>Tipo</th><th>Período</th><th>Observação</th><th></th></tr></thead><tbody>' +
+            pendentes.map(o => '<tr><td><b>' + esc(this.nomeDe(o.colaborador_id)) + '</b></td><td>' + esc(TIPOS_OCORRENCIA[o.tipo].rotulo) + '</td>' +
+              '<td class="mono">' + periodo(o) + '</td><td>' + esc(o.observacao || '') + '</td>' +
+              '<td style="text-align:right;white-space:nowrap">' + doc(o) +
+                ' <button class="v2btn ghost mini" data-oc-dec="recusar" data-oc-id="' + esc(o.id) + '">Recusar</button>' +
+                ' <button class="v2btn mini" data-oc-dec="aprovar" data-oc-id="' + esc(o.id) + '">Aprovar</button></td></tr>').join('') +
+            '</tbody></table></div></div>'
+        : '') +
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">' +
+        '<input class="inp" id="ocBusca" placeholder="Buscar colaborador" value="' + esc(this.ocBusca || '') + '" style="max-width:260px;margin:0">' +
+        '<select class="inp" id="ocTipo" style="max-width:260px;margin:0"><option value="">Todos os tipos</option>' +
+          Object.keys(TIPOS_OCORRENCIA).map(k => '<option value="' + k + '"' + (k === filtroTipo ? ' selected' : '') + '>' + esc(TIPOS_OCORRENCIA[k].rotulo) + '</option>').join('') +
+        '</select></div>' +
+      '<div class="tbl-wrap"><table class="adtable"><thead><tr><th>Colaborador</th><th>Tipo</th><th>Período</th><th>Situação</th><th>Observação</th><th></th></tr></thead><tbody>' +
+        (lista.length ? lista.map(linha).join('') : '<tr><td colspan="6" style="padding:30px;text-align:center;color:#64748b">Nenhuma ocorrência.</td></tr>') +
+      '</tbody></table></div>';
+
+    $('btnNovaOc').onclick = () => this.formOcorrencia(null);
+    $('ocBusca').oninput = () => { this.ocBusca = $('ocBusca').value; this.pintarOcorrencias(); $('ocBusca').focus(); };
+    $('ocTipo').onchange = () => { this.ocFiltroTipo = $('ocTipo').value; this.pintarOcorrencias(); };
+    const el = $('rh-ocorrencias');
+    el.querySelectorAll('[data-oc-foto]').forEach(b => { b.onclick = () => this.verFotoOcorrencia(b.dataset.ocFoto); });
+    el.querySelectorAll('[data-oc-ed]').forEach(b => { b.onclick = () => this.formOcorrencia(todas.find(o => o.id === b.dataset.ocEd)); });
+    el.querySelectorAll('[data-oc-cancel]').forEach(b => {
+      b.onclick = async () => {
+        if (!confirm('Cancelar esta ocorrência? Os dias voltam a contar como falta se não houver batida.')) return;
+        const r = await ApiRh.ocorrencia(this.token, { acao: 'cancelar', id: b.dataset.ocCancel });
+        if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+        toast('Ocorrência cancelada', 'ok'); await this.recarregar();
+      };
+    });
+    el.querySelectorAll('[data-oc-dec]').forEach(b => {
+      b.onclick = async () => {
+        const r = await ApiRh.ocorrencia(this.token, { acao: b.dataset.ocDec, id: b.dataset.ocId });
+        if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+        toast(b.dataset.ocDec === 'aprovar' ? 'Aprovada: os dias estão abonados' : 'Recusada', 'ok'); await this.recarregar();
+      };
+    });
+  },
+
+  async verFotoOcorrencia(id) {
+    const w = window.open('', '_blank');
+    if (!w) { toast('Libere pop-ups para ver a foto', 'warn'); return; }
+    w.document.write('<p style="font-family:Arial;padding:20px">Carregando…</p>');
+    const r = await ApiRh.ocorrencia(this.token, { acao: 'anexo', id });
+    if (!r.ok || !r.dados.anexo) { w.close(); toast(r.erro || 'Sem foto', 'warn'); return; }
+    w.document.open();
+    w.document.write('<title>Documento</title><body style="margin:0;background:#111;display:flex;justify-content:center"><img src="' + r.dados.anexo + '" style="max-width:100%;height:auto"></body>');
+    w.document.close();
+  },
+
+  formOcorrencia(o) {
+    o = o || {};
+    const pessoas = (this.dados.pessoas || []).filter(p => p.ativo || p.pessoa_id === o.colaborador_id).slice().sort((a, b) => a.nome.localeCompare(b.nome));
+    $('areaOc').innerHTML =
+      '<div class="card"><h2>' + (o.id ? 'Editar ocorrência' : 'Nova ocorrência') + '</h2>' +
+        '<div class="form-grid">' +
+          '<div><label class="lb2">Colaborador</label><select class="inp" id="ocPessoa"><option value="">Escolha</option>' +
+            pessoas.map(p => '<option value="' + p.pessoa_id + '"' + (p.pessoa_id === o.colaborador_id ? ' selected' : '') + '>' + esc(p.nome) + '</option>').join('') + '</select></div>' +
+          '<div><label class="lb2">Tipo</label><select class="inp" id="ocTipoF">' +
+            Object.keys(TIPOS_OCORRENCIA).map(k => '<option value="' + k + '"' + (k === o.tipo ? ' selected' : '') + '>' + esc(TIPOS_OCORRENCIA[k].rotulo) + '</option>').join('') + '</select></div>' +
+          '<div><label class="lb2">Início</label><input class="inp" type="date" id="ocInicio" value="' + esc(o.inicio || this.hojeServidor()) + '"></div>' +
+          '<div><label class="lb2">Fim (em branco se não tem data de volta)</label><input class="inp" type="date" id="ocFim" value="' + esc(o.fim || '') + '"></div>' +
+        '</div>' +
+        '<div class="form-grid" style="margin-top:10px">' +
+          '<div><label class="lb2">Observação</label><input class="inp" id="ocObs" value="' + esc(o.observacao || '') + '" placeholder="Ex.: férias 2026, 1º período"></div>' +
+          '<div><label class="lb2">Foto do documento' + (o.tem_anexo ? ' (já tem; envie outra para trocar)' : '') + '</label><input class="inp" type="file" accept="image/*" id="ocFoto"></div>' +
+        '</div>' +
+        '<p class="cap" id="ocEfeito" style="margin:10px 0 0"></p>' +
+        '<div class="row2" style="margin-top:14px"><button class="act" id="btnSalvarOc">Salvar</button><button class="act ghost" id="btnCancelarOc">Cancelar</button></div>' +
+      '</div>';
+    const efeito = () => {
+      const t = TIPOS_OCORRENCIA[$('ocTipoF').value];
+      $('ocEfeito').textContent = [t.abona ? 'Abona os dias (sem falta e sem horas previstas).' : '',
+        t.bloqueia ? 'O app não deixa bater ponto no período.' : '',
+        t.semCerca ? 'A batida vale fora da cerca no período (não cai em revisão por local).' : '',
+        t.foto ? 'Anexe a foto do documento.' : ''].filter(Boolean).join(' ');
+    };
+    $('ocTipoF').onchange = efeito; efeito();
+    $('btnCancelarOc').onclick = () => { $('areaOc').innerHTML = ''; };
+    $('btnSalvarOc').onclick = async () => {
+      const corpo = { acao: 'salvar', id: o.id, colaborador_id: $('ocPessoa').value, tipo: $('ocTipoF').value,
+        inicio: $('ocInicio').value, fim: $('ocFim').value || null, observacao: $('ocObs').value.trim() };
+      if (!corpo.colaborador_id) { toast('Escolha o colaborador', 'warn'); return; }
+      const f = $('ocFoto').files && $('ocFoto').files[0];
+      if (f) { try { corpo.anexo = await reduzirImagem(f); } catch (e) { toast(e.message, 'bad'); return; } }
+      const btn = $('btnSalvarOc'); btn.disabled = true;
+      const r = await ApiRh.ocorrencia(this.token, corpo);
+      btn.disabled = false;
+      if (!r.ok) { toast(r.erro || 'Falha ao salvar', 'bad'); return; }
+      toast('Ocorrência salva', 'ok'); $('areaOc').innerHTML = ''; await this.recarregar();
+    };
+    $('areaOc').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
 
   pintarAuditoria() {
     const cs = this.dados.correcoes || [];
@@ -2945,7 +3085,7 @@ export const Rh = {
 
   telaTrocarSenha() {
     $('rh-painel').classList.remove('hide');
-    ['alocacao', 'mapa', 'pendencias', 'pessoas', 'equipes', 'registros', 'jornadas', 'relatorios', 'auditoria', 'config', 'stub']
+    ['alocacao', 'mapa', 'pendencias', 'pessoas', 'equipes', 'ocorrencias', 'registros', 'jornadas', 'relatorios', 'auditoria', 'config', 'stub']
       .forEach(a => { const el = $('rh-' + a); if (el) el.classList.add('hide'); });
     $('rhCrumb').textContent = 'Trocar senha';
     $('rhNome').textContent = this.dados.usuario.nome || 'RH';

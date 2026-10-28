@@ -24,7 +24,7 @@ export default async function handler(req, res) {
     return erro(res, 400, 'PERIODO_LONGO', `período máximo de ${MAX_DIAS} dias`);
   }
   const sql = db();
-  const [marcacoes, alocacoes] = await Promise.all([
+  const [marcacoes, alocacoes, ocorrencias] = await Promise.all([
     sql`SELECT m.colaborador_id AS pessoa_id, m.equipe_id, m.tipo, m.marcado_em,
                to_char(m.marcado_dia,'YYYY-MM-DD') AS marcado_dia,
                CASE
@@ -42,7 +42,11 @@ export default async function handler(req, res) {
         ORDER BY m.marcado_em`,
     sql`SELECT to_char(a.dia,'YYYY-MM-DD') AS dia, a.colaborador_id, a.equipe_id
         FROM alocacao a
-        WHERE a.empresa_id = ${rh.empresa_id} AND a.dia BETWEEN ${b.de}::date AND ${b.ate}::date`
+        WHERE a.empresa_id = ${rh.empresa_id} AND a.dia BETWEEN ${b.de}::date AND ${b.ate}::date`,
+    sql`SELECT colaborador_id, tipo, to_char(inicio,'YYYY-MM-DD') AS inicio, to_char(fim,'YYYY-MM-DD') AS fim, estado
+        FROM ocorrencia
+        WHERE empresa_id = ${rh.empresa_id} AND estado = 'ativa'
+          AND inicio <= ${b.ate}::date AND (fim IS NULL OR fim >= ${b.de}::date)`
   ]);
-  return ok(res, { de: b.de, ate: b.ate, marcacoes, alocacoes });
+  return ok(res, { de: b.de, ate: b.ate, marcacoes, alocacoes, ocorrencias });
 }

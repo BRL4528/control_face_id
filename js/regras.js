@@ -1,3 +1,5 @@
+import { TIPOS_OCORRENCIA, ocorrenciaDoDia } from './ocorrencias.js';
+
 // Regras puras — sem DOM, sem rede, sem IndexedDB.
 // Fica separado justamente para ser testável em Node, que é onde os erros
 // que custam caro (ponto dobrado, tipo de marcação errado) aparecem.
@@ -698,7 +700,7 @@ export function minutosTrabalhados(marcacoes) {
  * marcacoes: { pessoa_id, equipe_id, tipo, marcado_em, marcado_dia, estado }
  * alocacoes: { dia, colaborador_id, equipe_id }
  */
-export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jornadas, jornadaPadrao, de, ate, hoje, fuso, pessoaId, feriados }) {
+export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jornadas, jornadaPadrao, de, ate, hoje, fuso, pessoaId, feriados, ocorrencias }) {
   const ehFeriado = feriados instanceof Set ? feriados : diasDeFeriado(de, ate, feriados);
   const afastamento = equipeId => !!((equipes || []).find(e => e.equipe_id === equipeId) || {}).afastamento;
   const jornadaDe = equipeId => {
@@ -737,7 +739,7 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
     const jor = jornadaDe(p.equipe_id);
     const fim = ate < hoje ? ate : hoje;
     for (let d = p.desde && p.desde > de ? p.desde : de; d <= fim; d = proximoDia(d)) {
-      if (horarioDoDia(jor, d, ehFeriado, false)) bolsa(p.pessoa_id).equipe.set(d, p.equipe_id);
+      if (horarioDoDia(jor, d, ehFeriado, false)) bolsa(p.pessoa_id).equipe.set(d, p.equipe_id);   // dia com ocorrência também aparece (sai FÉRIAS, ATESTADO...)
     }
   }
 
@@ -756,8 +758,11 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
       // feriado não têm horário: o que for batido ali é extra.
       // Equipe de afastamento (INSS, licença): não tem jornada nem falta.
       const afastado = afastamento(equipeId);
+      // Férias, atestado, licença, abono: o dia não tem previsto nem falta.
+      const oc = ocorrenciaDoDia(ocorrencias, id, dia);
+      const abonado = !!(oc && TIPOS_OCORRENCIA[oc.tipo].abona);
       // Horário do dia pela jornada (dia da semana); feriado e folga não têm.
-      const horario = afastado ? null : horarioDoDia(jor, dia, ehFeriado, b.aloc.has(dia));
+      const horario = afastado || abonado ? null : horarioDoDia(jor, dia, ehFeriado, b.aloc.has(dia));
       const escalado = !!horario && (b.aloc.has(dia) || marcas.length > 0 || b.equipe.has(dia));
       const previsto = escalado ? minutosPrevistos(horario) : 0;
       const aceitas = marcas.filter(m => m.estado !== 'pendente');
@@ -775,7 +780,7 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
 
       let status = 'ok', saldo = null;
       const folga = ehFeriado.has(dia) ? 'feriado' : 'folga';
-      if (!marcas.length) status = afastado ? 'afastado' : !horario ? folga : dia >= hoje ? 'em_andamento' : 'falta';
+      if (!marcas.length) status = abonado ? 'ocorrencia' : afastado ? 'afastado' : !horario ? folga : dia >= hoje ? 'em_andamento' : 'falta';
       else if (pendentes) status = 'a_confirmar';
       else if (ok.incompleto) status = dia >= hoje ? 'em_andamento' : 'incompleto';
       else if (!escalado) status = folga;
@@ -791,7 +796,7 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
       if (status === 'a_confirmar') { tot.dias_a_confirmar++; tot.a_confirmar += aConfirmar; }
       if (atrasado && status !== 'em_andamento') { tot.atrasos++; tot.atraso_min += atraso; }
       if (marcas.length) tot.dias++;
-      dias.push({ dia, equipe_id: equipeId, status, previsto, trabalhado: ok.minutos, saldo, a_confirmar: aConfirmar,
+      dias.push({ dia, equipe_id: equipeId, status, ocorrencia: oc ? oc.tipo : null, previsto, trabalhado: ok.minutos, saldo, a_confirmar: aConfirmar,
                   atraso: atrasado ? atraso : 0, marcacoes: marcas.length,
                   intervalo_descontado: semBaterIntervalo ? intervalo : 0, na_tolerancia: naTolerancia });
     }
@@ -905,7 +910,8 @@ export function folhaDoMes({ linha, marcacoes, mes, fuso, nomeEquipe, feriados }
       dia, num: d, semana: SEMANA_FOLHA[new Date(dia + 'T12:00:00Z').getUTCDay()],
       batidas: [0, 1, 2, 3].map(i => bs[i] ? horaNoFuso(bs[i].marcado_em, fuso) : ''),
       mais_batidas: Math.max(0, bs.length - 4),
-      trabalhado, extra, ocorrencia: x ? (OCORRENCIA_FOLHA[x.status] || '') : ehFeriado.has(dia) ? 'FERIADO' : '',
+      trabalhado, extra,
+      ocorrencia: x ? (x.ocorrencia ? TIPOS_OCORRENCIA[x.ocorrencia].folha : (OCORRENCIA_FOLHA[x.status] || '')) : ehFeriado.has(dia) ? 'FERIADO' : '',
       obra: bs.length || trabalhado ? obra(x && x.equipe_id) : ''
     });
   }

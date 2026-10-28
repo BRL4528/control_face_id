@@ -34,3 +34,24 @@ let fusoEmpresa = null;
 export const definirFuso = fuso => { fusoEmpresa = fuso || null; };
 export const hora = iso => horaNoFuso(iso, fusoEmpresa);
 export const data = iso => new Date(iso + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+
+/**
+ * Foto de documento (atestado etc.) reduzida para enviar: lado maior até `max` px,
+ * JPEG. Devolve data URL. Foto de celular sai de ~4 MB para ~200 a 400 KB.
+ */
+export function reduzirImagem(arquivo, max = 1600, qualidade = 0.8) {
+  return new Promise((ok, falha) => {
+    const url = URL.createObjectURL(arquivo);
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      ok(c.toDataURL('image/jpeg', qualidade));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); falha(new Error('Não consegui abrir a imagem')); };
+    img.src = url;
+  });
+}

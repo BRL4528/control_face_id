@@ -103,6 +103,12 @@ async function irParaPorta() {
   if (sub) sub.textContent = S.empresa ? S.empresa.nome : 'Seu ponto, no seu celular';
   // "Já tenho cadastro": quem trocou de celular e sabe a matrícula pareia direto (1:1 no ato).
   if (linkMat) linkMat.classList.toggle('hide', !(pelaEmpresa || pendente));
+  // Atestado pelo app: só para quem já é colaborador identificado.
+  const linkAt = $('linkAtestado');
+  if (linkAt) {
+    linkAt.classList.toggle('hide', !(pareado && !pendente));
+    linkAt.onclick = () => Ponto.enviarAtestado(S.dispositivo, irParaPorta);
+  }
   // O botão NUNCA fica preso: sempre dá pra tocar. Se o reconhecimento ainda
   // não carregou, o próprio fluxo do toque espera/avisa — antes o botão morto
   // deixava a pessoa presa no celular quando o modelo demorava a baixar.
@@ -111,7 +117,7 @@ async function irParaPorta() {
   try { fila = await Store.fila(); } catch (e) { /* storage bloqueado — segue */ }
   if (!Face.pronto) statusPorta('Preparando o reconhecimento… já pode tocar.');
   else if (pendente) statusPorta('Seu cadastro aguarda confirmação do RH. Pode bater o ponto normalmente.');
-  else if (S.afastado) statusPorta(MSG_AFASTADO, 'warnfg');
+  else if (S.afastado) statusPorta(S.afastadoMsg || MSG_AFASTADO, 'warnfg');
   else if (pelaEmpresa) statusPorta('Primeira vez? Só olhar para a câmera. Sem código, sem senha.');
   else if (!pareado) statusPorta('Primeira vez? Toque para ativar seu ponto.');
   else if (fila.length) statusPorta(fila.length + ' marcação(ões) esperando envio.', 'warnfg');
@@ -277,7 +283,7 @@ async function abrirPonto() {
         await Store.set('alocacao', alocacao);
         await Store.set('deriva', deriva);
         if (r.fuso) { await Store.set('fuso', r.fuso); definirFuso(r.fuso); }
-        S.afastado = !!r.afastado; await Store.set('afastado', S.afastado);
+        S.afastado = !!r.afastado; S.afastadoMsg = r.afastado_msg; await Store.set('afastado', S.afastado); await Store.set('afastado_msg', S.afastadoMsg);
       } else if (r.status === 403 && r.codigo === 'BLOQUEADO') {
         await marcarBloqueado(); return irParaPorta();
       } else if (r.status === 401) {
@@ -291,7 +297,7 @@ async function abrirPonto() {
     }
     // Afastado (INSS, licença): o RH tirou a batida; a câmera nem abre. Ao voltar,
     // a próxima carga com rede já libera.
-    if (S.afastado) { statusPorta(MSG_AFASTADO, 'warnfg'); return; }
+    if (S.afastado) { statusPorta(S.afastadoMsg || MSG_AFASTADO, 'warnfg'); return; }
     const pendente = !S.dispositivo.colaborador;
     if (!template && !pendente) { toast('Seu cadastro facial ainda não foi feito. Bata o ponto pelo link da empresa ou procure o RH.', 'bad'); return; }
     await Ponto.abrir(S.dispositivo, { template, alocacao, deriva }, irParaPorta);
@@ -361,7 +367,7 @@ async function boot() {
   try { S.dispositivo = await identidadeSalva(); } catch (e) { S.dispositivo = null; }
   try { S.bloqueado = !!(await Store.get('bloqueado')); } catch (e) { S.bloqueado = false; }
   try { definirFuso(await Store.get('fuso')); } catch (e) { /* sem fuso salvo: relógio do aparelho */ }
-  try { S.afastado = !!(await Store.get('afastado')); } catch (e) { S.afastado = false; }
+  try { S.afastado = !!(await Store.get('afastado')); S.afastadoMsg = await Store.get('afastado_msg'); } catch (e) { S.afastado = false; }
   try { await resolverEmpresa(); } catch (e) { /* segue sem empresa */ }
 
   try { setInterval(() => sincronizarFundo(), cfg().syncIntervalMs); } catch (e) { /* ok */ }

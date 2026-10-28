@@ -387,3 +387,26 @@ CREATE TABLE IF NOT EXISTS folha_assinatura (
   UNIQUE (empresa_id, colaborador_id, mes)
 );
 CREATE INDEX IF NOT EXISTS ix_folha_assinatura_colab ON folha_assinatura (colaborador_id, estado);
+
+-- ═══════════════════════════════════════════════════════ ocorrências do colaborador
+-- Férias, atestado, afastamento INSS, licença, falta justificada e viagem/trabalho
+-- externo, com período e foto do documento. Efeito de cada tipo em js/ocorrencias.js:
+-- abona o dia (sem previsto nem falta), bloqueia a batida no app ou dispensa a cerca.
+-- origem 'app': enviada pelo colaborador (atestado), nasce 'pendente' até o RH aprovar.
+CREATE TABLE IF NOT EXISTS ocorrencia (
+  id             text PRIMARY KEY,
+  empresa_id     text NOT NULL REFERENCES empresa(id) ON DELETE CASCADE,
+  colaborador_id text NOT NULL REFERENCES colaborador(id) ON DELETE CASCADE,
+  tipo           text NOT NULL,
+  inicio         date NOT NULL,
+  fim            date,                                -- NULL = em aberto (ex.: INSS sem data de volta)
+  observacao     text,
+  anexo          text,                                -- foto do documento (data URL)
+  estado         text NOT NULL DEFAULT 'ativa',       -- ativa | pendente | recusada | cancelada
+  origem         text NOT NULL DEFAULT 'rh',          -- rh | app
+  criada_em      timestamptz NOT NULL DEFAULT now(),
+  criada_por     text REFERENCES usuario_rh(id),
+  decidida_por   text REFERENCES usuario_rh(id),
+  decidida_em    timestamptz
+);
+CREATE INDEX IF NOT EXISTS ix_ocorrencia_colab ON ocorrencia (empresa_id, colaborador_id, inicio);

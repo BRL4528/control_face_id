@@ -22,7 +22,7 @@ export default async function handler(req, res) {
   const empresa = rh.empresa_id;
   const sql = db();
 
-  const [equipes, pessoas, marcacoes, alocacoes, locais, jornadas, empresaRow, configRow, usuariosRh, correcoes, planos, aparelhosPendentes, papeis] = await Promise.all([
+  const [equipes, pessoas, marcacoes, alocacoes, locais, jornadas, empresaRow, configRow, usuariosRh, correcoes, planos, aparelhosPendentes, papeis, ocorrencias] = await Promise.all([
     sql`SELECT id AS equipe_id, nome, ativo, jornada_id, supervisor_id, local_id, bitrix_stage_id, afastamento FROM equipe WHERE empresa_id = ${empresa} ORDER BY nome`,
     sql`SELECT c.id AS pessoa_id, c.nome, c.matricula, c.papel, c.equipe_padrao AS equipe_id, c.ativo, c.bitrix_contact_id,
                to_char(c.criado_em,'YYYY-MM-DD') AS desde,
@@ -86,7 +86,14 @@ export default async function handler(req, res) {
         ORDER BY d.pareado_em DESC`,
     // Papéis personalizados + quantos colaboradores usam cada um.
     sql`SELECT p.id, p.nome, p.ativo, (SELECT count(*)::int FROM colaborador c WHERE c.empresa_id = p.empresa_id AND c.papel = p.id) AS em_uso
-        FROM papel p WHERE p.empresa_id = ${empresa} ORDER BY lower(p.nome)`
+        FROM papel p WHERE p.empresa_id = ${empresa} ORDER BY lower(p.nome)`,
+    // Ocorrências que tocam o período (ou em aberto) e as pendentes; a foto vem à parte.
+    sql`SELECT id, colaborador_id, tipo, to_char(inicio,'YYYY-MM-DD') AS inicio, to_char(fim,'YYYY-MM-DD') AS fim,
+               observacao, estado, origem, (anexo IS NOT NULL) AS tem_anexo, criada_em
+        FROM ocorrencia
+        WHERE empresa_id = ${empresa} AND estado <> 'cancelada'
+          AND (estado = 'pendente' OR fim IS NULL OR fim >= (CURRENT_DATE - ${dias}::int - 31))
+        ORDER BY inicio DESC LIMIT 2000`
   ]);
 
   // "Hoje" no fuso da EMPRESA, não em UTC: às 21h em Campo Grande já é amanhã em
@@ -106,7 +113,7 @@ export default async function handler(req, res) {
     periodo_dias: dias,
     servidor_hora: new Date().toISOString(),
     hoje,                     // 'YYYY-MM-DD' no fuso da empresa — o front usa este, não o UTC
-    equipes, pessoas, marcacoes, locais, jornadas, planos, papeis,
+    equipes, pessoas, marcacoes, locais, jornadas, planos, papeis, ocorrencias,
     usuarios_rh: usuariosRh, correcoes,
     alocacoes,                 // janela ontem..+30 (tabs de dia + alertas de planejamento)
     alocacoes_hoje: alocacoesHoje,

@@ -14,7 +14,7 @@ import { Api } from './api.js';
 import { Face, DICA_ADORNO } from './face.js';
 import { criarDetectorPiscada } from './liveness.js';
 import { tipoDaVez, pontosDoDia, vereditoPorDistancia, emCooldown, agoraCorrigido, euclidiana, dia } from './regras.js';
-import { $, esc, mostrar, toast, hora } from './ui.js';
+import { $, esc, mostrar, toast, hora, reduzirImagem } from './ui.js';
 
 const cfg = () => window.EFRAT_CFG;
 
@@ -353,6 +353,47 @@ export const Ponto = {
     Face.parar();
     if (this.cam) { this.cam.getTracks().forEach(t => t.stop()); this.cam = null; }
     clearTimeout(this._t); clearTimeout(this._livenessTimer);
+  },
+
+  /* ------------------------------------------------ atestado pelo app */
+
+  /** Foto do atestado + data + dias. Vai para o RH aprovar; só então abona os dias. */
+  async enviarAtestado(dispositivo, aoSair) {
+    this.dispositivo = dispositivo;
+    this.aoSair = aoSair;
+    this.aoProvar = null;
+    mostrar('fila');
+    this.fecharCamera();
+    $('cartao').innerHTML = '';
+    $('quemFila') && ($('quemFila').textContent = dispositivo.colaborador.nome.split(' ')[0]);
+    const hoje = dia(agoraCorrigido(this.deriva || 0).toISOString(), await this.fuso());
+    $('painelDia').innerHTML =
+      '<div class="card diacard">' +
+        '<div class="dia-topo"><span class="lb">Enviar atestado médico</span></div>' +
+        '<label class="lb2">Foto do atestado</label>' +
+        '<input class="inp" type="file" accept="image/*" capture="environment" id="atFoto">' +
+        '<img id="atPrev" class="hide" alt="" style="width:100%;border-radius:10px;margin:6px 0;border:1px solid var(--linha)">' +
+        '<label class="lb2">Primeiro dia do atestado</label><input class="inp" type="date" id="atInicio" value="' + hoje + '">' +
+        '<label class="lb2">Quantos dias</label><input class="inp" type="number" min="1" max="365" id="atDias" value="1" inputmode="numeric">' +
+        '<label class="lb2">Observação (opcional)</label><input class="inp" id="atObs" placeholder="Ex.: consulta pela manhã">' +
+        '<p class="nota" style="text-align:left">O RH confere a foto e aprova. O CID não é obrigatório.</p>' +
+        '<button class="act big" id="atEnviar">Enviar ao RH</button>' +
+      '</div>';
+    let foto = null;
+    $('atFoto').onchange = async () => {
+      const f = $('atFoto').files && $('atFoto').files[0];
+      if (!f) return;
+      try { foto = await reduzirImagem(f); $('atPrev').src = foto; $('atPrev').classList.remove('hide'); }
+      catch (e) { toast(e.message, 'bad'); }
+    };
+    $('atEnviar').onclick = async () => {
+      if (!foto) { toast('Tire a foto do atestado', 'warn'); return; }
+      $('atEnviar').disabled = true;
+      const r = await Api.ocorrencia(this.dispositivo.credencial, { acao: 'enviar', inicio: $('atInicio').value,
+        dias: Number($('atDias').value) || 1, anexo: foto, observacao: $('atObs').value.trim() });
+      if (!r.ok) { $('atEnviar').disabled = false; toast(r.erro || 'Não consegui enviar. Tente com sinal.', 'bad'); return; }
+      this.fimFolha('Atestado enviado. O RH vai conferir.', 'ok');
+    };
   },
 
   /* ------------------------------------------- assinatura da folha de ponto */

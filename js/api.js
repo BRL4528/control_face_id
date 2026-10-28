@@ -70,10 +70,18 @@ export const Api = {
       colaborador: c.colaborador,
       template: c.template,       // { versao, vetores } ou null
       alocacao: c.alocacao,       // { equipe_id, equipe_nome, cerca } ou null
-      afastado: c.afastado === true,   // equipe de afastamento (INSS, licença): não bate ponto
+      afastado: c.afastado === true,   // equipe de afastamento ou férias/licença: não bate ponto
+      afastado_msg: c.afastado_msg || null,
       deriva: calcularDeriva(t0, t1, c.servidor_hora),
       fuso: c.fuso || null
     };
+  },
+
+  /** Atestado enviado pelo colaborador (api/ocorrencia.js). */
+  async ocorrencia(credencial, corpo) {
+    const r = await req('/ocorrencia', corpo, { bearer: credencial, timeoutMs: 60000 });
+    if (!r.ok || !r.json || !r.json.ok) return { ok: false, status: r.status, codigo: codErro(r), erro: msgErro(r, 'falha ao enviar') };
+    return Object.assign({ ok: true }, r.json);
   },
 
   /** Folha de ponto do colaborador: listar, assinar ou contestar (api/folha.js). */
@@ -146,6 +154,7 @@ export const ApiRh = {
   papel(token, d) { return reqRh('/rh/papel', token, d); },
   horas(token, d) { return reqRh('/rh/horas', token, d); },
   folha(token, d) { return reqRh('/rh/folha', token, d); },
+  ocorrencia(token, d) { return reqRh('/rh/ocorrencia', token, d); },
   decidir(token, d) { return reqRh('/rh/decidir', token, d); },
   corrigirPonto(token, d) { return reqRh('/rh/corrigir-ponto', token, d); },
   lancarPonto(token, d) { return reqRh('/rh/lancar-ponto', token, d); },

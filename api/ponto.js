@@ -15,6 +15,7 @@ import { db } from './_lib/db.js';
 import { autenticarDispositivo } from './_lib/auth.js';
 import { dentroDaCerca } from './_lib/geo.js';
 import { cercaVigente } from './_lib/escala.js';
+import { ocorrenciaVigente } from './_lib/ocorrencia.js';
 import { cors, ok, erro, corpo, exigeMetodo } from './_lib/http.js';
 import { guardarMiniatura } from './_lib/blob.js';
 import { diaNoFuso, fusoDaEmpresa } from './_lib/dia.js';
@@ -100,15 +101,21 @@ export default async function handler(req, res) {
       }
     }
 
+    // Viagem / trabalho externo: a batida vale fora da cerca. Férias, afastamento,
+    // licença: não deveria bater (o app bloqueia); se chegar, vai para o RH.
+    const oc = await ocorrenciaVigente(sql, vinc.empresa_id, colaboradorId, dia);
+    const externo = !!(oc && oc.semCerca) && cerca.dentro !== true;
+    if (externo) cerca = { dentro: true, distancia_m: cerca.distancia_m };
+
     const derivaFora = Math.abs(Number(m.deriva_ms) || 0) > DERIVA_MAX_MS;
     const revisar =
       m.veredito !== 'aceito' ||
       m.origem === 'manual' ||
       m.liveness_ok === false ||
-      (!temCerca && !visitado) ||
+      (!temCerca && !visitado && !externo) ||
       cerca.dentro === false ||
       derivaFora ||
-      !!(aloc && aloc.afastado);   // afastado não bate; se chegar (fila offline), o RH decide
+      !!(aloc && aloc.afastado) || !!(oc && oc.bloqueia);   // afastado não bate; se chegar (fila offline), o RH decide
 
     const equipeId = (aloc && aloc.equipe_id) || m.equipe_id || null;
 
@@ -120,7 +127,7 @@ export default async function handler(req, res) {
       ) VALUES (
         ${m.id_cliente}, ${vinc.empresa_id}, ${colaboradorId}, ${vinc.dispositivo_id}, ${equipeId},
         ${m.tipo}, ${m.origem || 'biometria'}, ${revisar ? 'revisar' : 'aceito'},
-        ${m.score ?? null}, ${m.liveness_ok ?? null}, ${aloc && aloc.afastado ? 'colaborador afastado' : visitado ? 'gestor em outro local: ' + visitado.nome : (m.motivo || null)},
+        ${m.score ?? null}, ${m.liveness_ok ?? null}, ${aloc && aloc.afastado ? 'colaborador afastado' : oc && oc.bloqueia ? 'colaborador em ' + oc.rotulo.toLowerCase() : externo ? 'trabalho externo (viagem)' : visitado ? 'gestor em outro local: ' + visitado.nome : (m.motivo || null)},
         ${m.marcado_em}, ${dia}, ${Number(m.deriva_ms) || 0},
         ${m.lat ?? null}, ${m.lng ?? null}, ${m.precisao_m ?? null},
         ${cerca.dentro}, ${cerca.distancia_m}, ${revisar ? (m.foto_url || null) : null}, ${revisar}
