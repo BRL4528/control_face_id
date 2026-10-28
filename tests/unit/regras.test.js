@@ -620,7 +620,7 @@ test('classificarPendente: fora da cerca com rosto confirmado é atenção (líd
 test('classificarPendente: só faltou piscar, com rosto confirmado, ganha rótulo próprio (caso Raíssa)', () => {
   const raissa = { dentro_cerca: true, origem: 'biometria', veredito: 'revisar', score: 0.383, liveness_ok: false };
   assert.equal(classificarPendente(raissa).tipo, 'sem_prova_de_vida');
-  assert.equal(classificarPendente(raissa).rotulo, 'Rosto confere, faltou piscar');
+  assert.equal(classificarPendente(raissa).rotulo, 'Rosto confere, sem prova de vida');
   assert.equal(classificarPendente({ ...raissa, score: 0.5 }).tipo, 'zona_cinzenta');
   assert.equal(classificarPendente({ ...raissa, origem: 'manual' }).tipo, 'registro_manual');
 });

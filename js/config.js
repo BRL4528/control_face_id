@@ -17,10 +17,10 @@ window.EFRAT_CFG = Object.assign({
   inputSize: 416, roiInputSize: 224,
   autoCapturaCiclos: 2,
 
-  // Liveness (prova de vida leve): pede uma piscada. Sem isso, foto na tela
-  // passa. Combinado com cerca + 1:1, torna a fraude impraticável sem hardware.
+  // Liveness (prova de vida leve): pede para fechar e abrir os olhos. Sem isso,
+  // foto na tela passa. Combinado com cerca + 1:1, torna a fraude impraticável sem hardware.
   livenessAtivo: true,
-  livenessTimeoutMs: 6000,
+  livenessTimeoutMs: 8000,
 
   cooldownMs: 60000,    // mesma pessoa não marca de novo dentro deste tempo
   geoTimeoutMs: 8000,   // ponto não trava esperando GPS, mas a cerca precisa dele

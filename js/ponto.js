@@ -3,7 +3,7 @@
 //
 //   1. Face 1:1 — compara o rosto capturado com o template do PRÓPRIO usuário
 //      (baixado na carga do dia). Confirma "é você", não descobre "quem é".
-//   2. Liveness — pede uma piscada antes de aceitar. Foto na tela não pisca.
+//   2. Liveness — pede para fechar e abrir os olhos. Foto na tela não fecha.
 //   3. Cerca — o GPS precisa cair dentro do raio da alocação do dia.
 //
 // O ponto nunca é negado por falha técnica: sem cerca, fora da cerca ou sem
@@ -27,6 +27,7 @@ export const Ponto = {
   doDia: [],
   cam: null,
   piscada: null,
+  earsAbertos: [],     // EAR dos últimos quadros enquadrando o rosto: linha de base da prova de vida
   aoSair: null,
 
   async abrir(dispositivo, carga, aoSair) {
@@ -113,9 +114,10 @@ export const Ponto = {
   iniciarCiclo() {
     this.estado = 'aguardando';
     this.piscada = null;
+    this.earsAbertos = [];
     const { slots, proximo } = pontosDoDia(this.doDia);
     const rot = proximo != null ? slots[proximo].rotulo : 'ponto';
-    $('dica').textContent = 'Registrando: ' + rot + ' — olhe para a câmera';
+    $('dica').textContent = 'Registrando ' + rot + '. Olhe para a câmera';
     if (!this.alocacao && !this.modoCadastro) toast('Sem alocação hoje — irá para conferência do RH', 'warn');
   },
 
@@ -140,8 +142,12 @@ export const Ponto = {
   /** Cada quadro: mostra a dica e, na fase de liveness, alimenta o detector de piscada. */
   aoQuadro(q) {
     if (this.estado === 'processando' || this.estado === 'comprovante') return;
+    if (this.estado === 'aguardando' && q.rosto && q.ear != null) {
+      this.earsAbertos.push(q.ear);
+      if (this.earsAbertos.length > 8) this.earsAbertos.shift();
+    }
     if (this.estado === 'liveness') {
-      $('dica').textContent = 'Pisque os olhos';
+      $('dica').textContent = 'Feche os olhos por 1 segundo e abra';
       $('dica').style.color = '#2d6cdf';
       if (q.rosto && q.ear != null && this.piscada && this.piscada.alimentar(q.ear)) {
         this.aposLiveness();
@@ -173,7 +179,7 @@ export const Ponto = {
       this.capPendente = { cap, dist: null, veredito: 'revisar' };
       if (cfg().livenessAtivo) {
         this.estado = 'liveness';
-        this.piscada = criarDetectorPiscada();
+        this.piscada = criarDetectorPiscada(this.earsAbertos);
         this._livenessTimer = setTimeout(() => this.aposLiveness(), cfg().livenessTimeoutMs);
       } else this.aposLiveness();
       return;
@@ -202,7 +208,7 @@ export const Ponto = {
     this.capPendente = { cap, dist, veredito };
     if (cfg().livenessAtivo) {
       this.estado = 'liveness';
-      this.piscada = criarDetectorPiscada();
+      this.piscada = criarDetectorPiscada(this.earsAbertos);
       this._livenessInicio = Date.now();
       this._livenessTimer = setTimeout(() => this.aposLiveness(), cfg().livenessTimeoutMs);
     } else {

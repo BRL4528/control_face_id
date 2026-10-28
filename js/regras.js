@@ -347,7 +347,7 @@ export const TIPOS_EXCECAO = {
   sem_entrada:     { rotulo: 'Entrada não registrada', severidade: 'atencao' },
   registro_manual: { rotulo: 'Registro manual sem biometria', severidade: 'atencao' },
   zona_cinzenta:   { rotulo: 'Similaridade na zona cinzenta', severidade: 'atencao' },
-  sem_prova_de_vida: { rotulo: 'Rosto confere, faltou piscar', severidade: 'atencao' },
+  sem_prova_de_vida: { rotulo: 'Rosto confere, sem prova de vida', severidade: 'atencao' },
   // Alertas de PLANEJAMENTO (não são do dia; são de gestão da escala).
   pessoa_em_2_equipes: { rotulo: 'Alocada em duas equipes no mesmo dia', severidade: 'critico' },
   cerca_sem_gente:     { rotulo: 'Equipe com cerca e sem colaboradores', severidade: 'atencao' },
@@ -821,7 +821,7 @@ export function motivosDaRevisao(m, cfg) {
   if (m.origem === 'manual') r.push('Registro manual, sem reconhecimento facial');
   if (m.dentro_cerca === false) r.push('Fora da cerca' + (m.distancia_cerca_m != null ? ' (' + m.distancia_cerca_m + ' m do centro)' : ''));
   else if (m.dentro_cerca == null && m.origem !== 'manual') r.push('Sem cerca definida para a equipe ou o dia');
-  if (m.liveness_ok === false) r.push('Prova de vida não detectada (sem piscada)');
+  if (m.liveness_ok === false) r.push('Prova de vida não detectada (olhos não fecharam)');
   const deriva = Math.abs(Number(m.deriva_relogio_ms) || 0);
   if (deriva > 120000) r.push('Relógio do aparelho ' + Math.round(deriva / 60000) + ' min fora do horário do servidor');
   if (m.origem !== 'manual' && m.score != null && Number(m.score) > c.limiarAceite) {

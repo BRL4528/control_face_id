@@ -1246,7 +1246,7 @@ export const Rh = {
       '<td>' + (m.tipo === 'entrada' ? 'Entrada' : 'Saída') + '</td>' +
       '<td>' + (m.lat != null ? '<a href="https://www.openstreetmap.org/?mlat=' + m.lat + '&mlon=' + m.lng + '#map=17/' + m.lat + '/' + m.lng + '" target="_blank" rel="noopener">' +
         Number(m.lat).toFixed(4) + ', ' + Number(m.lng).toFixed(4) + '</a>' + (m.precisao_m ? ' <span class="nota">±' + Math.round(m.precisao_m) + ' m</span>' : '') : '<span class="nota">sem GPS</span>') + '</td>' +
-      '<td>' + (m.liveness_ok === false ? '<span class="badfg">sem piscada</span>' : m.liveness_ok ? 'ok' : '—') + '</td></tr>';
+      '<td>' + (m.liveness_ok === false ? '<span class="badfg">sem prova de vida</span>' : m.liveness_ok ? 'ok' : '—') + '</td></tr>';
     return '<div class="pend-det-head">' +
         '<span class="av" style="width:56px;height:56px;border-radius:14px;overflow:hidden">' + (foto ? '<img src="' + esc(foto) + '" style="width:100%;height:100%;object-fit:cover">' : '📱') + '</span>' +
         '<div style="flex:1"><div class="nome">Aparelho não identificado <span class="sev warn">ATENÇÃO</span></div>' +

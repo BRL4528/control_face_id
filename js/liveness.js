@@ -1,15 +1,30 @@
-// Prova de vida leve: pede uma piscada e a detecta pela razão de aspecto do
+// Prova de vida leve: pede para fechar e abrir os olhos e detecta pela razão de aspecto do
 // olho (EAR — eye aspect ratio) nos landmarks que o motor já rastreia. Uma foto
-// estática na tela nunca pisca, então reprova; um rosto vivo pisca em segundos.
+// estática na tela nunca fecha os olhos, então reprova; um rosto vivo faz em segundos.
 //
 // Não é liveness certificado ISO 30107-3 (isso exige hardware/vídeo e vem
 // depois). É a barreira barata que, somada à cerca e ao 1:1, torna a fraude por
 // foto impraticável no dia a dia.
 //
 // EAR = (‖p2-p6‖ + ‖p3-p5‖) / (2·‖p1-p4‖) sobre os 6 pontos do olho do modelo
-// de 68 landmarks (olho esquerdo 36-41, direito 42-47). Aberto ~0.3, fechado
-// <0.18. Detectamos a transição aberto→fechado→aberto.
-const ABERTO = 0.24, FECHADO = 0.18;
+// de 68 landmarks (olho esquerdo 36-41, direito 42-47).
+//
+// O "fechado" é RELATIVO ao olho aberto da própria pessoa. O limiar fixo antigo
+// (aberto 0.24, fechado 0.18) quase nunca era atingido: o EAR varia com a pessoa,
+// o ângulo e a precisão dos landmarks, e o app só analisa 2 a 3 quadros por
+// segundo, então uma piscada (0,1 a 0,4 s) caía entre dois quadros. Em out/2026,
+// 944 de 947 batidas reprovaram. Agora o app pede "feche os olhos e abra" (dura
+// vários quadros) e compara cada quadro com a linha de base de olho aberto.
+const FECHOU = 0.75;    // olho fechado: abaixo de 75% da abertura normal da pessoa
+const ABRIU = 0.9;      // reabriu: voltou a 90% da abertura normal
+const MIN_BASE = 3;     // quadros de olho aberto para formar a linha de base
+
+function mediana(xs) {
+  const v = xs.filter(x => Number.isFinite(x) && x > 0).sort((a, b) => a - b);
+  if (!v.length) return null;
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
 
 function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
 
@@ -29,17 +44,30 @@ export function earDosOlhos(landmarks) {
 }
 
 /**
- * Máquina de estado de uma piscada. Alimente com o EAR de cada quadro; quando
- * ver aberto→fechado→aberto, `completo` fica true uma vez.
+ * Máquina de estado de "fechou e abriu os olhos". `base`: EARs dos quadros de
+ * olho aberto logo antes da prova de vida (a fase de enquadrar o rosto); sem
+ * eles, os primeiros quadros formam a linha de base. Alimente com o EAR de cada
+ * quadro; quando ver aberto→fechado→aberto, `completo` fica true uma vez.
+ * Foto parada não fecha os olhos, então nunca completa.
  */
-export function criarDetectorPiscada() {
+export function criarDetectorPiscada(base) {
+  const inicio = (base || []).filter(x => Number.isFinite(x) && x > 0).slice(-8);
+  let ref = inicio.length >= MIN_BASE ? mediana(inicio) : null;
+  const juntando = ref == null ? inicio.slice() : null;
   let fase = 'aguardando_fechar';   // aguardando_fechar → aguardando_abrir → completo
   return {
     completo: false,
+    get base() { return ref; },
     alimentar(valorEar) {
       if (this.completo) return true;
-      if (fase === 'aguardando_fechar' && valorEar < FECHADO) fase = 'aguardando_abrir';
-      else if (fase === 'aguardando_abrir' && valorEar > ABERTO) { fase = 'completo'; this.completo = true; }
+      if (!Number.isFinite(valorEar) || valorEar <= 0) return false;
+      if (ref == null) {
+        juntando.push(valorEar);
+        if (juntando.length >= MIN_BASE) ref = mediana(juntando);
+        return false;
+      }
+      if (fase === 'aguardando_fechar' && valorEar < ref * FECHOU) fase = 'aguardando_abrir';
+      else if (fase === 'aguardando_abrir' && valorEar > ref * ABRIU) { fase = 'completo'; this.completo = true; }
       return this.completo;
     },
     reiniciar() { fase = 'aguardando_fechar'; this.completo = false; }
