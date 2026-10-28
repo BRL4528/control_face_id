@@ -18,12 +18,13 @@ import {
 import { $, esc, mostrar, toast, hora, data, definirFuso, reduzirImagem } from './ui.js';
 import { janelaDasFolhas, escreverFolhas } from './folha.js';
 import { TIPOS_OCORRENCIA, ocorrenciaDoDia } from './ocorrencias.js';
+import { TIPOS_EVENTO, ESTADOS_EVENTO, situacaoCat } from './eventos.js';
 
 // Rótulo da aba na trilha do topo (breadcrumb) e no título de página.
 const TITULOS = {
   painel: 'Central operacional', alocacao: 'Ajustes do dia', planos: 'Escala', mapa: 'Mapa',
   pendencias: 'Pendências', registros: 'Espelho de ponto', jornadas: 'Jornadas',
-  pessoas: 'Colaboradores', equipes: 'Equipes', ocorrencias: 'Ocorrências',
+  pessoas: 'Colaboradores', equipes: 'Equipes', ocorrencias: 'Ocorrências', eventos: 'Advertências e acidentes',
   relatorios: 'Relatórios', auditoria: 'Auditoria', config: 'Configurações'
 };
 // Item fixo da lista de Equipes: quem está fora de qualquer equipe.
@@ -32,7 +33,7 @@ const DIAS_SEMANA = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta'
 const DIA_DA_SEMANA_REF = ['2026-10-04', '2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09', '2026-10-10'];
 const SEM_EQUIPE = '__sem_equipe__';
 
-const ABAS = ['painel', 'alocacao', 'planos', 'mapa', 'pendencias', 'pessoas', 'equipes', 'ocorrencias',
+const ABAS = ['painel', 'alocacao', 'planos', 'mapa', 'pendencias', 'pessoas', 'equipes', 'ocorrencias', 'eventos',
   'registros', 'jornadas', 'relatorios', 'auditoria', 'config', 'stub'];
 
 export const Rh = {
@@ -69,6 +70,7 @@ export const Rh = {
     const d = await ApiRh.dados(this.token, this.dias);
     if (!d.ok) return { ok: false, erro: d.erro || 'falha ao carregar' };
     this.dados = d.dados;
+    this.eventos = undefined;
     this.aplicarConfig();
     await this.guardarSessao();
     return { ok: true };
@@ -118,6 +120,7 @@ export const Rh = {
     this.usuarioLogin = ses.usuario || null;
     this.precisaTrocarSenha = !!ses.trocar_senha;
     this.dados = d.dados;
+    this.eventos = undefined;
     this.aplicarConfig();
     return true;
   },
@@ -220,6 +223,11 @@ export const Rh = {
     const nOc = ((this.dados && this.dados.ocorrencias) || []).filter(o => o.estado === 'pendente').length;
     const badgeOc = $('navBadgeOc');
     if (badgeOc) { badgeOc.textContent = nOc; badgeOc.classList.toggle('hide', nOc === 0); }
+    // Acidentes sem CAT: contador no menu. A lista vem à parte (/rh/evento), sem travar o painel.
+    if (this.eventos === undefined && this.token) { this.eventos = null; this.carregarEventos(); }
+    const nCat = (this.eventos || []).filter(e => e.estado === 'aguardando_cat').length;
+    const badgeEv = $('navBadgeEv');
+    if (badgeEv) { badgeEv.textContent = nCat; badgeEv.classList.toggle('hide', nCat === 0); }
 
     // trilha do topo
     $('rhCrumb').textContent = this.aba === 'stub' ? this.stub : (TITULOS[this.aba] || '');
@@ -232,6 +240,7 @@ export const Rh = {
     if (this.aba === 'pessoas') this.pintarPessoas();
     if (this.aba === 'equipes') this.pintarEquipes();
     if (this.aba === 'ocorrencias') this.pintarOcorrencias();
+    if (this.aba === 'eventos') this.pintarEventos();
     if (this.aba === 'registros') this.pintarRegistros();
     if (this.aba === 'jornadas') this.pintarJornadas();
     if (this.aba === 'relatorios') this.pintarRelatorios();
@@ -2742,6 +2751,185 @@ export const Rh = {
     $('areaOc').scrollIntoView({ behavior: 'smooth', block: 'start' });
   },
 
+/* ------------------------------------------- advertências, notificações e acidentes */
+
+  /** Busca a lista à parte; 503 MIGRACAO_PENDENTE vira aviso na própria aba. */
+  async carregarEventos() {
+    const r = await ApiRh.evento(this.token, { acao: 'listar' });
+    this.eventosErro = r.ok ? null : (r.codigo === 'MIGRACAO_PENDENTE' ? 'Esta função precisa da migração do banco (tabela evento). Rode a migração e atualize.' : (r.erro || 'Falha ao carregar'));
+    this.eventos = r.ok ? r.dados.eventos : [];
+    if (this.aba === 'eventos') this.pintarEventos();
+    const nCat = this.eventos.filter(e => e.estado === 'aguardando_cat').length;
+    const badgeEv = $('navBadgeEv');
+    if (badgeEv) { badgeEv.textContent = nCat; badgeEv.classList.toggle('hide', nCat === 0); }
+  },
+
+  pintarEventos() {
+    const el = $('rh-eventos');
+    if (this.eventos == null) { el.innerHTML = '<p class="nota">Carregando…</p>'; if (this.eventos === undefined) this.carregarEventos(); return; }
+    const hoje = this.hojeServidor(), cfg = window.EFRAT_CFG || {};
+    const aba = this.evAba || 'disciplina';
+    const obra = this.evObra || '';
+    const dm = s => s ? s.slice(8, 10) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4) : '';
+    const doTipo = e => aba === 'acidentes' ? e.tipo === 'acidente' : e.tipo !== 'acidente';
+    const lista = (this.eventos || []).filter(e => doTipo(e) && e.estado !== 'cancelado' && (!obra || e.equipe_id === obra));
+    const pill = (txt, cls) => '<span class="pill ' + cls + '"><span class="dot"></span>' + esc(txt) + '</span>';
+    const fotos = e => (e.tem_anexo ? '<button class="v2btn ghost mini" data-ev-foto="' + esc(e.id) + '">Ver foto</button> ' : '') +
+      (e.tem_cat ? '<button class="v2btn ghost mini" data-ev-cat-foto="' + esc(e.id) + '">Ver CAT</button> ' : '');
+    const situacao = e => {
+      if (e.estado === 'ciente') return pill('Ciente em ' + dm(String(e.ciencia && e.ciencia.em || '').slice(0, 10)), 'ok');
+      if (e.estado === 'recusou') return pill('Recusou, com testemunhas', 'mut');
+      if (e.estado === 'concluido') return pill('CAT ' + ((e.dados.cat || {}).numero || ''), 'ok');
+      if (e.estado === 'aguardando_cat') {
+        const s = situacaoCat(e, hoje, cfg.feriados);
+        return pill(s.situacao === 'atrasada' ? 'CAT atrasada (prazo ' + dm(s.prazo) + ')' : s.situacao === 'vence_hoje' ? 'CAT vence hoje' : 'Aguardando CAT até ' + dm(s.prazo),
+          s.situacao === 'no_prazo' ? 'mut' : 'bad');
+      }
+      return pill(ESTADOS_EVENTO[e.estado] || e.estado, 'mut');
+    };
+    const acoes = e => fotos(e) +
+      (e.estado === 'aguardando_ciencia' ? '<button class="v2btn ghost mini" data-ev-recusa="' + esc(e.id) + '">Registrar recusa</button> ' : '') +
+      (e.estado === 'aguardando_cat' ? '<button class="v2btn mini" data-ev-cat="' + esc(e.id) + '">Registrar CAT</button> ' : '') +
+      (e.tipo === 'acidente' && e.dados && e.dados.afastamento ? '<button class="v2btn ghost mini" data-ev-afast="' + esc(e.id) + '">Lançar afastamento</button> ' : '') +
+      '<button class="v2btn ghost mini" data-ev-cancel="' + esc(e.id) + '">Cancelar</button>';
+    const linha = e => '<tr><td><b>' + esc(this.nomeDe(e.colaborador_id)) + '</b>' +
+        (aba === 'disciplina' ? '<div class="mt">' + esc(TIPOS_EVENTO[e.tipo].rotulo) + '</div>' : '') + '</td>' +
+      '<td class="mono">' + dm(e.data) + (e.hora ? ' ' + esc(e.hora) : '') + '</td>' +
+      '<td>' + esc(e.equipe_id ? this.nomeEquipe(e.equipe_id) : '') + '</td>' +
+      '<td style="max-width:320px">' + esc(e.descricao) + (e.dados && e.dados.obito ? ' <b style="color:#b42318">(óbito)</b>' : '') + '</td>' +
+      '<td>' + situacao(e) + '</td><td style="text-align:right;white-space:nowrap">' + acoes(e) + '</td></tr>';
+    const atrasadas = (this.eventos || []).filter(e => e.estado === 'aguardando_cat' && situacaoCat(e, hoje, cfg.feriados).situacao !== 'no_prazo').length;
+
+    el.innerHTML =
+      '<div class="pg-head"><div><h1 class="tit">Advertências e acidentes</h1>' +
+        '<p class="sub">Advertências e notificações vão para o app do colaborador dar ciência com o rosto. Acidente de trabalho fica pendente até o registro da CAT (prazo: 1º dia útil seguinte; em caso de óbito, imediato).</p></div>' +
+        '<div class="acoes"><button class="v2btn" id="btnNovoEv">+ ' + (aba === 'acidentes' ? 'Registrar acidente' : 'Nova advertência ou notificação') + '</button></div></div>' +
+      (this.eventosErro ? '<div class="cartao warn" style="margin-bottom:12px">' + esc(this.eventosErro) + '</div>' : '') +
+      (atrasadas ? '<div class="cartao warn" style="margin-bottom:12px"><b>' + atrasadas + ' acidente(s) com CAT vencendo hoje ou atrasada.</b> A CAT é emitida no eSocial (S-2210); registre aqui o número quando sair.</div>' : '') +
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:center">' +
+        '<div class="segtabs" style="width:auto"><button data-ev-aba="disciplina"' + (aba === 'disciplina' ? ' class="on"' : '') + '>Advertências e notificações</button>' +
+          '<button data-ev-aba="acidentes"' + (aba === 'acidentes' ? ' class="on"' : '') + '>Acidentes</button></div>' +
+        '<select class="inp" id="evObra" style="max-width:280px;margin:0"><option value="">Todas as obras</option>' +
+          (this.dados.equipes || []).filter(e => e.ativo).slice().sort((a, b) => a.nome.localeCompare(b.nome))
+            .map(e => '<option value="' + esc(e.equipe_id) + '"' + (e.equipe_id === obra ? ' selected' : '') + '>' + esc(e.nome) + '</option>').join('') + '</select></div>' +
+      '<div id="areaEv"></div>' +
+      '<div class="tbl-wrap"><table class="adtable"><thead><tr><th>Colaborador</th><th>Data</th><th>Obra</th><th>O que houve</th><th>Situação</th><th></th></tr></thead><tbody>' +
+        (lista.length ? lista.map(linha).join('') : '<tr><td colspan="6" style="padding:30px;text-align:center;color:#64748b">Nenhum registro.</td></tr>') +
+      '</tbody></table></div>';
+
+    el.querySelectorAll('[data-ev-aba]').forEach(b => { b.onclick = () => { this.evAba = b.dataset.evAba; this.pintarEventos(); }; });
+    $('evObra').onchange = () => { this.evObra = $('evObra').value; this.pintarEventos(); };
+    $('btnNovoEv').onclick = () => this.formEvento(aba === 'acidentes' ? 'acidente' : 'advertencia');
+    const achar = id => (this.eventos || []).find(e => e.id === id);
+    const acao = async (corpo, msg) => {
+      const r = await ApiRh.evento(this.token, corpo);
+      if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return false; }
+      toast(msg, 'ok'); await this.carregarEventos(); return true;
+    };
+    el.querySelectorAll('[data-ev-foto]').forEach(b => { b.onclick = () => this.verFotoEvento(b.dataset.evFoto, 'anexo'); });
+    el.querySelectorAll('[data-ev-cat-foto]').forEach(b => { b.onclick = () => this.verFotoEvento(b.dataset.evCatFoto, 'cat'); });
+    el.querySelectorAll('[data-ev-cancel]').forEach(b => {
+      b.onclick = () => { if (confirm('Cancelar este registro? Ele sai da lista, mas continua guardado.')) acao({ acao: 'cancelar', id: b.dataset.evCancel }, 'Registro cancelado'); };
+    });
+    el.querySelectorAll('[data-ev-afast]').forEach(b => {
+      b.onclick = () => {
+        const e = achar(b.dataset.evAfast);
+        this.aba = 'ocorrencias'; this.pintar();
+        this.formOcorrencia({ colaborador_id: e.colaborador_id, tipo: 'atestado', inicio: e.data, observacao: 'Acidente de trabalho em ' + dm(e.data) });
+      };
+    });
+    el.querySelectorAll('[data-ev-recusa]').forEach(b => {
+      b.onclick = () => {
+        $('areaEv').innerHTML = '<div class="card"><h2>Recusa de ciência</h2>' +
+          '<p class="cap">O colaborador se recusou a dar ciência. O registro vale com duas testemunhas que presenciaram a entrega.</p>' +
+          '<div class="form-grid">' + [1, 2].map(i =>
+            '<div><label class="lb2">Testemunha ' + i + '</label><input class="inp" id="rcNome' + i + '" placeholder="Nome completo"></div>' +
+            '<div><label class="lb2">Documento (CPF ou RG)</label><input class="inp" id="rcDoc' + i + '"></div>').join('') + '</div>' +
+          '<label class="lb2" style="margin-top:10px">Observação</label><input class="inp" id="rcObs">' +
+          '<div class="row2" style="margin-top:14px"><button class="act" id="btnRc">Registrar recusa</button><button class="act ghost" id="btnRcX">Cancelar</button></div></div>';
+        $('btnRcX').onclick = () => { $('areaEv').innerHTML = ''; };
+        $('btnRc').onclick = () => acao({ acao: 'recusa', id: b.dataset.evRecusa, observacao: $('rcObs').value,
+          testemunhas: [1, 2].map(i => ({ nome: $('rcNome' + i).value, documento: $('rcDoc' + i).value })) }, 'Recusa registrada');
+      };
+    });
+    el.querySelectorAll('[data-ev-cat]').forEach(b => {
+      b.onclick = () => {
+        $('areaEv').innerHTML = '<div class="card"><h2>Registrar CAT</h2>' +
+          '<div class="form-grid"><div><label class="lb2">Número da CAT</label><input class="inp" id="catNum"></div>' +
+          '<div><label class="lb2">Data de emissão</label><input class="inp" type="date" id="catData" value="' + hoje + '"></div>' +
+          '<div><label class="lb2">Foto ou print da CAT (opcional)</label><input class="inp" type="file" accept="image/*" id="catFoto"></div></div>' +
+          '<div class="row2" style="margin-top:14px"><button class="act" id="btnCat">Salvar</button><button class="act ghost" id="btnCatX">Cancelar</button></div></div>';
+        $('btnCatX').onclick = () => { $('areaEv').innerHTML = ''; };
+        $('btnCat').onclick = async () => {
+          const corpo = { acao: 'cat', id: b.dataset.evCat, numero: $('catNum').value.trim(), data: $('catData').value };
+          const f = $('catFoto').files && $('catFoto').files[0];
+          if (f) { try { corpo.anexo = await reduzirImagem(f); } catch (e) { toast(e.message, 'bad'); return; } }
+          acao(corpo, 'CAT registrada');
+        };
+      };
+    });
+  },
+
+  async verFotoEvento(id, qual) {
+    const w = window.open('', '_blank');
+    if (!w) { toast('Libere pop-ups para ver a foto', 'warn'); return; }
+    w.document.write('<p style="font-family:Arial;padding:20px">Carregando…</p>');
+    const r = await ApiRh.evento(this.token, { acao: 'anexo', id, qual });
+    if (!r.ok || !r.dados.anexo) { w.close(); toast(r.erro || 'Sem foto', 'warn'); return; }
+    w.document.open();
+    w.document.write('<title>Documento</title><body style="margin:0;background:#111;display:flex;justify-content:center"><img src="' + r.dados.anexo + '" style="max-width:100%;height:auto"></body>');
+    w.document.close();
+  },
+
+  formEvento(tipoInicial) {
+    const pessoas = (this.dados.pessoas || []).filter(p => p.ativo).slice().sort((a, b) => a.nome.localeCompare(b.nome));
+    const eqs = (this.dados.equipes || []).filter(e => e.ativo).slice().sort((a, b) => a.nome.localeCompare(b.nome));
+    $('areaEv').innerHTML =
+      '<div class="card"><h2>Novo registro</h2>' +
+        '<div class="form-grid">' +
+          '<div><label class="lb2">Tipo</label><select class="inp" id="evTipo">' + Object.keys(TIPOS_EVENTO).map(k =>
+            '<option value="' + k + '"' + (k === tipoInicial ? ' selected' : '') + '>' + esc(TIPOS_EVENTO[k].rotulo) + '</option>').join('') + '</select></div>' +
+          '<div><label class="lb2">Colaborador</label><select class="inp" id="evPessoa"><option value="">Escolha</option>' +
+            pessoas.map(p => '<option value="' + p.pessoa_id + '">' + esc(p.nome) + '</option>').join('') + '</select></div>' +
+          '<div><label class="lb2">Obra</label><select class="inp" id="evEquipe"><option value="">Sem obra</option>' +
+            eqs.map(e => '<option value="' + esc(e.equipe_id) + '">' + esc(e.nome) + '</option>').join('') + '</select></div>' +
+          '<div><label class="lb2">Data</label><input class="inp" type="date" id="evData" value="' + this.hojeServidor() + '"></div>' +
+          '<div class="so-acidente"><label class="lb2">Hora</label><input class="inp" type="time" id="evHora"></div>' +
+        '</div>' +
+        '<label class="lb2" style="margin-top:10px">O que aconteceu</label>' +
+        '<textarea class="inp" id="evDesc" rows="4" placeholder="Descreva o fato, o local e o que foi feito"></textarea>' +
+        '<div class="form-grid so-acidente" style="margin-top:10px">' + [1, 2].map(i =>
+          '<div><label class="lb2">Testemunha ' + i + ' (opcional)</label><input class="inp" id="evTest' + i + '" placeholder="Nome"></div>').join('') + '</div>' +
+        '<div class="so-acidente" style="display:flex;gap:18px;margin-top:10px;flex-wrap:wrap">' +
+          '<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="evAfast" style="width:18px;height:18px"> Houve afastamento</label>' +
+          '<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="evObito" style="width:18px;height:18px"> Óbito (comunicar a CAT imediatamente)</label></div>' +
+        '<label class="lb2" style="margin-top:10px">Foto (documento assinado, local, lesão)</label><input class="inp" type="file" accept="image/*" id="evFoto">' +
+        '<div class="row2" style="margin-top:14px"><button class="act" id="btnSalvarEv">Salvar</button><button class="act ghost" id="btnCancelarEv">Cancelar</button></div>' +
+      '</div>';
+    const acidente = () => $('evTipo').value === 'acidente';
+    const ajustar = () => $('areaEv').querySelectorAll('.so-acidente').forEach(x => { x.style.display = acidente() ? '' : 'none'; });
+    $('evTipo').onchange = ajustar; ajustar();
+    $('evPessoa').onchange = () => { const p = this.pessoaDe($('evPessoa').value); if (p && p.equipe_id && !$('evEquipe').value) $('evEquipe').value = p.equipe_id; };
+    $('btnCancelarEv').onclick = () => { $('areaEv').innerHTML = ''; };
+    $('btnSalvarEv').onclick = async () => {
+      const corpo = { acao: 'salvar', tipo: $('evTipo').value, colaborador_id: $('evPessoa').value, equipe_id: $('evEquipe').value || null,
+        data: $('evData').value, hora: acidente() ? $('evHora').value : null, descricao: $('evDesc').value.trim(),
+        dados: acidente() ? { testemunhas: [1, 2].map(i => ({ nome: $('evTest' + i).value })), afastamento: $('evAfast').checked, obito: $('evObito').checked } : {} };
+      if (!corpo.colaborador_id) { toast('Escolha o colaborador', 'warn'); return; }
+      if (!corpo.descricao) { toast('Descreva o que aconteceu', 'warn'); return; }
+      const f = $('evFoto').files && $('evFoto').files[0];
+      if (f) { try { corpo.anexo = await reduzirImagem(f); } catch (e) { toast(e.message, 'bad'); return; } }
+      const btn = $('btnSalvarEv'); btn.disabled = true;
+      const r = await ApiRh.evento(this.token, corpo);
+      btn.disabled = false;
+      if (!r.ok) { toast(r.erro || 'Falha ao salvar', 'bad'); return; }
+      toast(acidente() ? 'Acidente registrado: aguardando CAT' : 'Registrado e enviado ao app para ciência', 'ok');
+      $('areaEv').innerHTML = '';
+      await this.carregarEventos();
+    };
+    $('areaEv').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
+
   pintarAuditoria() {
     const cs = this.dados.correcoes || [];
     const rotAcao = c => rotuloAuditoria(c).txt;
@@ -3085,7 +3273,7 @@ export const Rh = {
 
   telaTrocarSenha() {
     $('rh-painel').classList.remove('hide');
-    ['alocacao', 'mapa', 'pendencias', 'pessoas', 'equipes', 'ocorrencias', 'registros', 'jornadas', 'relatorios', 'auditoria', 'config', 'stub']
+    ['alocacao', 'mapa', 'pendencias', 'pessoas', 'equipes', 'ocorrencias', 'eventos', 'registros', 'jornadas', 'relatorios', 'auditoria', 'config', 'stub']
       .forEach(a => { const el = $('rh-' + a); if (el) el.classList.add('hide'); });
     $('rhCrumb').textContent = 'Trocar senha';
     $('rhNome').textContent = this.dados.usuario.nome || 'RH';

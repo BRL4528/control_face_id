@@ -124,6 +124,7 @@ async function irParaPorta() {
   else statusPorta('Olá, ' + S.dispositivo.colaborador.nome.split(' ')[0] + '.');
   if (pareado && navigator.onLine) sincronizarFundo();
   avisarFolha();
+  avisarCiencia();
 }
 
 // Folha de ponto aguardando assinatura: botão na porta. Só com rede e cadastro confirmado.
@@ -141,10 +142,28 @@ async function avisarFolha() {
   btn.onclick = () => abrirAssinatura(f, r.termo);
 }
 
-async function abrirAssinatura(folha, termo) {
+// Advertência/notificação aguardando ciência: botão na porta.
+async function avisarCiencia() {
+  const btn = $('btnCiencia');
+  if (!btn) return;
+  btn.classList.add('hide');
+  if (!S.dispositivo || !S.dispositivo.colaborador || S.bloqueado || !navigator.onLine) return;
+  const r = await Api.evento(S.dispositivo.credencial, { acao: 'listar' });
+  const evs = (r.ok && r.eventos) || [];
+  if (!evs.length || $('porta').classList.contains('hide')) return;
+  btn.textContent = evs.length === 1 ? 'Você tem 1 documento para dar ciência' : 'Você tem ' + evs.length + ' documentos para dar ciência';
+  btn.classList.remove('hide');
+  btn.onclick = async () => {
+    const carga = await cargaParaRosto();
+    if (carga) await Ponto.darCiencia(S.dispositivo, carga, evs[0], r.termo, irParaPorta);
+  };
+}
+
+/** Template e deriva para a captura do rosto (assinatura e ciência), com o motor carregado. */
+async function cargaParaRosto() {
   if (!Face.pronto) {
     statusPorta('Carregando o reconhecimento facial…');
-    if (!(await esperarFace(25000))) { statusPorta('Não consegui carregar o reconhecimento. Tente de novo.', 'badfg'); return; }
+    if (!(await esperarFace(25000))) { statusPorta('Não consegui carregar o reconhecimento. Tente de novo.', 'badfg'); return null; }
     statusPorta('');
   }
   let template = null, deriva = 0;
@@ -153,8 +172,13 @@ async function abrirAssinatura(folha, termo) {
     const r = await Api.cargaDia(S.dispositivo.credencial);
     if (r.ok) { template = r.template; deriva = r.deriva; await Store.set('template', template); }
   }
-  if (!template) { toast('Seu cadastro facial ainda não foi feito. Procure o RH.', 'bad'); return; }
-  await Ponto.assinarFolha(S.dispositivo, { template, deriva }, folha, termo, irParaPorta);
+  if (!template) { toast('Seu cadastro facial ainda não foi feito. Procure o RH.', 'bad'); return null; }
+  return { template, deriva };
+}
+
+async function abrirAssinatura(folha, termo) {
+  const carga = await cargaParaRosto();
+  if (carga) await Ponto.assinarFolha(S.dispositivo, carga, folha, termo, irParaPorta);
 }
 
 async function sincronizarFundo() {

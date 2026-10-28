@@ -410,3 +410,29 @@ CREATE TABLE IF NOT EXISTS ocorrencia (
   decidida_em    timestamptz
 );
 CREATE INDEX IF NOT EXISTS ix_ocorrencia_colab ON ocorrencia (empresa_id, colaborador_id, inicio);
+
+-- ═══════════════════════════════════════════════════════ advertências, notificações e acidentes
+-- Advertência/notificação por obra: foto do documento e ciência do colaborador pelo
+-- rosto no app (ciencia = prova, como na assinatura da folha) ou recusa registrada
+-- pelo RH com duas testemunhas. Acidente de trabalho: o que houve, testemunhas e
+-- foto; fica 'aguardando_cat' até o RH anexar a CAT (prazo: 1º dia útil seguinte).
+-- Catálogo e prazo em js/eventos.js.
+CREATE TABLE IF NOT EXISTS evento (
+  id             text PRIMARY KEY,
+  empresa_id     text NOT NULL REFERENCES empresa(id) ON DELETE CASCADE,
+  colaborador_id text NOT NULL REFERENCES colaborador(id) ON DELETE CASCADE,
+  equipe_id      text REFERENCES equipe(id) ON DELETE SET NULL,   -- obra
+  tipo           text NOT NULL,                                   -- advertencia | notificacao | acidente
+  data           date NOT NULL,
+  hora           text,
+  descricao      text NOT NULL,
+  anexo          text,                                            -- foto do documento / do local (data URL)
+  dados          jsonb NOT NULL DEFAULT '{}'::jsonb,              -- testemunhas, afastamento, cat {numero, data}, recusa
+  cat_anexo      text,                                            -- documento da CAT (data URL)
+  estado         text NOT NULL,                                   -- ver ESTADOS_EVENTO
+  ciencia        jsonb,                                           -- prova da ciência pelo rosto
+  criado_em      timestamptz NOT NULL DEFAULT now(),
+  criado_por     text REFERENCES usuario_rh(id)
+);
+CREATE INDEX IF NOT EXISTS ix_evento_empresa ON evento (empresa_id, tipo, estado);
+CREATE INDEX IF NOT EXISTS ix_evento_colab ON evento (colaborador_id, estado);

@@ -116,7 +116,7 @@ export const Ponto = {
     this.estado = 'aguardando';
     this.piscada = null;
     this.earsAbertos = [];
-    if (this.aoProvar) { $('dica').textContent = 'Assinando a folha. Olhe para a câmera'; return; }
+    if (this.aoProvar) { $('dica').textContent = 'Confirmando que é você. Olhe para a câmera'; return; }
     const { slots, proximo } = pontosDoDia(this.doDia);
     const rot = proximo != null ? slots[proximo].rotulo : 'ponto';
     $('dica').textContent = 'Registrando ' + rot + '. Olhe para a câmera';
@@ -353,6 +353,47 @@ export const Ponto = {
     Face.parar();
     if (this.cam) { this.cam.getTracks().forEach(t => t.stop()); this.cam = null; }
     clearTimeout(this._t); clearTimeout(this._livenessTimer);
+  },
+
+  /* ------------------------------------------- ciência de advertência/notificação */
+
+  /** Mostra o documento e colhe a ciência pelo rosto. Ciência não é concordância. */
+  async darCiencia(dispositivo, carga, ev, termo, aoSair) {
+    this.dispositivo = dispositivo;
+    this.template = carga.template;
+    this.alocacao = null;
+    this.deriva = carga.deriva || 0;
+    this.aoSair = aoSair;
+    this.modoCadastro = false;
+    this.aoProvar = null;
+    mostrar('fila');
+    $('cartao').innerHTML = '';
+    $('quemFila') && ($('quemFila').textContent = dispositivo.colaborador.nome.split(' ')[0]);
+    $('btnFecharCamera').onclick = () => this.fecharCamera();
+    await this.recarregarDia();
+    this.fecharCamera();
+    const dm = s => s.slice(8, 10) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4);
+    const rot = ev.tipo === 'advertencia' ? 'Advertência' : 'Notificação';
+    $('painelDia').innerHTML =
+      '<div class="card diacard">' +
+        '<div class="dia-topo"><span class="lb">' + rot + ' de ' + dm(ev.data) + '</span></div>' +
+        (ev.obra ? '<p class="nota" style="text-align:left;margin:0 0 6px">Obra: ' + esc(ev.obra) + '</p>' : '') +
+        '<p style="text-align:left;white-space:pre-wrap;font-size:14px;line-height:1.5;margin:6px 0">' + esc(ev.descricao) + '</p>' +
+        (ev.anexo ? '<img src="' + ev.anexo + '" alt="Documento" style="width:100%;border-radius:10px;border:1px solid var(--linha);margin:6px 0">' : '') +
+        '<label class="folha-termo"><input type="checkbox" id="cienAceite"><span>' + esc(termo) + '</span></label>' +
+        '<button class="act big" id="btnCiente" disabled>Dar ciência com o rosto</button>' +
+      '</div>';
+    $('cienAceite').onchange = () => { $('btnCiente').disabled = !$('cienAceite').checked; };
+    $('btnCiente').onclick = () => {
+      this.aoProvar = async prova => {
+        $('painelDia').classList.remove('hide');
+        $('cartao').innerHTML = '<div class="cartao"><div class="tit">Enviando…</div></div>';
+        const r = await Api.evento(this.dispositivo.credencial, { acao: 'ciente', id: ev.id, prova });
+        if (!r.ok) { $('cartao').innerHTML = ''; toast(r.erro || 'Não consegui enviar. Tente com sinal.', 'bad'); this.aoProvar = null; return; }
+        this.fimFolha('Ciência registrada.', 'ok', r.em);
+      };
+      this.abrirCamera();
+    };
   },
 
   /* ------------------------------------------------ atestado pelo app */
