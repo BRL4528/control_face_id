@@ -91,6 +91,13 @@ export const Api = {
     return Object.assign({ ok: true }, r.json);
   },
 
+  /** EPI e ferramentas recebidos: listar e confirmar com o rosto (api/almox.js). */
+  async almox(credencial, corpo) {
+    const r = await req('/almox', corpo, { bearer: credencial });
+    if (!r.ok || !r.json || !r.json.ok) return { ok: false, status: r.status, codigo: codErro(r), erro: msgErro(r, 'falha') };
+    return Object.assign({ ok: true }, r.json);
+  },
+
   /** Folha de ponto do colaborador: listar, assinar ou contestar (api/folha.js). */
   async folha(credencial, corpo) {
     const r = await req('/folha', corpo, { bearer: credencial });
@@ -163,6 +170,7 @@ export const ApiRh = {
   folha(token, d) { return reqRh('/rh/folha', token, d); },
   ocorrencia(token, d) { return reqRh('/rh/ocorrencia', token, d); },
   evento(token, d) { return reqRh('/rh/evento', token, d); },
+  almox(token, d) { return reqRh('/rh/almox', token, d); },
   decidir(token, d) { return reqRh('/rh/decidir', token, d); },
   corrigirPonto(token, d) { return reqRh('/rh/corrigir-ponto', token, d); },
   lancarPonto(token, d) { return reqRh('/rh/lancar-ponto', token, d); },

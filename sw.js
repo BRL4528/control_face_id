@@ -1,6 +1,6 @@
 // Cache dos estáticos. As chamadas de API nunca passam por aqui: resposta de
 // marcação em cache seria mentira sobre o que o servidor recebeu.
-const CACHE = 'efrat-ponto-v28';
+const CACHE = 'efrat-ponto-v29';
 const ASSETS = [
   './',
   './index.html',
@@ -39,6 +39,7 @@ const ASSETS = [
   './js/folha.js',
   './js/ocorrencias.js',
   './js/eventos.js',
+  './js/almox.js',
   './icon-192.png',
   './icon-512.png',
   './models/tiny_face_detector_model-weights_manifest.json',

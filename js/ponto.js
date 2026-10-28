@@ -396,6 +396,48 @@ export const Ponto = {
     };
   },
 
+  /* ------------------------------------------- recebimento de EPI e ferramentas */
+
+  /** Lista o que foi entregue e colhe a confirmação pelo rosto (ficha de EPI da NR-6). */
+  async confirmarEntregas(dispositivo, carga, entregas, termo, aoSair) {
+    this.dispositivo = dispositivo;
+    this.template = carga.template;
+    this.alocacao = null;
+    this.deriva = carga.deriva || 0;
+    this.aoSair = aoSair;
+    this.modoCadastro = false;
+    this.aoProvar = null;
+    mostrar('fila');
+    $('cartao').innerHTML = '';
+    $('quemFila') && ($('quemFila').textContent = dispositivo.colaborador.nome.split(' ')[0]);
+    $('btnFecharCamera').onclick = () => this.fecharCamera();
+    await this.recarregarDia();
+    this.fecharCamera();
+    const dm = s => s ? s.slice(8, 10) + '/' + s.slice(5, 7) : '';
+    $('painelDia').innerHTML =
+      '<div class="card diacard">' +
+        '<div class="dia-topo"><span class="lb">Itens recebidos</span></div>' +
+        '<table class="folha-mini"><tbody>' + entregas.map(e =>
+          '<tr><td>' + esc(e.nome) + (e.ca ? '<br><span class="nota" style="margin:0">CA ' + esc(e.ca) + '</span>' : '') +
+            (e.devolver_ate ? '<br><span class="nota" style="margin:0">devolver até ' + dm(e.devolver_ate) + '</span>' : '') + '</td>' +
+          '<td>' + e.quantidade + ' un. · ' + dm(e.entregue_em) + '</td></tr>').join('') + '</tbody></table>' +
+        '<label class="folha-termo"><input type="checkbox" id="epiAceite"><span>' + esc(termo) + '</span></label>' +
+        '<button class="act big" id="btnEpiOk" disabled>Confirmar com o rosto</button>' +
+        '<p class="nota">Se algo não confere, não confirme e fale com o almoxarifado.</p>' +
+      '</div>';
+    $('epiAceite').onchange = () => { $('btnEpiOk').disabled = !$('epiAceite').checked; };
+    $('btnEpiOk').onclick = () => {
+      this.aoProvar = async prova => {
+        $('painelDia').classList.remove('hide');
+        $('cartao').innerHTML = '<div class="cartao"><div class="tit">Enviando…</div></div>';
+        const r = await Api.almox(this.dispositivo.credencial, { acao: 'confirmar', ids: entregas.map(e => e.id), prova });
+        if (!r.ok) { $('cartao').innerHTML = ''; toast(r.erro || 'Não consegui enviar. Tente com sinal.', 'bad'); this.aoProvar = null; return; }
+        this.fimFolha('Recebimento confirmado.', 'ok', r.em);
+      };
+      this.abrirCamera();
+    };
+  },
+
   /* ------------------------------------------------ atestado pelo app */
 
   /** Foto do atestado + data + dias. Vai para o RH aprovar; só então abona os dias. */

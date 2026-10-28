@@ -436,3 +436,41 @@ CREATE TABLE IF NOT EXISTS evento (
 );
 CREATE INDEX IF NOT EXISTS ix_evento_empresa ON evento (empresa_id, tipo, estado);
 CREATE INDEX IF NOT EXISTS ix_evento_colab ON evento (colaborador_id, estado);
+
+-- ═══════════════════════════════════════════════════════ EPI e ferramentas
+-- Catálogo (item) e entregas ao colaborador (entrega). EPI guarda o CA vigente na
+-- entrega e o colaborador confirma o recebimento com o rosto no app (ciencia),
+-- o que forma a ficha de EPI da NR-6. Ferramenta é cautela: data para devolver e
+-- devolução registrada pelo RH. Regras e alertas em js/almox.js.
+CREATE TABLE IF NOT EXISTS item (
+  id             text PRIMARY KEY,
+  empresa_id     text NOT NULL REFERENCES empresa(id) ON DELETE CASCADE,
+  tipo           text NOT NULL,              -- epi | ferramenta
+  nome           text NOT NULL,
+  ca             text,                       -- Certificado de Aprovação (EPI)
+  ca_validade    date,
+  vida_util_dias integer,                    -- troca periódica do EPI
+  codigo         text,                       -- patrimônio / número de série (ferramenta)
+  ativo          boolean NOT NULL DEFAULT true,
+  criado_em      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_item_empresa ON item (empresa_id, tipo);
+CREATE TABLE IF NOT EXISTS entrega (
+  id             text PRIMARY KEY,
+  empresa_id     text NOT NULL REFERENCES empresa(id) ON DELETE CASCADE,
+  item_id        text NOT NULL REFERENCES item(id),
+  colaborador_id text NOT NULL REFERENCES colaborador(id) ON DELETE CASCADE,
+  equipe_id      text REFERENCES equipe(id) ON DELETE SET NULL,
+  quantidade     integer NOT NULL DEFAULT 1,
+  entregue_em    date NOT NULL,
+  devolver_ate   date,
+  devolvido_em   date,
+  ca             text,                       -- CA do item no dia da entrega
+  observacao     text,
+  estado         text NOT NULL DEFAULT 'aguardando_ciencia',
+  ciencia        jsonb,
+  criado_em      timestamptz NOT NULL DEFAULT now(),
+  criado_por     text REFERENCES usuario_rh(id)
+);
+CREATE INDEX IF NOT EXISTS ix_entrega_colab ON entrega (colaborador_id, estado);
+CREATE INDEX IF NOT EXISTS ix_entrega_empresa ON entrega (empresa_id, estado);

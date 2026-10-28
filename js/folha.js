@@ -118,6 +118,37 @@ export function htmlFolhas(folhas, ctx) {
     '</body></html>';
 }
 
+/**
+ * Ficha de EPI (NR-6) de um colaborador: cada entrega com data, item, CA, quantidade
+ * e a confirmação pelo rosto no app (data e hora), mais devolução. Uma página A4.
+ * `ficha`: { nome, funcao, matricula, linhas: [{ entregue_em, item, tipo, ca, quantidade, confirmada_em, devolvido_em, obra }] }.
+ */
+export function htmlFichaEpi(fichas, ctx) {
+  const { empresa, timbrado, logo } = ctx;
+  const dm = s => s ? s.slice(8, 10) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4) : '';
+  const pag = f => '<section class="pagina">' +
+    (timbrado ? '<img class="fundo" src="' + timbrado + '" alt="">' : '') +
+    '<div class="conteudo" style="padding-bottom:' + (timbrado ? '40mm' : '14mm') + '">' +
+      '<div class="cab">' + (logo ? '<img src="' + logo + '" alt="">' : '') +
+        '<div class="emp">' + esc(empresa.razao || empresa.nome || '') + (empresa.cnpj ? ' &nbsp;' + esc(empresa.cnpj) : '') +
+          '<br>FICHA DE ENTREGA DE EPI E FERRAMENTAS</div></div>' +
+      '<div class="info"><b>COLABORADOR:</b><span>' + esc(f.nome) + (f.funcao ? ' (' + esc(f.funcao) + ')' : '') +
+        (f.matricula ? ' &nbsp;·&nbsp; MATRÍCULA ' + esc(f.matricula) : '') + '</span></div>' +
+      '<table><thead><tr><th>DATA</th><th>ITEM</th><th>CA</th><th>QTD</th><th>OBRA</th><th>CONFIRMAÇÃO NO APP</th><th>DEVOLUÇÃO</th></tr></thead><tbody>' +
+        (f.linhas.length ? f.linhas.map(l => '<tr><td>' + dm(l.entregue_em) + '</td><td class="obra">' + esc(l.item) + '</td><td>' + esc(l.ca || '') + '</td>' +
+          '<td>' + l.quantidade + '</td><td class="obra">' + esc(l.obra || '') + '</td>' +
+          '<td>' + (l.confirmada_em ? dm(l.confirmada_em.slice(0, 10)) + ' ' + hora(l.confirmada_em) + ' (rosto)' : 'pendente') + '</td>' +
+          '<td>' + dm(l.devolvido_em) + '</td></tr>').join('')
+          : '<tr><td colspan="7">Nenhuma entrega registrada.</td></tr>') +
+      '</tbody></table>' +
+      '<div class="nota">Confirmação eletrônica do recebimento por reconhecimento facial no aplicativo de ponto, conforme NR-6 ' +
+        '(registro do fornecimento em sistema eletrônico). O colaborador declarou ter recebido os itens em perfeito estado e sido orientado sobre o uso.</div>' +
+    '</div></section>';
+  return '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Ficha de EPI</title><style>' + CSS + '</style></head><body>' +
+    '<div class="barra"><span>' + fichas.length + ' ficha(s)</span><button onclick="print()">Imprimir / Salvar em PDF</button></div>' +
+    fichas.map(pag).join('') + '</body></html>';
+}
+
 /** Abre a janela do lote já no clique (pop-up aberto depois de um await é bloqueado). null se bloqueou. */
 export function janelaDasFolhas() {
   const w = window.open('', '_blank');
@@ -126,8 +157,8 @@ export function janelaDasFolhas() {
 }
 
 /** Escreve o lote na janela aberta por janelaDasFolhas. */
-export function escreverFolhas(w, folhas, ctx) {
+export function escreverFolhas(w, folhas, ctx, html) {
   w.document.open();
-  w.document.write(htmlFolhas(folhas, ctx));
+  w.document.write(html || htmlFolhas(folhas, ctx));
   w.document.close();
 }

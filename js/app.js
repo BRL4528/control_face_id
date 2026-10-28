@@ -125,6 +125,7 @@ async function irParaPorta() {
   if (pareado && navigator.onLine) sincronizarFundo();
   avisarFolha();
   avisarCiencia();
+  avisarEpi();
 }
 
 // Folha de ponto aguardando assinatura: botão na porta. Só com rede e cadastro confirmado.
@@ -156,6 +157,23 @@ async function avisarCiencia() {
   btn.onclick = async () => {
     const carga = await cargaParaRosto();
     if (carga) await Ponto.darCiencia(S.dispositivo, carga, evs[0], r.termo, irParaPorta);
+  };
+}
+
+// EPI e ferramentas entregues aguardando confirmação: botão na porta.
+async function avisarEpi() {
+  const btn = $('btnEpi');
+  if (!btn) return;
+  btn.classList.add('hide');
+  if (!S.dispositivo || !S.dispositivo.colaborador || S.bloqueado || !navigator.onLine) return;
+  const r = await Api.almox(S.dispositivo.credencial, { acao: 'listar' });
+  const ents = (r.ok && r.entregas) || [];
+  if (!ents.length || $('porta').classList.contains('hide')) return;
+  btn.textContent = 'Confirmar recebimento de ' + (ents.length === 1 ? '1 item (EPI/ferramenta)' : ents.length + ' itens (EPI/ferramenta)');
+  btn.classList.remove('hide');
+  btn.onclick = async () => {
+    const carga = await cargaParaRosto();
+    if (carga) await Ponto.confirmarEntregas(S.dispositivo, carga, ents, r.termo, irParaPorta);
   };
 }
 

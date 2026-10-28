@@ -16,15 +16,16 @@ import {
   tiposPelaOrdem, classificarPendente, diasDeFeriado, feriadosNacionais, horarioDoDia, folhaDoMes
 } from './regras.js';
 import { $, esc, mostrar, toast, hora, data, definirFuso, reduzirImagem } from './ui.js';
-import { janelaDasFolhas, escreverFolhas } from './folha.js';
+import { janelaDasFolhas, escreverFolhas, htmlFichaEpi } from './folha.js';
 import { TIPOS_OCORRENCIA, ocorrenciaDoDia } from './ocorrencias.js';
 import { TIPOS_EVENTO, ESTADOS_EVENTO, situacaoCat } from './eventos.js';
+import { TIPOS_ITEM, ESTADOS_ENTREGA, alertasDaEntrega } from './almox.js';
 
 // Rótulo da aba na trilha do topo (breadcrumb) e no título de página.
 const TITULOS = {
   painel: 'Central operacional', alocacao: 'Ajustes do dia', planos: 'Escala', mapa: 'Mapa',
   pendencias: 'Pendências', registros: 'Espelho de ponto', jornadas: 'Jornadas',
-  pessoas: 'Colaboradores', equipes: 'Equipes', ocorrencias: 'Ocorrências', eventos: 'Advertências e acidentes',
+  pessoas: 'Colaboradores', equipes: 'Equipes', ocorrencias: 'Ocorrências', eventos: 'Advertências e acidentes', almox: 'EPI e ferramentas',
   relatorios: 'Relatórios', auditoria: 'Auditoria', config: 'Configurações'
 };
 // Item fixo da lista de Equipes: quem está fora de qualquer equipe.
@@ -33,7 +34,7 @@ const DIAS_SEMANA = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta'
 const DIA_DA_SEMANA_REF = ['2026-10-04', '2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09', '2026-10-10'];
 const SEM_EQUIPE = '__sem_equipe__';
 
-const ABAS = ['painel', 'alocacao', 'planos', 'mapa', 'pendencias', 'pessoas', 'equipes', 'ocorrencias', 'eventos',
+const ABAS = ['painel', 'alocacao', 'planos', 'mapa', 'pendencias', 'pessoas', 'equipes', 'ocorrencias', 'eventos', 'almox',
   'registros', 'jornadas', 'relatorios', 'auditoria', 'config', 'stub'];
 
 export const Rh = {
@@ -70,7 +71,7 @@ export const Rh = {
     const d = await ApiRh.dados(this.token, this.dias);
     if (!d.ok) return { ok: false, erro: d.erro || 'falha ao carregar' };
     this.dados = d.dados;
-    this.eventos = undefined;
+    this.eventos = undefined; this.almox = undefined;
     this.aplicarConfig();
     await this.guardarSessao();
     return { ok: true };
@@ -120,7 +121,7 @@ export const Rh = {
     this.usuarioLogin = ses.usuario || null;
     this.precisaTrocarSenha = !!ses.trocar_senha;
     this.dados = d.dados;
-    this.eventos = undefined;
+    this.eventos = undefined; this.almox = undefined;
     this.aplicarConfig();
     return true;
   },
@@ -241,6 +242,7 @@ export const Rh = {
     if (this.aba === 'equipes') this.pintarEquipes();
     if (this.aba === 'ocorrencias') this.pintarOcorrencias();
     if (this.aba === 'eventos') this.pintarEventos();
+    if (this.aba === 'almox') this.pintarAlmox();
     if (this.aba === 'registros') this.pintarRegistros();
     if (this.aba === 'jornadas') this.pintarJornadas();
     if (this.aba === 'relatorios') this.pintarRelatorios();
@@ -2930,6 +2932,168 @@ export const Rh = {
     $('areaEv').scrollIntoView({ behavior: 'smooth', block: 'start' });
   },
 
+/* ------------------------------------------------------- EPI e ferramentas */
+
+  async carregarAlmox() {
+    const r = await ApiRh.almox(this.token, { acao: 'listar' });
+    this.almoxErro = r.ok ? null : (r.codigo === 'MIGRACAO_PENDENTE' ? 'Esta função precisa da migração do banco (tabelas item e entrega). Rode a migração e atualize.' : (r.erro || 'Falha ao carregar'));
+    this.almox = r.ok ? r.dados : { itens: [], entregas: [] };
+    if (this.aba === 'almox') this.pintarAlmox();
+  },
+
+  pintarAlmox() {
+    const el = $('rh-almox');
+    if (this.almox == null) { el.innerHTML = '<p class="nota">Carregando…</p>'; if (this.almox === undefined) { this.almox = null; this.carregarAlmox(); } return; }
+    const hoje = this.hojeServidor(), aba = this.alAba || 'entregas';
+    const { itens, entregas } = this.almox;
+    const itemDe = id => itens.find(i => i.id === id) || null;
+    const dm = s => s ? s.slice(8, 10) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4) : '';
+    const ROT_AL = { ca_vencido: ['CA vencido na entrega', 'bad'], trocar: ['Trocar EPI', 'bad'], trocar_em_breve: ['Trocar em breve', 'mut'], atrasada: ['Devolução atrasada', 'bad'] };
+    const inativo = id => { const p = this.pessoaDe(id); return p && !p.ativo; };
+    const comAlerta = entregas.map(e => {
+      const a = alertasDaEntrega(e, itemDe(e.item_id), hoje).alertas.slice();
+      if (inativo(e.colaborador_id) && e.estado !== 'devolvida' && (itemDe(e.item_id) || {}).tipo === 'ferramenta') a.push('desligado');
+      return Object.assign({}, e, { alertas: a });
+    });
+    ROT_AL.desligado = ['Desligado com ferramenta', 'bad'];
+    const busca = (this.alBusca || '').trim().toLowerCase(), so = this.alSoAlertas;
+    const lista = comAlerta.filter(e => (!busca || this.nomeDe(e.colaborador_id).toLowerCase().includes(busca) || ((itemDe(e.item_id) || {}).nome || '').toLowerCase().includes(busca)) && (!so || e.alertas.length));
+    const nAlertas = comAlerta.filter(e => e.alertas.length).length;
+    const pill = (t, c) => '<span class="pill ' + c + '"><span class="dot"></span>' + esc(t) + '</span>';
+    const tabs = '<div class="segtabs" style="width:auto;margin-bottom:12px">' +
+      [['entregas', 'Entregas'], ['itens', 'Itens'], ['ficha', 'Ficha de EPI']].map(([k, t]) => '<button data-al-aba="' + k + '"' + (k === aba ? ' class="on"' : '') + '>' + t + '</button>').join('') + '</div>';
+
+    let corpo = '';
+    if (aba === 'entregas') {
+      corpo = (nAlertas ? '<div class="cartao warn" style="margin-bottom:12px"><b>' + nAlertas + ' entrega(s) com alerta</b> (troca de EPI, CA vencido, ferramenta atrasada ou com desligado).</div>' : '') +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:center">' +
+          '<input class="inp" id="alBusca" placeholder="Buscar colaborador ou item" value="' + esc(this.alBusca || '') + '" style="max-width:280px;margin:0">' +
+          '<label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="alSo"' + (so ? ' checked' : '') + '> Só com alerta</label>' +
+          '<button class="v2btn" id="btnNovaEntrega" style="margin-left:auto">+ Registrar entrega</button></div>' +
+        '<div id="areaAl"></div>' +
+        '<div class="tbl-wrap"><table class="adtable"><thead><tr><th>Colaborador</th><th>Item</th><th>Entrega</th><th>Situação</th><th>Alertas</th><th></th></tr></thead><tbody>' +
+          (lista.length ? lista.map(e => {
+            const it = itemDe(e.item_id) || { nome: '?', tipo: '' };
+            return '<tr><td><b>' + esc(this.nomeDe(e.colaborador_id)) + '</b>' + (e.equipe_id ? '<div class="mt">' + esc(this.nomeEquipe(e.equipe_id)) + '</div>' : '') + '</td>' +
+              '<td>' + esc(it.nome) + ' <span class="mt">(' + esc((TIPOS_ITEM[it.tipo] || {}).rotulo || '') + (e.ca ? ', CA ' + esc(e.ca) : '') + ')</span><div class="mt">' + e.quantidade + ' un.</div></td>' +
+              '<td class="mono">' + dm(e.entregue_em) + (e.devolver_ate ? '<div class="mt">devolver até ' + dm(e.devolver_ate) + '</div>' : '') + '</td>' +
+              '<td>' + pill(e.estado === 'devolvida' ? 'Devolvida em ' + dm(e.devolvido_em) : e.estado === 'confirmada' ? 'Confirmada no app' : ESTADOS_ENTREGA[e.estado] || e.estado,
+                    e.estado === 'aguardando_ciencia' ? 'mut' : 'ok') + '</td>' +
+              '<td>' + e.alertas.map(a => pill(ROT_AL[a][0], ROT_AL[a][1])).join(' ') + '</td>' +
+              '<td style="text-align:right;white-space:nowrap">' +
+                (it.tipo === 'ferramenta' && e.estado !== 'devolvida' ? '<button class="v2btn ghost mini" data-al-dev="' + esc(e.id) + '">Devolvida</button> ' : '') +
+                '<button class="v2btn ghost mini" data-al-cancel="' + esc(e.id) + '">Cancelar</button></td></tr>';
+          }).join('') : '<tr><td colspan="6" style="padding:30px;text-align:center;color:#64748b">Nenhuma entrega.</td></tr>') +
+        '</tbody></table></div>';
+    } else if (aba === 'itens') {
+      corpo = '<div style="display:flex;margin-bottom:10px"><button class="v2btn" id="btnNovoItem" style="margin-left:auto">+ Novo item</button></div><div id="areaAl"></div>' +
+        '<div class="tbl-wrap"><table class="adtable"><thead><tr><th>Item</th><th>Tipo</th><th>CA</th><th>Validade do CA</th><th>Troca a cada</th><th>Código</th><th></th></tr></thead><tbody>' +
+          (itens.length ? itens.map(i => '<tr' + (i.ativo ? '' : ' style="opacity:.55"') + '><td><b>' + esc(i.nome) + '</b></td><td>' + esc(TIPOS_ITEM[i.tipo].rotulo) + '</td>' +
+            '<td>' + esc(i.ca || '') + '</td><td>' + (i.ca_validade ? (i.ca_validade < hoje ? pill('Vencido ' + dm(i.ca_validade), 'bad') : dm(i.ca_validade)) : '') + '</td>' +
+            '<td>' + (i.vida_util_dias ? i.vida_util_dias + ' dias' : '') + '</td><td>' + esc(i.codigo || '') + '</td>' +
+            '<td style="text-align:right"><button class="v2btn ghost mini" data-al-item="' + esc(i.id) + '">Editar</button></td></tr>').join('')
+            : '<tr><td colspan="7" style="padding:30px;text-align:center;color:#64748b">Cadastre os EPIs (com CA) e as ferramentas.</td></tr>') +
+        '</tbody></table></div>';
+    } else {
+      corpo = '<div class="v2card" style="padding:15px"><p class="cap" style="margin:0 0 10px">Ficha de entrega de EPI e ferramentas por colaborador, com a confirmação pelo rosto no app (NR-6). Usa o timbrado de Configurações → Folha de ponto.</p>' +
+        '<div class="form-grid"><div><label class="lb2">Colaborador</label><select class="inp" id="fiPessoa"><option value="">Todos com entrega</option>' +
+          (this.dados.pessoas || []).filter(p => entregas.some(e => e.colaborador_id === p.pessoa_id)).sort((a, b) => a.nome.localeCompare(b.nome))
+            .map(p => '<option value="' + p.pessoa_id + '">' + esc(p.nome) + '</option>').join('') + '</select></div>' +
+          '<div style="display:flex;align-items:flex-end"><button class="v2btn" id="btnFicha">Gerar ficha</button></div></div></div>';
+    }
+
+    el.innerHTML = '<div class="pg-head"><div><h1 class="tit">EPI e ferramentas</h1>' +
+        '<p class="sub">Entrega de EPI com CA e de ferramentas (cautela). O colaborador confirma o recebimento com o rosto no app. Alertas de troca, CA vencido e devolução.</p></div></div>' +
+      (this.almoxErro ? '<div class="cartao warn" style="margin-bottom:12px">' + esc(this.almoxErro) + '</div>' : '') + tabs + corpo;
+
+    el.querySelectorAll('[data-al-aba]').forEach(b => { b.onclick = () => { this.alAba = b.dataset.alAba; this.pintarAlmox(); }; });
+    const acao = async (c, msg) => { const r = await ApiRh.almox(this.token, c); if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; } toast(msg, 'ok'); await this.carregarAlmox(); };
+    if (aba === 'entregas') {
+      $('alBusca').oninput = () => { this.alBusca = $('alBusca').value; this.pintarAlmox(); $('alBusca').focus(); };
+      $('alSo').onchange = () => { this.alSoAlertas = $('alSo').checked; this.pintarAlmox(); };
+      $('btnNovaEntrega').onclick = () => this.formEntrega();
+      el.querySelectorAll('[data-al-dev]').forEach(b => { b.onclick = () => acao({ acao: 'devolver', id: b.dataset.alDev, devolvido_em: hoje }, 'Devolução registrada'); });
+      el.querySelectorAll('[data-al-cancel]').forEach(b => { b.onclick = () => { if (confirm('Cancelar esta entrega?')) acao({ acao: 'cancelar', id: b.dataset.alCancel }, 'Entrega cancelada'); }; });
+    } else if (aba === 'itens') {
+      $('btnNovoItem').onclick = () => this.formItem(null);
+      el.querySelectorAll('[data-al-item]').forEach(b => { b.onclick = () => this.formItem(itens.find(i => i.id === b.dataset.alItem)); });
+    } else {
+      $('btnFicha').onclick = () => this.gerarFichaEpi($('fiPessoa').value);
+    }
+  },
+
+  formItem(i) {
+    i = i || { tipo: 'epi', ativo: true };
+    $('areaAl').innerHTML = '<div class="card"><h2>' + (i.id ? 'Editar item' : 'Novo item') + '</h2><div class="form-grid">' +
+      '<div><label class="lb2">Tipo</label><select class="inp" id="itTipo">' + Object.keys(TIPOS_ITEM).map(k => '<option value="' + k + '"' + (k === i.tipo ? ' selected' : '') + '>' + TIPOS_ITEM[k].rotulo + '</option>').join('') + '</select></div>' +
+      '<div><label class="lb2">Nome</label><input class="inp" id="itNome" value="' + esc(i.nome || '') + '" placeholder="Ex.: Luva de vaqueta, Furadeira Bosch"></div>' +
+      '<div class="so-epi"><label class="lb2">CA</label><input class="inp" id="itCa" value="' + esc(i.ca || '') + '"></div>' +
+      '<div class="so-epi"><label class="lb2">Validade do CA</label><input class="inp" type="date" id="itCaVal" value="' + esc(i.ca_validade || '') + '"></div>' +
+      '<div class="so-epi"><label class="lb2">Trocar a cada (dias)</label><input class="inp" type="number" min="0" id="itVida" value="' + (i.vida_util_dias || '') + '"></div>' +
+      '<div class="so-fer"><label class="lb2">Código / patrimônio</label><input class="inp" id="itCod" value="' + esc(i.codigo || '') + '"></div>' +
+      '</div>' + (i.id ? '<label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="itAtivo"' + (i.ativo ? ' checked' : '') + '> Ativo</label>' : '') +
+      '<div class="row2" style="margin-top:14px"><button class="act" id="btnItOk">Salvar</button><button class="act ghost" id="btnItX">Cancelar</button></div></div>';
+    const aj = () => { const epi = $('itTipo').value === 'epi'; $('areaAl').querySelectorAll('.so-epi').forEach(x => { x.style.display = epi ? '' : 'none'; }); $('areaAl').querySelectorAll('.so-fer').forEach(x => { x.style.display = epi ? 'none' : ''; }); };
+    $('itTipo').onchange = aj; aj();
+    $('btnItX').onclick = () => { $('areaAl').innerHTML = ''; };
+    $('btnItOk').onclick = async () => {
+      const r = await ApiRh.almox(this.token, { acao: 'salvar_item', id: i.id, tipo: $('itTipo').value, nome: $('itNome').value, ca: $('itCa').value,
+        ca_validade: $('itCaVal').value || null, vida_util_dias: Number($('itVida').value) || null, codigo: $('itCod').value, ativo: $('itAtivo') ? $('itAtivo').checked : true });
+      if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+      toast('Item salvo', 'ok'); await this.carregarAlmox();
+    };
+  },
+
+  formEntrega() {
+    const itens = this.almox.itens.filter(i => i.ativo);
+    if (!itens.length) { toast('Cadastre os itens primeiro (aba Itens)', 'warn'); this.alAba = 'itens'; this.pintarAlmox(); return; }
+    const pessoas = (this.dados.pessoas || []).filter(p => p.ativo).sort((a, b) => a.nome.localeCompare(b.nome));
+    const eqs = (this.dados.equipes || []).filter(e => e.ativo && !e.afastamento).sort((a, b) => a.nome.localeCompare(b.nome));
+    $('areaAl').innerHTML = '<div class="card"><h2>Registrar entrega</h2><div class="form-grid">' +
+      '<div><label class="lb2">Item</label><select class="inp" id="enItem">' + itens.map(i => '<option value="' + i.id + '">' + esc(i.nome) + ' (' + TIPOS_ITEM[i.tipo].rotulo + ')</option>').join('') + '</select></div>' +
+      '<div><label class="lb2">Quantidade (por pessoa)</label><input class="inp" type="number" min="1" id="enQtd" value="1"></div>' +
+      '<div><label class="lb2">Data da entrega</label><input class="inp" type="date" id="enData" value="' + this.hojeServidor() + '"></div>' +
+      '<div id="enDevWrap"><label class="lb2">Devolver até (ferramenta)</label><input class="inp" type="date" id="enDev"></div>' +
+      '<div><label class="lb2">Obra</label><select class="inp" id="enObra"><option value="">Sem obra</option>' + eqs.map(e => '<option value="' + esc(e.equipe_id) + '">' + esc(e.nome) + '</option>').join('') + '</select></div>' +
+      '</div>' +
+      '<label class="lb2" style="margin-top:10px">Colaboradores <button class="v2btn ghost mini" id="enTodosObra" type="button">marcar todos da obra</button></label>' +
+      '<div id="enPessoas" style="max-height:220px;overflow:auto;border:1px solid var(--v2-linha);border-radius:8px;padding:8px;columns:2">' +
+        pessoas.map(p => '<label style="display:flex;gap:6px;align-items:center;font-size:13px;break-inside:avoid"><input type="checkbox" value="' + p.pessoa_id + '" data-eq="' + esc(p.equipe_id || '') + '"> ' + esc(p.nome) + '</label>').join('') + '</div>' +
+      '<label class="lb2" style="margin-top:10px">Observação</label><input class="inp" id="enObs">' +
+      '<div class="row2" style="margin-top:14px"><button class="act" id="btnEnOk">Registrar e enviar ao app</button><button class="act ghost" id="btnEnX">Cancelar</button></div></div>';
+    const aj = () => { const it = itens.find(i => i.id === $('enItem').value); $('enDevWrap').style.display = it && it.tipo === 'ferramenta' ? '' : 'none'; };
+    $('enItem').onchange = aj; aj();
+    $('enTodosObra').onclick = () => { const o = $('enObra').value; if (!o) { toast('Escolha a obra', 'warn'); return; } $('enPessoas').querySelectorAll('input').forEach(c => { if (c.dataset.eq === o) c.checked = true; }); };
+    $('btnEnX').onclick = () => { $('areaAl').innerHTML = ''; };
+    $('btnEnOk').onclick = async () => {
+      const colaboradores = [...$('enPessoas').querySelectorAll('input:checked')].map(c => c.value);
+      if (!colaboradores.length) { toast('Escolha os colaboradores', 'warn'); return; }
+      const r = await ApiRh.almox(this.token, { acao: 'entregar', item_id: $('enItem').value, colaboradores, quantidade: Number($('enQtd').value) || 1,
+        entregue_em: $('enData').value, devolver_ate: $('enDev').value || null, equipe_id: $('enObra').value || null, observacao: $('enObs').value });
+      if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
+      toast(r.dados.entregas + ' entrega(s) registrada(s); confirmação pelo app', 'ok'); await this.carregarAlmox();
+    };
+    $('areaAl').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
+
+  gerarFichaEpi(pessoaId) {
+    const { itens, entregas } = this.almox, cfg = window.EFRAT_CFG || {};
+    const ids = pessoaId ? [pessoaId] : [...new Set(entregas.map(e => e.colaborador_id))];
+    const fichas = ids.map(id => {
+      const p = this.pessoaDe(id) || { nome: id };
+      const linhas = entregas.filter(e => e.colaborador_id === id).sort((a, b) => a.entregue_em.localeCompare(b.entregue_em)).map(e => {
+        const it = itens.find(i => i.id === e.item_id) || {};
+        return { entregue_em: e.entregue_em, item: it.nome || '?', ca: e.ca, quantidade: e.quantidade, obra: e.equipe_id ? this.nomeEquipe(e.equipe_id) : '',
+                 confirmada_em: e.ciencia && e.ciencia.em, devolvido_em: e.devolvido_em };
+      });
+      return { nome: p.nome, matricula: p.matricula, funcao: p.papel && p.papel !== 'colaborador' ? this.nomePapel(p.papel) : '', linhas };
+    }).sort((a, b) => a.nome.localeCompare(b.nome));
+    if (!fichas.length) { toast('Nenhuma entrega registrada', 'warn'); return; }
+    const w = janelaDasFolhas();
+    if (!w) { toast('Libere pop-ups para gerar a ficha', 'warn'); return; }
+    escreverFolhas(w, null, null, htmlFichaEpi(fichas, { empresa: { nome: (this.dados.empresa || {}).nome, razao: cfg.razaoSocial, cnpj: cfg.cnpj }, timbrado: cfg.timbrado, logo: cfg.logo }));
+  },
+
   pintarAuditoria() {
     const cs = this.dados.correcoes || [];
     const rotAcao = c => rotuloAuditoria(c).txt;
@@ -3273,7 +3437,7 @@ export const Rh = {
 
   telaTrocarSenha() {
     $('rh-painel').classList.remove('hide');
-    ['alocacao', 'mapa', 'pendencias', 'pessoas', 'equipes', 'ocorrencias', 'eventos', 'registros', 'jornadas', 'relatorios', 'auditoria', 'config', 'stub']
+    ['alocacao', 'mapa', 'pendencias', 'pessoas', 'equipes', 'ocorrencias', 'eventos', 'almox', 'registros', 'jornadas', 'relatorios', 'auditoria', 'config', 'stub']
       .forEach(a => { const el = $('rh-' + a); if (el) el.classList.add('hide'); });
     $('rhCrumb').textContent = 'Trocar senha';
     $('rhNome').textContent = this.dados.usuario.nome || 'RH';
