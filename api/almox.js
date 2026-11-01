@@ -8,6 +8,7 @@ import { db } from './_lib/db.js';
 import { autenticarDispositivo } from './_lib/auth.js';
 import { comTabelaNova } from './_lib/tabela-nova.js';
 import { cors, ok, erro, corpo, exigeMetodo } from './_lib/http.js';
+import { conferirProva, limiarDaEmpresa } from './_lib/prova-facial.js';
 
 const num = v => (v == null || v === '' || !Number.isFinite(Number(v))) ? null : Number(v);
 const TERMO = 'Declaro que recebi os itens acima em perfeito estado, fui orientado sobre o uso e me comprometo a usá-los e conservá-los.';
@@ -35,12 +36,14 @@ export default async function handler(req, res) {
     if (b.acao !== 'confirmar') return erro(res, 400, 'CORPO_INVALIDO', 'acao inválida');
     const ids = (Array.isArray(b.ids) ? b.ids : []).map(String).slice(0, 100);
     if (!ids.length) return erro(res, 400, 'CORPO_INVALIDO', 'nada para confirmar');
+    // Exige o 1:1 dentro do limiar e a foto da captura; a prova de vida só fica registrada.
     const p = b.prova || {};
-    const foto = typeof p.foto === 'string' && /^data:image\/(jpeg|png|webp);base64,/.test(p.foto) && p.foto.length <= 300000 ? p.foto : null;
+    const prova = conferirProva(p, await limiarDaEmpresa(sql, vinc.empresa_id));
+    if (!prova.ok) return erro(res, prova.status, prova.codigo, prova.mensagem);
     const ciencia = {
       em: new Date().toISOString(), termo: TERMO, dispositivo_id: vinc.dispositivo_id,
-      ua: String(req.headers['user-agent'] || '').slice(0, 300), score: num(p.score), liveness_ok: p.liveness_ok === true,
-      lat: num(p.lat), lng: num(p.lng), precisao_m: num(p.precisao_m), foto
+      ua: String(req.headers['user-agent'] || '').slice(0, 300), score: prova.score, liveness_ok: prova.liveness_ok,
+      lat: num(p.lat), lng: num(p.lng), precisao_m: num(p.precisao_m), foto: prova.foto
     };
     const r = await sql`UPDATE entrega SET estado='confirmada', ciencia=${JSON.stringify(ciencia)}::jsonb
                         WHERE id = ANY(${ids}) AND colaborador_id=${vinc.colaborador_id} AND empresa_id=${vinc.empresa_id}

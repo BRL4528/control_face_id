@@ -43,11 +43,12 @@ export const Api = {
     return { ok: true, empresa: r.json.empresa };
   },
 
-  /** Pareamento do celular: com matrícula (vira ativo) ou anônimo (nasce pendente). */
+  /** Pareamento do celular: anônimo ou com matrícula, os dois nascem pendentes até o RH confirmar. */
   async parear(dados) {
     const r = await req('/parear', dados);
     if (!r.ok || !r.json || !r.json.ok) return { ok: false, status: r.status, codigo: codErro(r), erro: msgErro(r, 'falha ao parear') };
-    return { ok: true, estado: r.json.estado || 'ativo', colaborador: r.json.colaborador || null, empresa: r.json.empresa || null };
+    return { ok: true, estado: r.json.estado || 'ativo', colaborador: r.json.colaborador || null, empresa: r.json.empresa || null,
+             matricula_informada: r.json.matricula_informada || null };
   },
 
   /** Aparelho pendente informa a matrícula (opcional) para o RH aprovar em um clique. */
@@ -72,6 +73,7 @@ export const Api = {
       alocacao: c.alocacao,       // { equipe_id, equipe_nome, cerca } ou null
       afastado: c.afastado === true,   // equipe de afastamento ou férias/licença: não bate ponto
       afastado_msg: c.afastado_msg || null,
+      marcacoes_hoje: Array.isArray(c.marcacoes_hoje) ? c.marcacoes_hoje : [],   // batidas do dia já no servidor (outro celular)
       deriva: calcularDeriva(t0, t1, c.servidor_hora),
       fuso: c.fuso || null
     };

@@ -6,12 +6,14 @@
 //   { acao: 'contestar', id, hash, motivo }     → não concorda; vai para o RH
 //
 // prova: { score, liveness_ok, lat, lng, precisao_m, foto, deriva_ms } da mesma
-// captura 1:1 + prova de vida da batida. Rosto que não confere é barrado no app;
-// aqui guardamos a evidência e o termo aceito.
+// captura 1:1 + prova de vida da batida. O servidor exige o 1:1 (score dentro do
+// limiar da empresa) e a foto da captura (api/_lib/prova-facial.js); a prova de
+// vida fica registrada como evidência, junto com o termo aceito.
 import { db } from './_lib/db.js';
 import { autenticarDispositivo } from './_lib/auth.js';
 import { TERMO_ASSINATURA } from './_lib/folha.js';
 import { cors, ok, erro, corpo, exigeMetodo } from './_lib/http.js';
+import { conferirProva, limiarDaEmpresa } from './_lib/prova-facial.js';
 
 const num = v => (v == null || v === '' || !Number.isFinite(Number(v))) ? null : Number(v);
 
@@ -51,13 +53,15 @@ export default async function handler(req, res) {
     return ok(res, { id: f.id, estado: 'contestada' });
   }
 
+  // Sem 1:1 dentro do limiar e sem a foto da captura, não há assinatura.
   const p = b.prova || {};
-  const foto = typeof p.foto === 'string' && /^data:image\/(jpeg|png|webp);base64,/.test(p.foto) && p.foto.length <= 300000 ? p.foto : null;
+  const prova = conferirProva(p, await limiarDaEmpresa(sql, vinc.empresa_id));
+  if (!prova.ok) return erro(res, prova.status, prova.codigo, prova.mensagem);
   const assinatura = {
     em: new Date().toISOString(), hash: f.hash, termo: TERMO_ASSINATURA,
     dispositivo_id: vinc.dispositivo_id, ua: String(req.headers['user-agent'] || '').slice(0, 300),
-    score: num(p.score), liveness_ok: p.liveness_ok === true, deriva_ms: num(p.deriva_ms),
-    lat: num(p.lat), lng: num(p.lng), precisao_m: num(p.precisao_m), foto
+    score: prova.score, liveness_ok: prova.liveness_ok, deriva_ms: num(p.deriva_ms),
+    lat: num(p.lat), lng: num(p.lng), precisao_m: num(p.precisao_m), foto: prova.foto
   };
   await sql`UPDATE folha_assinatura SET estado='assinada', assinatura=${JSON.stringify(assinatura)}::jsonb,
             respondida_em=now(), contestacao=NULL WHERE id=${f.id} AND estado <> 'assinada'`;
