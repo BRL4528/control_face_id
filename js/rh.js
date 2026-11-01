@@ -3477,23 +3477,37 @@ export const Rh = {
   },
 
   formNovoUsuario() {
+    // O perfil é escolhido já na criação (padrão RH): sem ele o usuário nascia administrador.
+    const eqs = (this.dados.equipes || []).filter(e => e.ativo).slice().sort((a, b) => a.nome.localeCompare(b.nome));
     $('areaNovoUsuario').innerHTML =
       '<div class="card"><h2>Novo usuário RH</h2>' +
         '<div class="form-grid">' +
           '<div><label class="lb2">Nome</label><input class="inp" id="nuNome"></div>' +
           '<div><label class="lb2">Usuário (login)</label><input class="inp" id="nuUsuario" autocapitalize="off" placeholder="ex.: maria.rh"></div>' +
+          '<div><label class="lb2">Perfil</label><select class="inp" id="nuPerfil">' +
+            Object.keys(PERFIS).map(k => '<option value="' + k + '"' + (k === 'rh' ? ' selected' : '') + '>' + esc(PERFIS[k].rotulo) + '</option>').join('') + '</select></div>' +
         '</div>' +
+        '<div id="nuObrasWrap" style="margin-top:10px"><label class="lb2">Obras que este gestor vê</label>' +
+          '<div style="max-height:200px;overflow:auto;border:1px solid var(--v2-linha);border-radius:8px;padding:8px;columns:2">' +
+            (eqs.length ? eqs.map(e => '<label style="display:flex;gap:6px;align-items:center;font-size:13px;break-inside:avoid"><input type="checkbox" value="' + esc(e.equipe_id) + '"> ' + esc(e.nome) + '</label>').join('')
+              : '<p class="nota" style="margin:0">Nenhuma obra ativa.</p>') +
+          '</div></div>' +
         '<div class="row2" style="margin-top:14px">' +
           '<button class="act" id="btnCriarUsuario">Criar</button>' +
           '<button class="act ghost" id="btnCancelarUsuario">Cancelar</button></div>' +
         '<div id="nuResultado"></div>' +
       '</div>';
+    const aj = () => { $('nuObrasWrap').style.display = $('nuPerfil').value === 'gestor_obra' ? '' : 'none'; };
+    $('nuPerfil').onchange = aj; aj();
     $('btnCancelarUsuario').onclick = () => { $('areaNovoUsuario').innerHTML = ''; };
     $('btnCriarUsuario').onclick = async () => {
       const nome = $('nuNome').value.trim(), usuario = $('nuUsuario').value.trim();
       if (!nome || !usuario) { toast('Informe nome e usuário', 'warn'); return; }
+      const perfil = $('nuPerfil').value;
+      const obras = perfil === 'gestor_obra' ? [...$('nuObrasWrap').querySelectorAll('input:checked')].map(c => c.value) : [];
+      if (perfil === 'gestor_obra' && !obras.length) { toast('Escolha as obras do gestor', 'warn'); return; }
       const btn = $('btnCriarUsuario'); btn.disabled = true; btn.textContent = 'Criando…';
-      const r = await ApiRh.usuario(this.token, { acao: 'criar', nome, usuario });
+      const r = await ApiRh.usuario(this.token, { acao: 'criar', nome, usuario, perfil, obras });
       btn.disabled = false; btn.textContent = 'Criar';
       if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
       // Atualiza a lista em segundo plano SEM repintar a aba (não perder a senha).
@@ -3501,7 +3515,8 @@ export const Rh = {
       if (d.ok) { this.dados = d.dados; this.aplicarConfig(); }
       // A senha temporária aparece UMA vez — mostra destacada para repassar.
       $('nuResultado').innerHTML = this.htmlSenhaTemporaria(r.dados.usuario, r.dados.senha_temporaria, 'criado');
-      $('nuNome').value = ''; $('nuUsuario').value = '';
+      $('nuNome').value = ''; $('nuUsuario').value = ''; $('nuPerfil').value = 'rh'; aj();
+      $('nuObrasWrap').querySelectorAll('input:checked').forEach(c => { c.checked = false; });
       this.ligarSenhaTemporaria(r.dados.senha_temporaria);
     };
     $('areaNovoUsuario').scrollIntoView({ behavior: 'smooth', block: 'start' });
