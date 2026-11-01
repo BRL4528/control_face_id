@@ -11,6 +11,7 @@ import { diaNoFuso, fusoDaEmpresa, instanteNoFuso } from '../_lib/dia.js';
 import { statementsLancamento, noFuturo } from '../_lib/lancamento.js';
 import { comentarNoCard, montarComentarioLancamento } from '../_lib/bitrix-saida.js';
 import { exigeAcesso, noEscopo } from '../_lib/acesso.js';
+import { cercaVigente } from '../_lib/escala.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 
 export default async function handler(req, res) {
@@ -49,8 +50,10 @@ export default async function handler(req, res) {
     if (!marcadoEm) return erro(res, 400, 'CORPO_INVALIDO', 'dia e hora inválidos');
     if (noFuturo(marcadoEm)) return erro(res, 400, 'DATA_FUTURA', 'não é possível lançar ponto no futuro');
     dia = diaNoFuso(marcadoEm, fuso);
-    const al = await sql`SELECT equipe_id FROM alocacao WHERE empresa_id=${rh.empresa_id} AND colaborador_id=${orig.colaborador_id} AND dia=${dia} LIMIT 1`;
-    equipeId = (al[0] && al[0].equipe_id) || orig.equipe_id || null;
+    // Equipe: alocação do novo dia; senão a da batida original; senão a equipe
+    // padrão da pessoa (mesma regra do app, via cercaVigente).
+    const cv = await cercaVigente(sql, rh.empresa_id, orig.colaborador_id, dia);
+    equipeId = (cv && cv.cerca_origem === 'alocacao' && cv.equipe_id) || orig.equipe_id || (cv && cv.equipe_id) || null;
     novo = { tipo, marcado_em: marcadoEm };
   }
 
