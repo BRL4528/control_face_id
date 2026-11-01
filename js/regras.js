@@ -537,6 +537,27 @@ export function horarioDoDia(j, dia, feriados, alocado) {
 }
 
 /**
+ * Jornada prevista de uma equipe num dia específico, como texto: "HH:MM–HH:MM"
+ * do horário daquele dia da semana, "Feriado" ou "Folga (sem jornada no dia)".
+ * Resolve a jornada da equipe, senão a padrão da empresa (objeto), senão o texto
+ * padrão ("HH:MM–HH:MM", config.jornadaPadrao), senão 07:00–17:00. Sem `dia`,
+ * devolve a jornada base (igual a jornadaDaEquipe). `alocado` = escalado no dia
+ * (escala vale mesmo em dia sem horário). Pura.
+ */
+export function jornadaDoDiaTexto(equipeId, equipes, jornadas, jornadaPadrao, dia, feriados, alocado, padraoTexto) {
+  const eq = (equipes || []).find(e => e.equipe_id === equipeId);
+  let j = (eq && eq.jornada_id && (jornadas || []).find(x => x.jornada_id === eq.jornada_id)) || jornadaPadrao || null;
+  if (!j) {
+    const t = /^(\d{2}:\d{2})\s*[–-]\s*(\d{2}:\d{2})$/.exec(String(padraoTexto || '').trim());
+    j = t ? { entrada: t[1], saida: t[2] } : { entrada: '07:00', saida: '17:00' };
+  }
+  if (!dia || !/^\d{4}-\d{2}-\d{2}$/.test(String(dia))) return j.entrada + '–' + j.saida;
+  if (feriados && feriados.has(dia)) return 'Feriado';
+  const h = horarioDoDia(j, dia, feriados, !!alocado);
+  return h ? h.entrada + '–' + h.saida : 'Folga (sem jornada no dia)';
+}
+
+/**
  * Confere o formulário de jornada antes de salvar. `dias`: { "1": { entrada, saida }, ... }
  * só com os dias marcados (0 = domingo). Devolve a lista de problemas em texto de
  * tela (vazia = pode salvar). Turno que vira a noite ainda não é suportado. Pura.

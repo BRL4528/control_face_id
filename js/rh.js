@@ -11,7 +11,7 @@ import {
   indicadores, espelho, euclidiana,
   presencaPorEquipe, serieDiaria, pendenciasPorMotivo,
   exceptionsDoDia,
-  jornadaDaEquipe, horasEntradaPorEquipe, csvDe,
+  jornadaDaEquipe, jornadaDoDiaTexto, horasEntradaPorEquipe, csvDe,
   alertasDePlanejamento, horasPorColaborador, fmtMinutos, dia as diaDe, motivosDaRevisao, rotuloAuditoria,
   tiposPelaOrdem, classificarPendente, diasDeFeriado, feriadosNacionais, horarioDoDia, folhaDoMes, problemasDaJornada
 } from './regras.js';
@@ -19,8 +19,8 @@ import { $, esc, mostrar, toast, hora, data, definirFuso, reduzirImagem } from '
 import { janelaDasFolhas, escreverFolhas, htmlFichaEpi, textoRegistroFacial } from './folha.js';
 import { TIPOS_OCORRENCIA, ocorrenciaDoDia } from './ocorrencias.js';
 import { TIPOS_EVENTO, ESTADOS_EVENTO, situacaoCat } from './eventos.js';
-import { TIPOS_ITEM, ESTADOS_ENTREGA, alertasDaEntrega, caVencidoEm } from './almox.js';
-import { PERFIS, pode, ABA_MODULO, podeEditarJornadas } from './acessos.js';
+import { TIPOS_ITEM, ESTADOS_ENTREGA, alertasDaEntrega, caVencidoEm, nomeComCodigo, podeCancelarEntrega } from './almox.js';
+import { PERFIS, pode, perfilDe, ABA_MODULO, podeEditarJornadas } from './acessos.js';
 
 // Rótulo da aba na trilha do topo (breadcrumb) e no título de página.
 const TITULOS = {
@@ -70,12 +70,21 @@ export const Rh = {
     this.usuarioLogin = usuario;
     this.precisaTrocarSenha = !!login.dados.trocar_senha;
     const d = await ApiRh.dados(this.token, this.dias);
-    if (!d.ok) return { ok: false, erro: d.erro || 'falha ao carregar' };
-    this.dados = d.dados;
+    if (d.ok && d.dados && d.dados.trocar_senha === true) this.precisaTrocarSenha = true;   // versão mínima do servidor
+    if (!d.ok && !this.semDadosAteTrocar(d)) return { ok: false, erro: d.erro || 'falha ao carregar' };
+    this.dados = d.ok ? d.dados : { usuario: login.dados.usuario || { nome: usuario } };
     this.eventos = undefined; this.almox = undefined;
     this.aplicarConfig();
     await this.guardarSessao();
     return { ok: true };
+  },
+
+  /**
+   * Com senha temporária o servidor pode recusar os dados até a troca (403
+   * TROCAR_SENHA, api/_lib/acesso.js); a tela de troca só precisa do nome.
+   */
+  semDadosAteTrocar(d) {
+    return this.precisaTrocarSenha && d && (d.codigo === 'TROCAR_SENHA' || d.codigo === 'SENHA_TEMPORARIA');
   },
 
   /* --------------------------------------------------- sessão do RH
@@ -117,11 +126,11 @@ export const Rh = {
     const exp = this.validadeDoToken(ses.token);
     if (exp && exp <= Date.now()) { await this.esquecerSessao(); return false; }
     const d = await ApiRh.dados(ses.token, this.dias);
-    if (!d.ok) { await this.esquecerSessao(); return false; }
+    this.precisaTrocarSenha = !!ses.trocar_senha || !!(d.ok && d.dados && d.dados.trocar_senha === true);
+    if (!d.ok && !this.semDadosAteTrocar(d)) { this.precisaTrocarSenha = false; await this.esquecerSessao(); return false; }
     this.token = ses.token;
     this.usuarioLogin = ses.usuario || null;
-    this.precisaTrocarSenha = !!ses.trocar_senha;
-    this.dados = d.dados;
+    this.dados = d.ok ? d.dados : { usuario: { nome: ses.usuario || 'RH' } };
     this.eventos = undefined; this.almox = undefined;
     this.aplicarConfig();
     return true;
@@ -153,8 +162,16 @@ export const Rh = {
       if (this.aoSair) this.aoSair();
       return;
     }
-    if (d.ok) { this.dados = d.dados; this.aplicarConfig(); }
+    if (d.ok) { this.dados = d.dados; this.aplicarConfig(); this.pintarPapel(); }
     this.pintar();
+  },
+
+  /** Rótulo do perfil no rodapé da sidebar (Administrador, RH, Almoxarifado...). */
+  pintarPapel() {
+    const el = $('rhPapel');
+    const ac = this.dados && this.dados.acesso;
+    // Sem `acesso` (servidor antigo) o painel trata como administrador (pode()), e o rótulo acompanha.
+    if (el) el.textContent = (ac && ac.rotulo) || PERFIS[perfilDe(ac)].rotulo;
   },
 
   abrir(aoSair) {
@@ -164,6 +181,7 @@ export const Rh = {
     if (this.precisaTrocarSenha) { this.telaTrocarSenha(); return; }
     const nome = this.dados.usuario.nome || 'RH';
     $('rhNome').textContent = nome;
+    this.pintarPapel();
     $('rhIniciais').textContent = this.iniciais(nome);
     $('rhEmpresa').textContent = this.dados.usuario.usuario ? ('@' + this.dados.usuario.usuario) : 'Painel do RH';
     $('rhPeriodo').textContent = 'últimos ' + this.dados.periodo_dias + ' dias';
@@ -324,6 +342,19 @@ export const Rh = {
     const jp = this.jornadaPadrao();
     return jornadaDaEquipe(equipeId, this.dados.equipes, this.dados.jornadas,
       jp ? jp.entrada + '–' + jp.saida : cfg.jornadaPadrao);
+  },
+
+  /**
+   * Jornada prevista no dia da pendência (horário daquele dia da semana, feriado
+   * ou folga), e não só a jornada base da equipe.
+   */
+  jornadaNoDia(x) {
+    const d = this.dados || {}, cfg = window.EFRAT_CFG || {};
+    const dia = (x.marcacao && x.marcacao.marcado_dia) || (x.alocacao && x.alocacao.dia) || this.hojeServidor();
+    const alocado = !!x.alocacao || [].concat(d.alocacoes || [], d.alocacoes_hoje || [])
+      .some(a => a.colaborador_id === x.pessoa_id && (a.dia || this.hojeServidor()) === dia);
+    return jornadaDoDiaTexto(x.equipe_id, d.equipes, d.jornadas, this.jornadaPadrao(), dia,
+      diasDeFeriado(dia, dia, cfg.feriados), alocado, cfg.jornadaPadrao);
   },
 
   nomeDe(id) {
@@ -1178,13 +1209,29 @@ export const Rh = {
     // prova biométrica: miniatura do cadastro × foto de auditoria (quando houver)
     const fotoCad = p && p.miniatura ? '<img src="' + p.miniatura + '">' : '👤';
     const fotoReg = m && m.foto_auditoria ? '<img src="' + m.foto_auditoria + '">' : '👤';
-    const match = m && m.score != null
-      ? '✓ Distância facial ' + Number(m.score).toFixed(3) + ' (menor = melhor)'
-      : 'Batida sem foto de auditoria para comparar';
+    // ✓ só quando o rosto confere (distância até o limiar de aceite); acima dele é
+    // zona cinzenta (atenção) e, passando do limiar cinza, rosto não confere.
+    const cfgFace = window.EFRAT_CFG || {};
+    const limAceite = Number(cfgFace.limiarAceite ?? 0.45), limCinza = Number(cfgFace.limiarCinza ?? 0.58);
+    const score = m && m.score != null && Number.isFinite(Number(m.score)) ? Number(m.score) : null;
+    const fmtLim = v => v.toFixed(2).replace('.', ','), fmtDist = v => v.toFixed(3).replace('.', ',');
+    let match, matchStyle = '';
+    if (score == null) {
+      match = m && m.foto_auditoria ? 'Batida sem distância facial para comparar' : 'Batida sem foto de auditoria para comparar';
+      matchStyle = ' style="background:#fff7ed;color:#9a3412"';
+    } else if (score <= limAceite) {
+      match = '✓ Distância facial ' + fmtDist(score) + ' (menor = melhor)';
+    } else if (score <= limCinza) {
+      match = '⚠ Distância facial ' + fmtDist(score) + ', acima do aceite (' + fmtLim(limAceite) + '). Confira o rosto';
+      matchStyle = ' style="background:#fff7ed;color:#9a3412"';
+    } else {
+      match = '⚠ Distância facial ' + fmtDist(score) + ', acima do limite (' + fmtLim(limCinza) + '). Rosto não confere';
+      matchStyle = ' style="background:#fef3f2;color:#b42318"';
+    }
 
     const fatos = [
       ['Onde deveria estar', cerca ? (this.nomeEquipe(x.equipe_id) + ' · cerca ' + cerca.cerca_raio_m + ' m') : 'Sem alocação'],
-      ['Jornada prevista', this.jornadaDe(x.equipe_id)],
+      ['Jornada prevista', this.jornadaNoDia(x)],
       ['Origem', m ? (m.origem === 'manual' ? 'Registro manual' : 'Biometria facial · app') : 'Ausência detectada']
     ];
     if (m) fatos.push(['Desvio', m.distancia_cerca_m != null ? (m.distancia_cerca_m + ' m do centro') : '-']);
@@ -1218,7 +1265,7 @@ export const Rh = {
         '<section><h2>Prova biométrica</h2><div class="fotos">' +
           '<div><div class="foto">' + fotoCad + '</div><div class="cap">Cadastro</div></div>' +
           '<div><div class="foto">' + fotoReg + '</div><div class="cap">Registro' + (m ? ' · ' + x.hora : '') + '</div></div>' +
-        '</div><div class="match"' + (m && m.score != null ? '' : ' style="background:#fff7ed;color:#9a3412"') + '>' + esc(match) + '</div></section>' +
+        '</div><div class="match"' + matchStyle + '>' + esc(match) + '</div></section>' +
         '<section><h2>Local esperado × registrado</h2>' +
           '<div class="foto" style="aspect-ratio:auto;height:186px">' + this.svgMapaProva(m, cerca) + '</div>' +
           '<div class="cap">' + (cerca ? ('Cerca ' + cerca.cerca_raio_m + ' m') : 'Sem cerca definida') +
@@ -1409,6 +1456,9 @@ export const Rh = {
 
   pintarPessoas() {
     const eqs = this.dados.equipes || [];
+    // Quem só vê pessoas (almoxarifado, segurança do trabalho, somente leitura) não
+    // cadastra, importa, edita nem refaz biometria; Baixar modelo e Código ficam.
+    const edita = pode(this.dados.acesso, 'pessoas', true);
     const q = this.buscaPessoas.toLowerCase();
     const lista = (this.dados.pessoas || []).slice()
       .filter(p => !q || (p.nome + ' ' + p.matricula).toLowerCase().includes(q))
@@ -1433,9 +1483,9 @@ export const Rh = {
         '<td><span class="pill ' + r.status.cls + '"><span class="dot"></span>' + r.status.txt + '</span></td>' +
         '<td style="font-variant-numeric:tabular-nums">' + esc(r.ultimo) + '</td>' +
         '<td style="white-space:nowrap;text-align:right">' +
-          '<button class="v2btn ghost mini" data-editar="' + p.pessoa_id + '">Editar</button> ' +
-          '<button class="v2btn ghost mini" data-codigo="' + esc(p.matricula) + '" data-nome="' + esc(p.nome) + '">Código</button> ' +
-          '<button class="v2btn ghost mini" data-bio="' + p.pessoa_id + '">' + (p.tem_biometria ? 'Refazer' : 'Biometria') + '</button>' +
+          (edita ? '<button class="v2btn ghost mini" data-editar="' + p.pessoa_id + '">Editar</button> ' : '') +
+          '<button class="v2btn ghost mini" data-codigo="' + esc(p.matricula) + '" data-nome="' + esc(p.nome) + '">Código</button>' +
+          (edita ? ' <button class="v2btn ghost mini" data-bio="' + p.pessoa_id + '">' + (p.tem_biometria ? 'Refazer' : 'Biometria') + '</button>' : '') +
         '</td></tr>';
     };
 
@@ -1444,9 +1494,9 @@ export const Rh = {
         '<h1 class="tit">Colaboradores</h1>' +
         '<p class="sub">' + total + ' pessoas cadastradas.</p></div>' +
         '<div class="acoes"><button class="v2btn ghost" id="btnModelo" title="Planilha xlsx com as colunas certas e instruções">Baixar modelo</button>' +
-          '<button class="v2btn ghost" id="btnImportar" title="Planilha xlsx ou csv com matrícula e nome">Importar planilha</button>' +
-          '<input type="file" id="impArquivo" accept=".xlsx,.xls,.csv" class="hide">' +
-          '<button class="v2btn" id="btnAbrirNovo">+ Colaborador</button></div>' +
+          (edita ? '<button class="v2btn ghost" id="btnImportar" title="Planilha xlsx ou csv com matrícula e nome">Importar planilha</button>' +
+            '<input type="file" id="impArquivo" accept=".xlsx,.xls,.csv" class="hide">' +
+            '<button class="v2btn" id="btnAbrirNovo">+ Colaborador</button>' : '') + '</div>' +
       '</div>' +
       '<div id="areaNovo"></div>' +
       '<div class="tbl-wrap">' +
@@ -1473,8 +1523,11 @@ export const Rh = {
       this.pintarPessoas();
       const nb = $('pBusca'); if (nb) { nb.focus(); nb.setSelectionRange(caret, caret); }
     };
-    $('btnAbrirNovo').onclick = () => this.formColaborador(null);
-    $('btnImportar').onclick = () => $('impArquivo').click();
+    if (edita) {
+      $('btnAbrirNovo').onclick = () => this.formColaborador(null);
+      $('btnImportar').onclick = () => $('impArquivo').click();
+      $('impArquivo').onchange = e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) this.importarPlanilha(f); };
+    }
     $('btnModelo').onclick = async () => {
       const btn = $('btnModelo'); btn.disabled = true;
       const blob = await ApiRh.modeloImportacao(this.token);
@@ -1485,7 +1538,6 @@ export const Rh = {
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     };
-    $('impArquivo').onchange = e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) this.importarPlanilha(f); };
 
     $('rh-pessoas').querySelectorAll('button[data-bio]').forEach(b => {
       b.onclick = () => this.abrirBiometria(b.dataset.bio);
@@ -1872,7 +1924,7 @@ export const Rh = {
             '<div class="eq-busca">' +
               '<input class="inp" id="eqBusca" type="search" placeholder="🔍 Buscar obra…" value="' + esc(this.buscaEquipes || '') + '">' +
               this.htmlFiltroFuncao('eqFuncao') +
-              '<button class="v2btn ghost" id="btnNovaEquipe" title="Criar uma equipe que não vem do Bitrix">+</button>' +
+              (pode(d.acesso, 'pessoas', true) ? '<button class="v2btn ghost" id="btnNovaEquipe" title="Criar uma equipe que não vem do Bitrix">+</button>' : '') +
             '</div>' +
           '</div>' +
           '<div class="pend-list" id="eqLista">' +
@@ -1893,7 +1945,7 @@ export const Rh = {
     this.ligarFiltroFuncao('eqFuncao', () => this.pintarEquipes());
     const bus = $('eqBusca');
     bus.oninput = () => { this.buscaEquipes = bus.value; this.pintarEquipes(); $('eqBusca').focus(); };
-    $('btnNovaEquipe').onclick = async () => {
+    if ($('btnNovaEquipe')) $('btnNovaEquipe').onclick = async () => {
       const nome = prompt('Nome da nova equipe:');
       if (!nome || !nome.trim()) return;
       const r = await ApiRh.equipe(this.token, { nome: nome.trim() });
@@ -1923,7 +1975,7 @@ export const Rh = {
           'Quem veio do Bitrix se resolve movendo o card no kanban.</p></div></div>' +
         '<div class="fatos"><h2 style="margin:0 0 11px;font-size:14px">' +
           semEquipe.length + (semEquipe.length === 1 ? ' colaborador' : ' colaboradores') + '</h2>' +
-          (semEquipe.map(p => this.htmlMembro(p, true)).join('') || '<p class="nota">Ninguém fora de equipe. ✓</p>') +
+          (semEquipe.map(p => this.htmlMembro(p, true, pode(d.acesso, 'pessoas', true))).join('') || '<p class="nota">Ninguém fora de equipe. ✓</p>') +
         '</div>';
     }
 
@@ -1942,6 +1994,9 @@ export const Rh = {
     const candidatos = todas.filter(p => p.equipe_id !== e.equipe_id && !p.bitrix_contact_id)
       .sort((a, b) => (!a.equipe_id === !b.equipe_id ? a.nome.localeCompare(b.nome) : (a.equipe_id ? 1 : -1)));
 
+    // Quem só vê pessoas não altera a equipe; os atalhos para jornadas e escala só
+    // aparecem para quem vê aquelas abas.
+    const edita = pode(d.acesso, 'pessoas', true);
     const fato = (k, v, acao) => '<div><div class="k">' + k + '</div><div class="v">' + v + '</div>' +
       (acao ? '<div style="margin-top:7px">' + acao + '</div>' : '') + '</div>';
 
@@ -1961,24 +2016,24 @@ export const Rh = {
 
       '<div class="fatos"><div class="g eq-g">' +
         fato('Local (cerca)', loc ? esc(loc.nome) + ' · ' + loc.raio_m + ' m' : '<span style="color:var(--v2-vermelho)">Não definido</span>',
-          '<button class="v2btn' + (loc ? ' ghost' : '') + ' mini" id="eqDefinirLocal">' + (loc ? 'Trocar o local' : '📍 Definir local') + '</button>') +
+          edita ? '<button class="v2btn' + (loc ? ' ghost' : '') + ' mini" id="eqDefinirLocal">' + (loc ? 'Trocar o local' : '📍 Definir local') + '</button>' : '') +
         fato('Jornada', esc(jornada) + (jNome ? ' · ' + esc(jNome.nome) : ' · padrão da empresa'),
-          '<button class="v2btn ghost mini" id="eqIrJornadas">Alterar</button>') +
+          podeEditarJornadas(d.acesso) ? '<button class="v2btn ghost mini" id="eqIrJornadas">Alterar</button>' : '') +
         fato('Escala', escalas.length
           ? escalas.map(pl => esc(pl.nome || e.nome)).join(', ')
           : '<span style="color:var(--v2-mut2)">nenhuma — usa o local</span>',
-          '<button class="v2btn ghost mini" id="eqIrEscala">' + (escalas.length ? 'Ver' : 'Criar') + '</button>') +
+          pode(d.acesso, 'operacao') ? '<button class="v2btn ghost mini" id="eqIrEscala">' + (escalas.length || !pode(d.acesso, 'operacao', true) ? 'Ver' : 'Criar') + '</button>' : '') +
         fato('Supervisor', sup ? esc(sup.nome) : '<span style="color:var(--v2-mut2)">—</span>') +
         fato('Afastamento', e.afastamento ? 'Sim: não bate ponto' : 'Não',
-          '<button class="v2btn ghost mini" id="eqAfastamento">' + (e.afastamento ? 'Voltar a ser equipe de trabalho' : 'Marcar como afastamento') + '</button>') +
+          edita ? '<button class="v2btn ghost mini" id="eqAfastamento">' + (e.afastamento ? 'Voltar a ser equipe de trabalho' : 'Marcar como afastamento') + '</button>' : '') +
       '</div></div>' +
 
       '<div class="fatos">' +
         '<h2 style="margin:0 0 11px;font-size:14px">Colaboradores <span style="color:var(--v2-mut2);font-weight:400">(' + ms.length + ')</span>' +
           (this.filtroFuncao ? ' <span class="pill mut" style="padding:0 7px">só ' + esc(this.nomePapel(this.filtroFuncao).toLowerCase()) + '</span>' : '') + '</h2>' +
-        (ms.length ? ms.map(p => this.htmlMembro(p, false)).join('')
+        (ms.length ? ms.map(p => this.htmlMembro(p, false, edita)).join('')
                    : '<p class="nota" style="margin:0">Nenhum colaborador nesta equipe.</p>') +
-        (candidatos.length ?
+        (candidatos.length && edita ?
           '<div class="eq-vincular" style="margin-top:12px">' +
             '<select class="inp" id="eqVincSel"><option value="">— vincular um colaborador de fora do Bitrix —</option>' +
               candidatos.map(p => '<option value="' + esc(p.pessoa_id) + '">' + esc(p.nome) +
@@ -1988,7 +2043,7 @@ export const Rh = {
       '</div>';
   },
 
-  htmlMembro(p, mostrarEquipe) {
+  htmlMembro(p, mostrarEquipe, edita = true) {
     return '<div class="eq-membro"><span class="av">' + esc(this.iniciais(p.nome)) + '</span>' +
       '<div style="flex:1;min-width:0"><div class="nm">' + esc(p.nome) + '</div>' +
         '<div class="mt">Matrícula ' + esc(p.matricula) + (p.papel && p.papel !== 'colaborador' ? ' · ' + esc(this.nomePapel(p.papel).toLowerCase()) : '') +
@@ -1996,8 +2051,8 @@ export const Rh = {
       (p.bitrix_contact_id
         ? '<span class="mt" title="A equipe desta pessoa é o card dela no Bitrix">via Bitrix</span>'
         : p.equipe_id
-          ? '<button class="v2btn ghost mini" data-desv="' + esc(p.pessoa_id) + '">Remover da equipe</button>'
-          : '<span class="mt">vincule a uma equipe ao lado</span>') +
+          ? !edita ? '' : '<button class="v2btn ghost mini" data-desv="' + esc(p.pessoa_id) + '">Remover da equipe</button>'
+          : edita ? '<span class="mt">vincule a uma equipe ao lado</span>' : '') +
     '</div>';
   },
 
@@ -2688,6 +2743,9 @@ export const Rh = {
 
   pintarOcorrencias() {
     const d = this.dados, hoje = this.hojeServidor();
+    // Perfil que só vê ocorrências (gestor de obra, segurança do trabalho) não cria,
+    // edita nem decide; foto de documento de saúde só com o módulo saúde.
+    const edita = pode(d.acesso, 'ocorrencias', true), verSaude = pode(d.acesso, 'saude');
     const todas = (d.ocorrencias || []).slice();
     const pendentes = todas.filter(o => o.estado === 'pendente');
     const filtroTipo = this.ocFiltroTipo || '', busca = (this.ocBusca || '').trim().toLowerCase();
@@ -2697,29 +2755,29 @@ export const Rh = {
     const periodo = o => dm(o.inicio) + (o.fim ? (o.fim !== o.inicio ? ' a ' + dm(o.fim) : '') : ' em diante');
     const situacao = o => o.estado === 'recusada' ? ['Recusada', 'bad']
       : o.inicio > hoje ? ['Agendada', 'mut'] : (!o.fim || o.fim >= hoje) ? ['Em andamento', 'ok'] : ['Encerrada', 'mut'];
-    const doc = o => o.tem_anexo ? '<button class="v2btn ghost mini" data-oc-foto="' + esc(o.id) + '">Ver foto</button>' : '';
+    const doc = o => o.tem_anexo && verSaude ? '<button class="v2btn ghost mini" data-oc-foto="' + esc(o.id) + '">Ver foto</button>' : '';
     const linha = o => {
       const [txt, cls] = situacao(o);
       return '<tr><td><b>' + esc(this.nomeDe(o.colaborador_id)) + '</b></td><td>' + esc(TIPOS_OCORRENCIA[o.tipo] ? TIPOS_OCORRENCIA[o.tipo].rotulo : o.tipo) + '</td>' +
         '<td class="mono">' + periodo(o) + '</td><td><span class="pill ' + cls + '"><span class="dot"></span>' + txt + '</span></td>' +
         '<td>' + esc(o.observacao || '') + '</td><td style="text-align:right;white-space:nowrap">' + doc(o) +
-          (o.estado === 'ativa' ? ' <button class="v2btn ghost mini" data-oc-ed="' + esc(o.id) + '">Editar</button>' +
+          (o.estado === 'ativa' && edita ? ' <button class="v2btn ghost mini" data-oc-ed="' + esc(o.id) + '">Editar</button>' +
             ' <button class="v2btn ghost mini" data-oc-cancel="' + esc(o.id) + '">Cancelar</button>' : '') + '</td></tr>';
     };
 
     $('rh-ocorrencias').innerHTML =
       '<div class="pg-head"><div><h1 class="tit">Ocorrências</h1>' +
         '<p class="sub">Férias, atestado, afastamento, licença, falta justificada e viagem. O período abona as faltas, bloqueia a batida quando for o caso e aparece na folha de ponto.</p></div>' +
-        '<div class="acoes"><button class="v2btn" id="btnNovaOc">+ Nova ocorrência</button></div></div>' +
+        (edita ? '<div class="acoes"><button class="v2btn" id="btnNovaOc">+ Nova ocorrência</button></div>' : '') + '</div>' +
       '<div id="areaOc"></div>' +
       (pendentes.length
         ? '<div class="v2card" style="padding:15px;margin-bottom:16px"><h2 style="margin:0 0 10px;font-size:14px">Enviadas pelo app, aguardando o RH (' + pendentes.length + ')</h2>' +
             '<div class="tbl-wrap"><table class="adtable"><thead><tr><th>Colaborador</th><th>Tipo</th><th>Período</th><th>Observação</th><th></th></tr></thead><tbody>' +
             pendentes.map(o => '<tr><td><b>' + esc(this.nomeDe(o.colaborador_id)) + '</b></td><td>' + esc(TIPOS_OCORRENCIA[o.tipo].rotulo) + '</td>' +
               '<td class="mono">' + periodo(o) + '</td><td>' + esc(o.observacao || '') + '</td>' +
-              '<td style="text-align:right;white-space:nowrap">' + doc(o) +
-                ' <button class="v2btn ghost mini" data-oc-dec="recusar" data-oc-id="' + esc(o.id) + '">Recusar</button>' +
-                ' <button class="v2btn mini" data-oc-dec="aprovar" data-oc-id="' + esc(o.id) + '">Aprovar</button></td></tr>').join('') +
+              '<td style="text-align:right;white-space:nowrap">' + doc(o) + (edita
+                ? ' <button class="v2btn ghost mini" data-oc-dec="recusar" data-oc-id="' + esc(o.id) + '">Recusar</button>' +
+                  ' <button class="v2btn mini" data-oc-dec="aprovar" data-oc-id="' + esc(o.id) + '">Aprovar</button>' : '') + '</td></tr>').join('') +
             '</tbody></table></div></div>'
         : '') +
       '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">' +
@@ -2731,7 +2789,7 @@ export const Rh = {
         (lista.length ? lista.map(linha).join('') : '<tr><td colspan="6" style="padding:30px;text-align:center;color:#64748b">Nenhuma ocorrência.</td></tr>') +
       '</tbody></table></div>';
 
-    $('btnNovaOc').onclick = () => this.formOcorrencia(null);
+    if ($('btnNovaOc')) $('btnNovaOc').onclick = () => this.formOcorrencia(null);
     $('ocBusca').oninput = () => { this.ocBusca = $('ocBusca').value; this.pintarOcorrencias(); $('ocBusca').focus(); };
     $('ocTipo').onchange = () => { this.ocFiltroTipo = $('ocTipo').value; this.pintarOcorrencias(); };
     const el = $('rh-ocorrencias');
@@ -2780,7 +2838,7 @@ export const Rh = {
         '</div>' +
         '<div class="form-grid" style="margin-top:10px">' +
           '<div><label class="lb2">Observação</label><input class="inp" id="ocObs" value="' + esc(o.observacao || '') + '" placeholder="Ex.: férias 2026, 1º período"></div>' +
-          '<div><label class="lb2">Foto do documento' + (o.tem_anexo ? ' (já tem; envie outra para trocar)' : '') + '</label><input class="inp" type="file" accept="image/*" id="ocFoto"></div>' +
+          (pode(this.dados.acesso, 'saude', true) ? '<div><label class="lb2">Foto do documento' + (o.tem_anexo ? ' (já tem; envie outra para trocar)' : '') + '</label><input class="inp" type="file" accept="image/*" id="ocFoto"></div>' : '') +
         '</div>' +
         '<p class="cap" id="ocEfeito" style="margin:10px 0 0"></p>' +
         '<div class="row2" style="margin-top:14px"><button class="act" id="btnSalvarOc">Salvar</button><button class="act ghost" id="btnCancelarOc">Cancelar</button></div>' +
@@ -2798,7 +2856,7 @@ export const Rh = {
       const corpo = { acao: 'salvar', id: o.id, colaborador_id: $('ocPessoa').value, tipo: $('ocTipoF').value,
         inicio: $('ocInicio').value, fim: $('ocFim').value || null, observacao: $('ocObs').value.trim() };
       if (!corpo.colaborador_id) { toast('Escolha o colaborador', 'warn'); return; }
-      const f = $('ocFoto').files && $('ocFoto').files[0];
+      const f = $('ocFoto') && $('ocFoto').files && $('ocFoto').files[0];
       if (f) { try { corpo.anexo = await reduzirImagem(f); } catch (e) { toast(e.message, 'bad'); return; } }
       const btn = $('btnSalvarOc'); btn.disabled = true;
       const r = await ApiRh.ocorrencia(this.token, corpo);
@@ -2826,6 +2884,7 @@ export const Rh = {
     const el = $('rh-eventos');
     if (this.eventos == null) { el.innerHTML = '<p class="nota">Carregando…</p>'; if (this.eventos === undefined) this.carregarEventos(); return; }
     const hoje = this.hojeServidor(), cfg = window.EFRAT_CFG || {};
+    const edita = pode(this.dados.acesso, 'eventos', true);   // sem isso só lista e vê as fotos
     const aba = this.evAba || 'disciplina';
     const obra = this.evObra || '';
     const dm = s => s ? s.slice(8, 10) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4) : '';
@@ -2848,11 +2907,11 @@ export const Rh = {
       }
       return pill(ESTADOS_EVENTO[e.estado] || e.estado, 'mut');
     };
-    const acoes = e => fotos(e) +
+    const acoes = e => fotos(e) + (!edita ? '' :
       (e.estado === 'aguardando_ciencia' ? '<button class="v2btn ghost mini" data-ev-recusa="' + esc(e.id) + '">Registrar recusa</button> ' : '') +
       (e.estado === 'aguardando_cat' ? '<button class="v2btn mini" data-ev-cat="' + esc(e.id) + '">Registrar CAT</button> ' : '') +
       (e.tipo === 'acidente' && e.dados && e.dados.afastamento ? '<button class="v2btn ghost mini" data-ev-afast="' + esc(e.id) + '">Lançar afastamento</button> ' : '') +
-      '<button class="v2btn ghost mini" data-ev-cancel="' + esc(e.id) + '">Cancelar</button>';
+      '<button class="v2btn ghost mini" data-ev-cancel="' + esc(e.id) + '">Cancelar</button>');
     const linha = e => '<tr><td><b>' + esc(this.nomeDe(e.colaborador_id)) + '</b>' +
         (aba === 'disciplina' ? '<div class="mt">' + esc(TIPOS_EVENTO[e.tipo].rotulo) + '</div>' : '') + '</td>' +
       '<td class="mono">' + dm(e.data) + (e.hora ? ' ' + esc(e.hora) : '') + '</td>' +
@@ -2864,7 +2923,7 @@ export const Rh = {
     el.innerHTML =
       '<div class="pg-head"><div><h1 class="tit">Advertências e acidentes</h1>' +
         '<p class="sub">Advertências e notificações vão para o app do colaborador dar ciência com o rosto. Acidente de trabalho fica pendente até o registro da CAT (prazo: 1º dia útil seguinte; em caso de óbito, imediato).</p></div>' +
-        '<div class="acoes"><button class="v2btn" id="btnNovoEv">+ ' + (aba === 'acidentes' ? 'Registrar acidente' : 'Nova advertência ou notificação') + '</button></div></div>' +
+        (edita ? '<div class="acoes"><button class="v2btn" id="btnNovoEv">+ ' + (aba === 'acidentes' ? 'Registrar acidente' : 'Nova advertência ou notificação') + '</button></div>' : '') + '</div>' +
       (this.eventosErro ? '<div class="cartao warn" style="margin-bottom:12px">' + esc(this.eventosErro) + '</div>' : '') +
       (atrasadas ? '<div class="cartao warn" style="margin-bottom:12px"><b>' + atrasadas + ' acidente(s) com CAT vencendo hoje ou atrasada.</b> A CAT é emitida no eSocial (S-2210); registre aqui o número quando sair.</div>' : '') +
       '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:center">' +
@@ -2880,7 +2939,7 @@ export const Rh = {
 
     el.querySelectorAll('[data-ev-aba]').forEach(b => { b.onclick = () => { this.evAba = b.dataset.evAba; this.pintarEventos(); }; });
     $('evObra').onchange = () => { this.evObra = $('evObra').value; this.pintarEventos(); };
-    $('btnNovoEv').onclick = () => this.formEvento(aba === 'acidentes' ? 'acidente' : 'advertencia');
+    if ($('btnNovoEv')) $('btnNovoEv').onclick = () => this.formEvento(aba === 'acidentes' ? 'acidente' : 'advertencia');
     const achar = id => (this.eventos || []).find(e => e.id === id);
     const acao = async (corpo, msg) => {
       const r = await ApiRh.evento(this.token, corpo);
@@ -3004,6 +3063,7 @@ export const Rh = {
     const el = $('rh-almox');
     if (this.almox == null) { el.innerHTML = '<p class="nota">Carregando…</p>'; if (this.almox === undefined) { this.almox = null; this.carregarAlmox(); } return; }
     const hoje = this.hojeServidor(), aba = this.alAba || 'entregas';
+    const edita = pode(this.dados.acesso, 'almox', true);   // sem isso só consulta e gera a ficha
     const { itens, entregas } = this.almox;
     const itemDe = id => itens.find(i => i.id === id) || null;
     const dm = s => s ? s.slice(8, 10) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4) : '';
@@ -3018,7 +3078,8 @@ export const Rh = {
     });
     ROT_AL.desligado = ['Desligado com ferramenta', 'bad'];
     const busca = (this.alBusca || '').trim().toLowerCase(), so = this.alSoAlertas;
-    const lista = comAlerta.filter(e => (!busca || this.nomeDe(e.colaborador_id).toLowerCase().includes(busca) || ((itemDe(e.item_id) || {}).nome || '').toLowerCase().includes(busca)) && (!so || e.alertas.length));
+    const lista = comAlerta.filter(e => (!busca || this.nomeDe(e.colaborador_id).toLowerCase().includes(busca) ||
+      nomeComCodigo(itemDe(e.item_id)).toLowerCase().includes(busca)) && (!so || e.alertas.length));
     const nAlertas = comAlerta.filter(e => e.alertas.length).length;
     const pill = (t, c) => '<span class="pill ' + c + '"><span class="dot"></span>' + esc(t) + '</span>';
     const tabs = '<div class="segtabs" style="width:auto;margin-bottom:12px">' +
@@ -3028,15 +3089,15 @@ export const Rh = {
     if (aba === 'entregas') {
       corpo = (nAlertas ? '<div class="cartao warn" style="margin-bottom:12px"><b>' + nAlertas + ' entrega(s) com alerta</b> (troca de EPI, CA vencido, ferramenta atrasada ou com desligado).</div>' : '') +
         '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:center">' +
-          '<input class="inp" id="alBusca" placeholder="Buscar colaborador ou item" value="' + esc(this.alBusca || '') + '" style="max-width:280px;margin:0">' +
+          '<input class="inp" id="alBusca" placeholder="Buscar colaborador, item ou código" value="' + esc(this.alBusca || '') + '" style="max-width:280px;margin:0">' +
           '<label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="alSo"' + (so ? ' checked' : '') + '> Só com alerta</label>' +
-          '<button class="v2btn" id="btnNovaEntrega" style="margin-left:auto">+ Registrar entrega</button></div>' +
+          (edita ? '<button class="v2btn" id="btnNovaEntrega" style="margin-left:auto">+ Registrar entrega</button>' : '') + '</div>' +
         '<div id="areaAl"></div>' +
         '<div class="tbl-wrap"><table class="adtable"><thead><tr><th>Colaborador</th><th>Item</th><th>Entrega</th><th>Situação</th><th>Alertas</th><th></th></tr></thead><tbody>' +
           (lista.length ? lista.map(e => {
             const it = itemDe(e.item_id) || { nome: '?', tipo: '' };
             return '<tr><td><b>' + esc(this.nomeDe(e.colaborador_id)) + '</b>' + (e.equipe_id ? '<div class="mt">' + esc(this.nomeEquipe(e.equipe_id)) + '</div>' : '') + '</td>' +
-              '<td>' + esc(it.nome) + ' <span class="mt">(' + esc((TIPOS_ITEM[it.tipo] || {}).rotulo || '') + (e.ca ? ', CA ' + esc(e.ca) : '') + ')</span><div class="mt">' + e.quantidade + ' un.</div></td>' +
+              '<td>' + esc(nomeComCodigo(it)) + ' <span class="mt">(' + esc((TIPOS_ITEM[it.tipo] || {}).rotulo || '') + (e.ca ? ', CA ' + esc(e.ca) : '') + ')</span><div class="mt">' + e.quantidade + ' un.</div></td>' +
               '<td class="mono">' + dm(e.entregue_em) + (e.devolver_ate ? '<div class="mt">devolver até ' + dm(e.devolver_ate) + '</div>' : '') + '</td>' +
               '<td>' + pill(e.estado === 'devolvida' ? 'Devolvida em ' + dm(e.devolvido_em) : e.estado === 'confirmada' ? 'Confirmada no app' : ESTADOS_ENTREGA[e.estado] || e.estado,
                     e.estado === 'aguardando_ciencia' ? 'mut' : 'ok') +
@@ -3044,17 +3105,18 @@ export const Rh = {
               '<td>' + e.alertas.map(a => pill(ROT_AL[a][0], ROT_AL[a][1])).join(' ') + '</td>' +
               '<td style="text-align:right;white-space:nowrap">' +
                 // Baixa: ferramenta devolvida; EPI devolvido ou trocado (sai dos alertas e continua na ficha NR-6).
-                (e.estado !== 'devolvida' ? '<button class="v2btn ghost mini" data-al-dev="' + esc(e.id) + '">' + (it.tipo === 'epi' ? 'Devolvido / trocado' : 'Devolvida') + '</button> ' : '') +
-                '<button class="v2btn ghost mini" data-al-cancel="' + esc(e.id) + '">Cancelar</button></td></tr>';
+                // Cancelar só enquanto aguarda a confirmação no app: confirmada ou devolvida é registro da ficha.
+                (edita && e.estado !== 'devolvida' ? '<button class="v2btn ghost mini" data-al-dev="' + esc(e.id) + '">' + (it.tipo === 'epi' ? 'Devolvido / trocado' : 'Devolvida') + '</button> ' : '') +
+                (edita && podeCancelarEntrega(e) ? '<button class="v2btn ghost mini" data-al-cancel="' + esc(e.id) + '">Cancelar</button>' : '') + '</td></tr>';
           }).join('') : '<tr><td colspan="6" style="padding:30px;text-align:center;color:#64748b">Nenhuma entrega.</td></tr>') +
         '</tbody></table></div>';
     } else if (aba === 'itens') {
-      corpo = '<div style="display:flex;margin-bottom:10px"><button class="v2btn" id="btnNovoItem" style="margin-left:auto">+ Novo item</button></div><div id="areaAl"></div>' +
+      corpo = (edita ? '<div style="display:flex;margin-bottom:10px"><button class="v2btn" id="btnNovoItem" style="margin-left:auto">+ Novo item</button></div>' : '') + '<div id="areaAl"></div>' +
         '<div class="tbl-wrap"><table class="adtable"><thead><tr><th>Item</th><th>Tipo</th><th>CA</th><th>Validade do CA</th><th>Troca a cada</th><th>Código</th><th></th></tr></thead><tbody>' +
           (itens.length ? itens.map(i => '<tr' + (i.ativo ? '' : ' style="opacity:.55"') + '><td><b>' + esc(i.nome) + '</b></td><td>' + esc(TIPOS_ITEM[i.tipo].rotulo) + '</td>' +
             '<td>' + esc(i.ca || '') + '</td><td>' + (i.ca_validade ? (i.ca_validade < hoje ? pill('Vencido ' + dm(i.ca_validade), 'bad') : dm(i.ca_validade)) : '') + '</td>' +
             '<td>' + (i.vida_util_dias ? i.vida_util_dias + ' dias' : '') + '</td><td>' + esc(i.codigo || '') + '</td>' +
-            '<td style="text-align:right"><button class="v2btn ghost mini" data-al-item="' + esc(i.id) + '">Editar</button></td></tr>').join('')
+            '<td style="text-align:right">' + (edita ? '<button class="v2btn ghost mini" data-al-item="' + esc(i.id) + '">Editar</button>' : '') + '</td></tr>').join('')
             : '<tr><td colspan="7" style="padding:30px;text-align:center;color:#64748b">Cadastre os EPIs (com CA) e as ferramentas.</td></tr>') +
         '</tbody></table></div>';
     } else {
@@ -3070,15 +3132,26 @@ export const Rh = {
       (this.almoxErro ? '<div class="cartao warn" style="margin-bottom:12px">' + esc(this.almoxErro) + '</div>' : '') + tabs + corpo;
 
     el.querySelectorAll('[data-al-aba]').forEach(b => { b.onclick = () => { this.alAba = b.dataset.alAba; this.pintarAlmox(); }; });
-    const acao = async (c, msg) => { const r = await ApiRh.almox(this.token, c); if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; } toast(msg, 'ok'); await this.carregarAlmox(); };
+    // 409 (ex.: baixa já registrada em outra aba): a lista está velha, recarrega.
+    const acao = async (c, msg) => { const r = await ApiRh.almox(this.token, c); if (!r.ok) { toast(r.erro || 'Falha', 'bad'); if (r.status === 409) await this.carregarAlmox(); return; } toast(msg, 'ok'); await this.carregarAlmox(); };
     if (aba === 'entregas') {
       $('alBusca').oninput = () => { this.alBusca = $('alBusca').value; this.pintarAlmox(); $('alBusca').focus(); };
       $('alSo').onchange = () => { this.alSoAlertas = $('alSo').checked; this.pintarAlmox(); };
-      $('btnNovaEntrega').onclick = () => this.formEntrega();
+      if ($('btnNovaEntrega')) $('btnNovaEntrega').onclick = () => this.formEntrega();
       el.querySelectorAll('[data-al-dev]').forEach(b => { b.onclick = () => acao({ acao: 'devolver', id: b.dataset.alDev, devolvido_em: hoje }, 'Baixa registrada'); });
-      el.querySelectorAll('[data-al-cancel]').forEach(b => { b.onclick = () => { if (confirm('Cancelar esta entrega?')) acao({ acao: 'cancelar', id: b.dataset.alCancel }, 'Entrega cancelada'); }; });
+      el.querySelectorAll('[data-al-cancel]').forEach(b => {
+        b.onclick = async () => {
+          if (!confirm('Cancelar esta entrega?')) return;
+          const r = await ApiRh.almox(this.token, { acao: 'cancelar', id: b.dataset.alCancel });
+          if (r.ok) { toast('Entrega cancelada', 'ok'); await this.carregarAlmox(); return; }
+          // 409: o colaborador confirmou (ou houve baixa) enquanto a tela estava aberta.
+          // Recarrega: a linha passa a oferecer só a baixa.
+          if (r.status === 409) { toast('Esta entrega já foi confirmada no app ou devolvida e não pode mais ser cancelada.', 'warn'); await this.carregarAlmox(); return; }
+          toast(r.erro || 'Falha', 'bad');
+        };
+      });
     } else if (aba === 'itens') {
-      $('btnNovoItem').onclick = () => this.formItem(null);
+      if ($('btnNovoItem')) $('btnNovoItem').onclick = () => this.formItem(null);
       el.querySelectorAll('[data-al-item]').forEach(b => { b.onclick = () => this.formItem(itens.find(i => i.id === b.dataset.alItem)); });
     } else {
       $('btnFicha').onclick = () => this.gerarFichaEpi($('fiPessoa').value);
@@ -3113,7 +3186,7 @@ export const Rh = {
     const pessoas = (this.dados.pessoas || []).filter(p => p.ativo).sort((a, b) => a.nome.localeCompare(b.nome));
     const eqs = (this.dados.equipes || []).filter(e => e.ativo && !e.afastamento).sort((a, b) => a.nome.localeCompare(b.nome));
     $('areaAl').innerHTML = '<div class="card"><h2>Registrar entrega</h2><div class="form-grid">' +
-      '<div><label class="lb2">Item</label><select class="inp" id="enItem">' + itens.map(i => '<option value="' + i.id + '">' + esc(i.nome) + ' (' + TIPOS_ITEM[i.tipo].rotulo + ')</option>').join('') + '</select></div>' +
+      '<div><label class="lb2">Item</label><select class="inp" id="enItem">' + itens.map(i => '<option value="' + i.id + '">' + esc(nomeComCodigo(i)) + ' (' + TIPOS_ITEM[i.tipo].rotulo + ')</option>').join('') + '</select></div>' +
       '<div><label class="lb2">Quantidade (por pessoa)</label><input class="inp" type="number" min="1" id="enQtd" value="1"></div>' +
       '<div><label class="lb2">Data da entrega</label><input class="inp" type="date" id="enData" value="' + this.hojeServidor() + '"></div>' +
       '<div id="enDevWrap"><label class="lb2">Devolver até (ferramenta)</label><input class="inp" type="date" id="enDev"></div>' +
@@ -3151,7 +3224,7 @@ export const Rh = {
       const p = this.pessoaDe(id) || { nome: id };
       const linhas = entregas.filter(e => e.colaborador_id === id).sort((a, b) => a.entregue_em.localeCompare(b.entregue_em)).map(e => {
         const it = itens.find(i => i.id === e.item_id) || {};
-        return { entregue_em: e.entregue_em, item: it.nome || '?', ca: e.ca, quantidade: e.quantidade, obra: e.equipe_id ? this.nomeEquipe(e.equipe_id) : '',
+        return { entregue_em: e.entregue_em, item: it.nome || '?', codigo: it.codigo || '', ca: e.ca, quantidade: e.quantidade, obra: e.equipe_id ? this.nomeEquipe(e.equipe_id) : '',
                  confirmada_em: e.ciencia && e.ciencia.em, prova: e.ciencia || null, devolvido_em: e.devolvido_em };
       });
       return { nome: p.nome, matricula: p.matricula, funcao: p.papel && p.papel !== 'colaborador' ? this.nomePapel(p.papel) : '', linhas };
@@ -3531,6 +3604,7 @@ export const Rh = {
     $('rhCrumb').textContent = 'Trocar senha';
     $('rhNome').textContent = this.dados.usuario.nome || 'RH';
     $('rhIniciais').textContent = this.iniciais(this.dados.usuario.nome || 'RH');
+    this.pintarPapel();
     $('rh-painel').innerHTML =
       '<div class="cfg-sec" style="max-width:460px;margin:40px auto">' +
         '<h2>Defina uma nova senha</h2>' +
@@ -3550,7 +3624,15 @@ export const Rh = {
       if (!r.ok) { toast(r.erro || 'Falha ao trocar senha', 'bad'); return; }
       toast('Senha atualizada', 'ok');
       this.precisaTrocarSenha = false;
+      // Trocar a senha pode invalidar o token antigo: quando o servidor devolve
+      // um token novo, é ele que passa a valer (e é ele que fica guardado).
+      if (r.dados && typeof r.dados.token === 'string' && r.dados.token) this.token = r.dados.token;
       await this.guardarSessao();   // o F5 não pode voltar a pedir a troca
+      // Recarrega com a sessão já liberada (antes da troca os dados podem ter vindo vazios).
+      const d = await ApiRh.dados(this.token, this.dias);
+      if (d.ok) { this.dados = d.dados; this.aplicarConfig(); }
+      // Sem os dados completos (só a versão mínima de antes da troca), o painel abriria vazio.
+      else if (!this.dados || !this.dados.acesso || this.dados.trocar_senha === true) { toast(d.erro || 'Falha ao carregar o painel. Entre de novo.', 'bad'); if (this.aoSair) this.aoSair(); return; }
       this.abrir(this.aoSair);   // agora entra normalmente
     };
   }

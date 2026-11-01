@@ -168,7 +168,7 @@ export function htmlFichaEpi(fichas, ctx) {
       '<div class="info"><b>COLABORADOR:</b><span>' + nomeEFuncao(f.nome, f.funcao) +
         (f.matricula ? ' &nbsp;·&nbsp; MATRÍCULA ' + esc(f.matricula) : '') + '</span></div>' +
       '<table><thead><tr><th>DATA</th><th>ITEM</th><th>CA</th><th>QTD</th><th>OBRA</th><th>CONFIRMAÇÃO NO APP</th><th>DEVOLUÇÃO</th></tr></thead><tbody>' +
-        (f.linhas.length ? f.linhas.map(l => '<tr><td>' + dm(l.entregue_em) + '</td><td class="obra">' + esc(l.item) + '</td><td>' + esc(l.ca || '') + '</td>' +
+        (f.linhas.length ? f.linhas.map(l => '<tr><td>' + dm(l.entregue_em) + '</td><td class="obra">' + esc(l.item) + (l.codigo ? ' (' + esc(l.codigo) + ')' : '') + '</td><td>' + esc(l.ca || '') + '</td>' +
           '<td>' + l.quantidade + '</td><td class="obra">' + esc(l.obra || '') + '</td>' +
           '<td>' + (l.confirmada_em ? dm(l.confirmada_em.slice(0, 10)) + ' ' + hora(l.confirmada_em) + ' (' + textoRegistroFacial(l.prova) + ')' : 'pendente') + '</td>' +
           '<td>' + dm(l.devolvido_em) + '</td></tr>').join('')
