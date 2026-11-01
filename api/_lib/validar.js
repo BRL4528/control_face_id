@@ -12,9 +12,15 @@
 const RX_DIA = /^\d{4}-\d{2}-\d{2}$/;
 const RX_HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-/** 'YYYY-MM-DD' que existe no calendário (rejeita 2026-02-30, 2026-13-01). */
+// Faixa de anos aceita: o Postgres recusa o ano 0000 (500 "date/time field value
+// out of range") e nenhuma data do ponto, EPI ou ocorrência sai disto.
+const ANO_MIN = 1900, ANO_MAX = 2999;
+
+/** 'YYYY-MM-DD' que existe no calendário (rejeita 2026-02-30, 2026-13-01, 0000-01-01). */
 export function diaValido(s) {
   if (typeof s !== 'string' || !RX_DIA.test(s)) return false;
+  const ano = Number(s.slice(0, 4));
+  if (ano < ANO_MIN || ano > ANO_MAX) return false;
   const d = new Date(s + 'T00:00:00Z');
   return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
 }

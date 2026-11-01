@@ -11,7 +11,7 @@ import { caVencidoNaEntrega } from '../../api/rh/almox.js';
 
 test('diaValido: formato e dia que existe no calendário', () => {
   for (const d of ['2026-01-31', '2028-02-29', '2026-12-31']) assert.equal(diaValido(d), true, d);
-  for (const d of ['2026-02-30', '2026-13-01', '2026-13-45', '2027-02-29', '2026-00-10', '2026-1-1', '', null, undefined, 20260101, '2026-01-01T00:00'])
+  for (const d of ['2026-02-30', '2026-13-01', '2026-13-45', '2027-02-29', '2026-00-10', '2026-1-1', '0000-01-01', '1899-12-31', '3000-01-01', '', null, undefined, 20260101, '2026-01-01T00:00'])
     assert.equal(diaValido(d), false, String(d));
 });
 
