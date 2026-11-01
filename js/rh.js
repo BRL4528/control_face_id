@@ -1438,6 +1438,12 @@ export const Rh = {
 
   /** Último ponto e status de hoje por pessoa, para a tabela. */
   resumoPessoa(pessoaId) {
+    // Perfil sem ponto (almoxarifado, segurança do trabalho) não recebe batidas nem
+    // escala do servidor: não afirmar "sem registro" para quem bateu.
+    const ac = this.dados.acesso;
+    if (!pode(ac, 'ponto') && !pode(ac, 'operacao') && !pode(ac, 'relatorios')) {
+      return { status: { cls: 'mut', txt: 'Não disponível no seu perfil' }, ultimo: '-' };
+    }
     const hoje = this.hojeServidor();
     const minhas = (this.dados.marcacoes || []).filter(m => m.pessoa_id === pessoaId)
       .sort((a, b) => String(b.marcado_em).localeCompare(String(a.marcado_em)));

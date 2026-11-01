@@ -819,7 +819,9 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
     const jor = jornadaDe(p.equipe_id);
     const fim = ate < hoje ? ate : hoje;
     for (let d = p.desde && p.desde > de ? p.desde : de; d <= fim; d = proximoDia(d)) {
-      if (horarioDoDia(jor, d, ehFeriado, false)) bolsa(p.pessoa_id).equipe.set(d, p.equipe_id);   // dia com ocorrência também aparece (sai FÉRIAS, ATESTADO...)
+      // Dia de trabalho entra (com ocorrência sai FÉRIAS, ATESTADO...); feriado em dia de
+      // trabalho também, para o relatório mostrar "Feriado" em vez de pular o dia.
+      if (horarioDoDia(jor, d, ehFeriado, false) || (ehFeriado.has(d) && horarioDoDia(jor, d, null, false))) bolsa(p.pessoa_id).equipe.set(d, p.equipe_id);
     }
   }
 

@@ -146,7 +146,7 @@ test('falta sem escala: quem está na equipe deve os dias de trabalho desde que 
   const r = horasPorColaborador({ ...base, pessoas, jornadas: [EFRAT], alocacoes: [], marcacoes: [], de: '2026-10-01', ate: '2026-10-31', hoje: '2026-10-14' });
   const dias = r[0].dias.map(x => x.dia + ':' + x.status);
   assert.deepEqual(dias, ['2026-10-06:falta', '2026-10-07:falta', '2026-10-08:falta', '2026-10-09:falta',
-                          '2026-10-13:falta', '2026-10-14:em_andamento']);   // 10–11 fim de semana, 12 feriado
+                          '2026-10-12:feriado', '2026-10-13:falta', '2026-10-14:em_andamento']);   // 10–11 fim de semana; 12 feriado aparece, sem falta
   assert.equal(r[0].totais.faltas, 5); assert.equal(r[0].totais.saldo, -540 * 5 + 0);
 });
 
@@ -167,4 +167,11 @@ test('problemasDaJornada: tolerância 0 vale; sem dia marcado ou saída antes da
   assert.deepEqual(problemasDaJornada({ ...base, saida: '06:00' }), ['A saída precisa ser depois da entrada']);
   assert.deepEqual(problemasDaJornada({ ...base, tolerancia_min: -1 }), ['Tolerância entre 0 e 120 minutos']);
   assert.deepEqual(problemasDaJornada({ ...base, tolerancia_min: NaN }), ['Tolerância entre 0 e 120 minutos']);
+});
+
+test('feriado em dia de trabalho aparece no relatório como Feriado, sem previsto nem falta', () => {
+  const pessoas = [{ pessoa_id: 'p1', nome: 'Ana', matricula: '1', ativo: true, equipe_id: 'e1', desde: '2026-10-01' }];
+  const r = horasPorColaborador({ ...base, pessoas, jornadas: [EFRAT], alocacoes: [], marcacoes: [], de: '2026-10-12', ate: '2026-10-12', hoje: '2026-10-20' });
+  assert.deepEqual(r[0].dias.map(x => [x.dia, x.status, x.previsto]), [['2026-10-12', 'feriado', 0]]);
+  assert.equal(r[0].totais.faltas, 0);
 });
