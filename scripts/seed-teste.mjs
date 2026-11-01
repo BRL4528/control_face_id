@@ -26,7 +26,7 @@ function descritor(pessoa) {
 
 const nomeEmp = process.argv[2] || 'RT Teste ' + new Date().toISOString().slice(0, 16);
 const empresa = id();
-const linkToken = randomBytes(6).toString('base64url');
+const linkToken = randomBytes(6).toString('hex');   // o servidor compara o token em minúsculas
 await sql`INSERT INTO empresa (id, nome, link_token) VALUES (${empresa}, ${nomeEmp}, ${linkToken})`;
 
 // Usuários do painel (senha = login + '-teste-123').
