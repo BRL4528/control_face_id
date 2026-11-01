@@ -1,7 +1,6 @@
 // Motor de reconhecimento. Isola tudo que depende do face-api e da câmera,
 // para que a orquestração da tela não precise saber nada disso.
 import { euclidiana } from './regras.js';
-import { earDosOlhos } from './liveness.js';
 
 const cfg = () => window.EFRAT_CFG;
 
@@ -68,9 +67,7 @@ function avaliar(det, canvas, boxCheia) {
     okLuz: m.bright >= c.minBright && m.bright <= c.maxBright,
     okPose: g <= c.maxYaw
   };
-  // EAR (abertura dos olhos) exposto para o detector de piscada da liveness.
-  // Só uma leitura — quem decide "piscou" é js/liveness.js, no app de ponto.
-  try { q.ear = earDosOlhos(det.landmarks); } catch (e) { q.ear = null; }
+  // q.yaw (giro do rosto) também alimenta a prova de vida "vire o rosto e volte" (js/liveness.js).
   q.ok = q.okTam && q.okNitidez && q.okLuz && q.okPose;
   q.msg = !q.okTam ? 'Aproxime o rosto'
     : !q.okLuz ? (m.bright < c.minBright ? 'Muito escuro' : 'Muito claro / contraluz')
@@ -155,7 +152,8 @@ export const Face = {
       if (!this.pronto || !video.videoWidth) return;
       const f = fingido();
       if (f) {
-        const q = { ok: f.qualidadeOk !== false, rosto: true, rel: 0.5, sharp: 300, bright: 120, yaw: 0.05, msg: f.qualidadeOk === false ? 'Muito escuro' : 'Pronto', box: { x: 10, y: 10, width: 100, height: 100 } };
+        const yawFake = Array.isArray(f.yawSeq) && f.yawSeq.length ? f.yawSeq.shift() : 0.05;   // testes simulam o giro
+        const q = { ok: f.qualidadeOk !== false, rosto: true, rel: 0.5, sharp: 300, bright: 120, yaw: yawFake, msg: f.qualidadeOk === false ? 'Muito escuro' : 'Pronto', box: { x: 10, y: 10, width: 100, height: 100 } };
         cb.onQualidade && cb.onQualidade(q);
         if (q.ok && cb.autoCaptura && cb.autoCaptura()) {
           this._seguidos++;

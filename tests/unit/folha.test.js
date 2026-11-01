@@ -32,3 +32,17 @@ test('folhaDoMes: uma linha por dia, batidas, extra, falta e rateio por obra', (
   assert.deepEqual([f.totais.dias_trabalhados, f.totais.extra, f.totais.trabalhado], [3, 60, 1680]);
   assert.equal(f.dias[11].ocorrencia, 'FERIADO');    // 12/10
 });
+
+test('hora extra: 50% em dia comum, 100% em domingo e feriado', () => {
+  const pessoas = [{ pessoa_id: 'p1', nome: 'João', matricula: '1', ativo: true, equipe_id: 'o574', desde: '2026-10-01' }];
+  const marcacoes = [
+    b('2026-10-06', '07:00'), b('2026-10-06', '11:00'), b('2026-10-06', '12:00'), b('2026-10-06', '18:00'),   // terça +1h
+    b('2026-10-11', '08:00'), b('2026-10-11', '10:00'),                                                       // domingo 2h
+    b('2026-10-12', '08:00'), b('2026-10-12', '11:00')                                                        // feriado 3h
+  ];
+  const [linha] = horasPorColaborador({ marcacoes, alocacoes: [], pessoas, equipes: [{ equipe_id: 'o574' }], jornadas: [],
+    de: '2026-10-01', ate: '2026-10-31', hoje: '2026-10-28', fuso: 'America/Campo_Grande' });
+  const f = folhaDoMes({ linha, marcacoes, mes: '2026-10', fuso: 'America/Campo_Grande', nomeEquipe: id => NOMES[id] });
+  assert.deepEqual([f.totais.extra50, f.totais.extra100, f.totais.extra], [60, 300, 360]);
+  assert.equal(f.dias[10].extra_100, true); assert.equal(f.dias[5].extra_100, false);
+});

@@ -826,7 +826,7 @@ export function motivosDaRevisao(m, cfg) {
   if (m.origem === 'manual') r.push('Registro manual, sem reconhecimento facial');
   if (m.dentro_cerca === false) r.push('Fora da cerca' + (m.distancia_cerca_m != null ? ' (' + m.distancia_cerca_m + ' m do centro)' : ''));
   else if (m.dentro_cerca == null && m.origem !== 'manual') r.push('Sem cerca definida para a equipe ou o dia');
-  if (m.liveness_ok === false) r.push('Prova de vida não detectada (olhos não fecharam)');
+  if (m.liveness_ok === false) r.push('Prova de vida não detectada (rosto não girou)');
   const deriva = Math.abs(Number(m.deriva_relogio_ms) || 0);
   if (deriva > 120000) r.push('Relógio do aparelho ' + Math.round(deriva / 60000) + ' min fora do horário do servidor');
   if (m.origem !== 'manual' && m.score != null && Number(m.score) > c.limiarAceite) {
@@ -871,7 +871,8 @@ export function rotuloObra(nome) {
  * Folha de ponto de UMA pessoa num mês ('YYYY-MM'), no formato da folha assinada:
  * uma linha por dia com as 4 primeiras batidas, total, extra, ocorrência e obra;
  * mais totais e rateio por obra (dias e horas em cada uma). `linha`: item de
- * horasPorColaborador do mesmo período. `marcacoes`: batidas não rejeitadas da
+ * horasPorColaborador do mesmo período. Hora extra separada em 50% (dia comum) e
+ * 100% (domingo e feriado). `marcacoes`: batidas não rejeitadas da
  * pessoa. `nomeEquipe(id)` dá o nome da obra. `feriados`: os da empresa
  * (os nacionais já entram). Pura.
  */
@@ -887,7 +888,7 @@ export function folhaDoMes({ linha, marcacoes, mes, fuso, nomeEquipe, feriados }
   }
   const obra = id => rotuloObra(id && nomeEquipe ? nomeEquipe(id) : '');
   const rateio = new Map();
-  const tot = { trabalhado: 0, extra: 0, a_menos: 0, faltas: 0, dias_trabalhados: 0, a_confirmar: 0, batidas_alem_de_4: 0 };
+  const tot = { trabalhado: 0, extra: 0, extra50: 0, extra100: 0, a_menos: 0, faltas: 0, dias_trabalhados: 0, a_confirmar: 0, batidas_alem_de_4: 0 };
   const dias = [];
   for (let d = 1; d <= ultimo; d++) {
     const dia = mes + '-' + String(d).padStart(2, '0');
@@ -895,11 +896,14 @@ export function folhaDoMes({ linha, marcacoes, mes, fuso, nomeEquipe, feriados }
     const bs = (batidas.get(dia) || []).slice().sort((a, b) => String(a.marcado_em).localeCompare(String(b.marcado_em)));
     const trabalhado = x ? x.trabalhado : 0;
     const extra = x && x.saldo > 0 ? x.saldo : 0;
+    // Hora extra em domingo ou feriado é 100%; nos demais dias, 50% (CLT art. 59 e 70; Lei 605/49).
+    const extra100 = extra > 0 && (new Date(dia + 'T12:00:00Z').getUTCDay() === 0 || ehFeriado.has(dia));
     if (x && x.saldo < 0) tot.a_menos += -x.saldo;
     if (x && x.status === 'falta') tot.faltas++;
     if (x && x.status === 'a_confirmar') tot.a_confirmar++;
     if (bs.length > 4) tot.batidas_alem_de_4++;
     tot.trabalhado += trabalhado; tot.extra += extra;
+    if (extra100) tot.extra100 += extra; else tot.extra50 += extra;
     if (trabalhado > 0) {
       tot.dias_trabalhados++;
       const k = (x && x.equipe_id) || '';
@@ -910,8 +914,10 @@ export function folhaDoMes({ linha, marcacoes, mes, fuso, nomeEquipe, feriados }
       dia, num: d, semana: SEMANA_FOLHA[new Date(dia + 'T12:00:00Z').getUTCDay()],
       batidas: [0, 1, 2, 3].map(i => bs[i] ? horaNoFuso(bs[i].marcado_em, fuso) : ''),
       mais_batidas: Math.max(0, bs.length - 4),
-      trabalhado, extra,
-      ocorrencia: x ? (x.ocorrencia ? TIPOS_OCORRENCIA[x.ocorrencia].folha : (OCORRENCIA_FOLHA[x.status] || '')) : ehFeriado.has(dia) ? 'FERIADO' : '',
+      trabalhado, extra, extra_100: extra100,
+      // Falta e dia a conferir vencem o rótulo da ocorrência (aviso prévio, viagem não abonam).
+      ocorrencia: x ? (OCORRENCIA_FOLHA[x.status] && x.status !== 'feriado' && x.status !== 'afastado' ? OCORRENCIA_FOLHA[x.status]
+        : x.ocorrencia ? TIPOS_OCORRENCIA[x.ocorrencia].folha : (OCORRENCIA_FOLHA[x.status] || '')) : ehFeriado.has(dia) ? 'FERIADO' : '',
       obra: bs.length || trabalhado ? obra(x && x.equipe_id) : ''
     });
   }

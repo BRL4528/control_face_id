@@ -31,3 +31,16 @@ test('férias e atestado abonam: sem falta, sem previsto, e a folha mostra o mot
   const f = folhaDoMes({ linha: l, marcacoes: [], mes: '2026-10', fuso: base.fuso, nomeEquipe: () => 'Obra 574 - X' });
   assert.equal(f.dias[5].ocorrencia, 'FÉRIAS'); assert.equal(f.dias[12].ocorrencia, 'ATESTADO'); assert.equal(f.dias[13].ocorrencia, 'FALTA');
 });
+
+test('aviso prévio: dia trabalhado normal e a folha marca SOBRE AVISO', () => {
+  const pessoas = [{ pessoa_id: 'p1', nome: 'Ana', matricula: '1', ativo: true, equipe_id: 'e1', desde: '2026-10-01' }];
+  const em = h => '2026-10-21T' + String(h + 4).padStart(2, '0') + ':00:00Z';
+  const marcacoes = [7, 11, 12, 17].map(h => ({ pessoa_id: 'p1', equipe_id: 'e1', tipo: 'entrada', marcado_em: em(h), marcado_dia: '2026-10-21', estado: 'aceita' }));
+  const [l] = horasPorColaborador({ marcacoes, alocacoes: [], pessoas, equipes: [{ equipe_id: 'e1' }], jornadas: [],
+    de: '2026-10-01', ate: '2026-10-31', hoje: '2026-10-28', fuso: 'America/Campo_Grande', ocorrencias: [oc('aviso_previo', '2026-10-19', '2026-10-30')] });
+  const d = l.dias.find(x => x.dia === '2026-10-21');
+  assert.deepEqual([d.status, d.trabalhado, d.ocorrencia], ['ok', 540, 'aviso_previo']);
+  const f = folhaDoMes({ linha: l, marcacoes, mes: '2026-10', fuso: 'America/Campo_Grande', nomeEquipe: () => 'X' });
+  assert.equal(f.dias[20].ocorrencia, 'SOBRE AVISO');
+  assert.equal(f.dias[21].ocorrencia, 'FALTA');   // 22/10 sem batida: aviso prévio não abona
+});

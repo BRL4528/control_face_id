@@ -12,10 +12,13 @@ export const TIPOS_OCORRENCIA = {
   afastamento_inss: { rotulo: 'Afastamento INSS', folha: 'AFASTADO INSS', abona: true, bloqueia: true, foto: true },
   licenca:          { rotulo: 'Licença (maternidade, paternidade, outras)', folha: 'LICENÇA', abona: true, bloqueia: true, foto: true },
   abono:            { rotulo: 'Falta justificada / abono', folha: 'ABONADO', abona: true },
-  viagem:           { rotulo: 'Viagem / trabalho externo', folha: 'EXTERNO', semCerca: true }
+  viagem:           { rotulo: 'Viagem / trabalho externo', folha: 'EXTERNO', semCerca: true },
+  // Cumprindo aviso prévio (ou de sobreaviso): o dia é trabalhado normalmente e a folha marca,
+  // como no modelo de folha da Efrat ("SOBRE AVISO" na coluna FALTAS).
+  aviso_previo:     { rotulo: 'Aviso prévio / sobreaviso', folha: 'SOBRE AVISO' }
 };
 
-const PRIORIDADE = ['afastamento_inss', 'licenca', 'ferias', 'atestado', 'abono', 'viagem'];
+const PRIORIDADE = ['afastamento_inss', 'licenca', 'ferias', 'atestado', 'abono', 'viagem', 'aviso_previo'];
 
 /**
  * Ocorrência ativa da pessoa no dia ('YYYY-MM-DD'), ou null. Entre duas no mesmo dia

@@ -3,7 +3,7 @@
 //
 //   1. Face 1:1 — compara o rosto capturado com o template do PRÓPRIO usuário
 //      (baixado na carga do dia). Confirma "é você", não descobre "quem é".
-//   2. Liveness — pede para fechar e abrir os olhos. Foto na tela não fecha.
+//   2. Liveness — pede para virar o rosto e voltar. Foto na tela não gira.
 //   3. Cerca — o GPS precisa cair dentro do raio da alocação do dia.
 //
 // O ponto nunca é negado por falha técnica: sem cerca, fora da cerca ou sem
@@ -12,7 +12,7 @@
 import { Store } from './store.js';
 import { Api } from './api.js';
 import { Face, DICA_ADORNO } from './face.js';
-import { criarDetectorPiscada } from './liveness.js';
+import { criarDetectorGiro } from './liveness.js';
 import { tipoDaVez, pontosDoDia, vereditoPorDistancia, emCooldown, agoraCorrigido, euclidiana, dia } from './regras.js';
 import { $, esc, mostrar, toast, hora, reduzirImagem } from './ui.js';
 
@@ -26,8 +26,8 @@ export const Ponto = {
   estado: 'parado',    // parado | aguardando | liveness | processando | comprovante
   doDia: [],
   cam: null,
-  piscada: null,
-  earsAbertos: [],     // EAR dos últimos quadros enquadrando o rosto: linha de base da prova de vida
+  giro: null,
+  yawsDeFrente: [],    // giro dos últimos quadros enquadrando o rosto: linha de base da prova de vida
   aoSair: null,
   aoProvar: null,      // assinatura da folha: recebe a prova do rosto em vez de registrar batida
 
@@ -114,8 +114,8 @@ export const Ponto = {
 
   iniciarCiclo() {
     this.estado = 'aguardando';
-    this.piscada = null;
-    this.earsAbertos = [];
+    this.giro = null;
+    this.yawsDeFrente = [];
     if (this.aoProvar) { $('dica').textContent = 'Confirmando que é você. Olhe para a câmera'; return; }
     const { slots, proximo } = pontosDoDia(this.doDia);
     const rot = proximo != null ? slots[proximo].rotulo : 'ponto';
@@ -141,17 +141,17 @@ export const Ponto = {
     } catch (e) { toast('Sem acesso à câmera: ' + e.name, 'bad'); return false; }
   },
 
-  /** Cada quadro: mostra a dica e, na fase de liveness, alimenta o detector de piscada. */
+  /** Cada quadro: mostra a dica e, na fase de liveness, alimenta o detector de giro. */
   aoQuadro(q) {
     if (this.estado === 'processando' || this.estado === 'comprovante') return;
-    if (this.estado === 'aguardando' && q.rosto && q.ear != null) {
-      this.earsAbertos.push(q.ear);
-      if (this.earsAbertos.length > 8) this.earsAbertos.shift();
+    if (this.estado === 'aguardando' && q.rosto && Number.isFinite(q.yaw)) {
+      this.yawsDeFrente.push(q.yaw);
+      if (this.yawsDeFrente.length > 8) this.yawsDeFrente.shift();
     }
     if (this.estado === 'liveness') {
-      $('dica').textContent = 'Feche os olhos por 1 segundo e abra';
+      $('dica').textContent = 'Vire o rosto devagar para um lado e volte';
       $('dica').style.color = '#2d6cdf';
-      if (q.rosto && q.ear != null && this.piscada && this.piscada.alimentar(q.ear)) {
+      if (q.rosto && Number.isFinite(q.yaw) && this.giro && this.giro.alimentar(q.yaw)) {
         this.aposLiveness();
       }
       return;
@@ -181,7 +181,7 @@ export const Ponto = {
       this.capPendente = { cap, dist: null, veredito: 'revisar' };
       if (cfg().livenessAtivo) {
         this.estado = 'liveness';
-        this.piscada = criarDetectorPiscada(this.earsAbertos);
+        this.giro = criarDetectorGiro(this.yawsDeFrente);
         this._livenessTimer = setTimeout(() => this.aposLiveness(), cfg().livenessTimeoutMs);
       } else this.aposLiveness();
       return;
@@ -210,7 +210,7 @@ export const Ponto = {
     this.capPendente = { cap, dist, veredito };
     if (cfg().livenessAtivo) {
       this.estado = 'liveness';
-      this.piscada = criarDetectorPiscada(this.earsAbertos);
+      this.giro = criarDetectorGiro(this.yawsDeFrente);
       this._livenessInicio = Date.now();
       this._livenessTimer = setTimeout(() => this.aposLiveness(), cfg().livenessTimeoutMs);
     } else {
@@ -221,7 +221,7 @@ export const Ponto = {
   async aposLiveness() {
     if (this.estado !== 'liveness' && this.capPendente == null) return;
     clearTimeout(this._livenessTimer);
-    const passou = this.piscada ? this.piscada.completo : true;
+    const passou = this.giro ? this.giro.completo : true;
     this.estado = 'processando';
     if (this.aoProvar) {
       const fn = this.aoProvar, { cap, dist } = this.capPendente;
@@ -291,9 +291,9 @@ export const Ponto = {
   },
 
   diagnosticoLiveness() {
-    const d = this.piscada ? this.piscada.diagnostico : null;
+    const d = this.giro ? this.giro.diagnostico : null;
     const f = v => v == null ? '-' : v.toFixed(3).replace('.', ',');
-    return d ? 'prova de vida: base ' + f(d.base) + ', mínimo ' + f(d.minimo) + ', ' + d.quadros + ' quadros' : 'prova de vida: sem leitura do olho';
+    return d ? 'prova de vida (giro): base ' + f(d.base) + ', maior desvio ' + f(d.maior_desvio) + ', ' + d.quadros + ' quadros' : 'prova de vida: sem leitura do rosto';
   },
 
   comprovante(m) {
@@ -523,7 +523,8 @@ export const Ponto = {
         '<table class="folha-mini"><tbody>' +
           '<tr><td>Dias trabalhados</td><td><b>' + (t.dias_trabalhados || 0) + '</b></td></tr>' +
           '<tr><td>Horas trabalhadas</td><td><b>' + hm(t.trabalhado) + '</b></td></tr>' +
-          '<tr><td>Horas extras</td><td><b>' + hm(t.extra) + '</b></td></tr>' +
+          '<tr><td>Horas extras 50%</td><td><b>' + hm(t.extra50 != null ? t.extra50 : t.extra) + '</b></td></tr>' +
+          (t.extra100 ? '<tr><td>Horas extras 100%</td><td><b>' + hm(t.extra100) + '</b></td></tr>' : '') +
           '<tr><td>Faltas</td><td><b>' + (t.faltas || 0) + '</b></td></tr>' +
         '</tbody></table>' +
         ((c.rateio || []).length ? '<p class="nota" style="text-align:left">' + c.rateio.map(r => esc(r.obra) + ': ' + r.dias + ' dia(s)').join('<br>') + '</p>' : '') +

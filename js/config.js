@@ -17,7 +17,7 @@ window.EFRAT_CFG = Object.assign({
   inputSize: 416, roiInputSize: 224,
   autoCapturaCiclos: 2,
 
-  // Liveness (prova de vida leve): pede para fechar e abrir os olhos. Sem isso,
+  // Liveness (prova de vida leve): pede para virar o rosto e voltar. Sem isso,
   // foto na tela passa. Combinado com cerca + 1:1, torna a fraude impraticável sem hardware.
   livenessAtivo: true,
   livenessTimeoutMs: 8000,

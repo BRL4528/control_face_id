@@ -64,7 +64,7 @@ function pagina(f, ctx) {
       '<td>' + d.num + '</td><td>' + d.semana + '</td>' +
       d.batidas.map((h, i) => '<td>' + (h || '') + (i === 3 && d.mais_batidas ? '*' : '') + '</td>').join('') +
       '<td>' + (d.trabalhado ? hm(d.trabalhado) : '') + '</td>' +
-      '<td>' + (d.extra ? hm(d.extra) : '') + '</td>' +
+      '<td>' + (d.extra ? hm(d.extra) + (d.extra_100 ? ' (100%)' : '') : '') + '</td>' +
       '<td class="oc ' + classeOc(d.ocorrencia) + '">' + (d.ocorrencia || '') + '</td>' +
       '<td class="obra">' + esc(d.obra) + '</td></tr>').join('');
   const t = f.totais;
@@ -91,7 +91,8 @@ function pagina(f, ctx) {
         '<table><tbody>' +
           '<tr><td>Dias trabalhados</td><td><b>' + t.dias_trabalhados + '</b></td></tr>' +
           '<tr><td>Horas trabalhadas</td><td><b>' + hm(t.trabalhado) + '</b></td></tr>' +
-          '<tr><td>Horas extras</td><td><b>' + hm(t.extra) + '</b></td></tr>' +
+          '<tr><td>Horas extras 50%</td><td><b>' + hm(t.extra50 != null ? t.extra50 : t.extra) + '</b></td></tr>' +
+          '<tr><td>Horas extras 100% (domingo e feriado)</td><td><b>' + hm(t.extra100 || 0) + '</b></td></tr>' +
           '<tr><td>Horas a menos</td><td><b>' + hm(t.a_menos) + '</b></td></tr>' +
           '<tr><td>Faltas</td><td><b>' + t.faltas + '</b></td></tr>' +
         '</tbody></table>' +
