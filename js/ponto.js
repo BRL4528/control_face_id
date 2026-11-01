@@ -30,6 +30,8 @@ export const Ponto = {
   yawsDeFrente: [],    // giro dos últimos quadros enquadrando o rosto: linha de base da prova de vida
   aoSair: null,
   aoProvar: null,      // assinatura da folha: recebe a prova do rosto em vez de registrar batida
+  falhasProva: 0,      // prova de vida reprovada na assinatura/ciência/EPI (reinicia ao abrir a câmera)
+  provaSemVida: false, // enviada sem prova de vida: o fim avisa que o RH vai conferir
 
   async abrir(dispositivo, carga, aoSair) {
     this.dispositivo = dispositivo;
@@ -99,6 +101,8 @@ export const Ponto = {
   /* ------------------------------------------------------- câmera */
 
   async abrirCamera() {
+    this.falhasProva = 0;
+    this.provaSemVida = false;
     $('painelDia').classList.add('hide');
     $('areaCamera').classList.remove('hide');
     if (!(await this.ligarCamera())) { this.fecharCamera(); return; }
@@ -107,6 +111,8 @@ export const Ponto = {
 
   fecharCamera() {
     this.pararCamera();
+    const aviso = $('cartaoProva'); if (aviso) aviso.remove();   // aviso de prova de vida reprovada
+    this.provaSemVida = false;   // envio sem prova de vida que falhou não marca o próximo fim (contestação, atestado)
     $('areaCamera') && $('areaCamera').classList.add('hide');
     $('painelDia') && $('painelDia').classList.remove('hide');
     this.estado = 'parado';
@@ -116,11 +122,22 @@ export const Ponto = {
     this.estado = 'aguardando';
     this.giro = null;
     this.yawsDeFrente = [];
+    this.textoPrivacidade();
     if (this.aoProvar) { $('dica').textContent = 'Confirmando que é você. Olhe para a câmera'; return; }
     const { slots, proximo } = pontosDoDia(this.doDia);
     const rot = proximo != null ? slots[proximo].rotulo : 'ponto';
     $('dica').textContent = 'Registrando ' + rot + '. Olhe para a câmera';
     if (!this.alocacao && !this.modoCadastro) toast('Sem alocação hoje — irá para conferência do RH', 'warn');
+  },
+
+  /** O que acontece com a foto do rosto, conforme o uso da câmera. */
+  textoPrivacidade() {
+    const el = $('privacidade'); if (!el) return;
+    el.textContent = this.aoProvar
+      ? 'Uma foto do seu rosto fica guardada como prova.'
+      : this.modoCadastro
+        ? 'Uma foto do seu rosto fica guardada para o RH confirmar o seu cadastro.'
+        : 'A foto do rosto só é guardada quando a marcação vai para conferência do RH.';
   },
 
   async ligarCamera() {
@@ -224,18 +241,54 @@ export const Ponto = {
     const passou = this.giro ? this.giro.completo : true;
     this.estado = 'processando';
     if (this.aoProvar) {
-      const fn = this.aoProvar, { cap, dist } = this.capPendente;
+      const pendente = this.capPendente;
       this.capPendente = null;
-      const pos = await this.posicao();
-      this.pararCamera();
-      $('areaCamera').classList.add('hide');
-      await fn({ score: dist == null ? null : Number(dist.toFixed(4)), liveness_ok: passou, foto: cap.thumb || null,
-                 lat: pos ? pos.coords.latitude : null, lng: pos ? pos.coords.longitude : null,
-                 precisao_m: pos ? pos.coords.accuracy : null, deriva_ms: this.deriva });
+      // Assinatura, ciência e EPI não seguem com a prova de vida reprovada: a pessoa
+      // tenta de novo. Depois de 2 falhas pode enviar mesmo assim, e o RH confere.
+      if (!passou) { this.provaReprovada(pendente); return; }
+      await this.entregarProva(pendente, true);
       return;
     }
     await this.registrar(this.capPendente, passou);
     this.capPendente = null;
+  },
+
+  /** Envia a prova do rosto para quem pediu (folha, ciência, EPI). */
+  async entregarProva({ cap, dist }, livenessOk) {
+    const fn = this.aoProvar;
+    if (!fn) return;
+    this.provaSemVida = !livenessOk;
+    const aviso = $('cartaoProva'); if (aviso) aviso.remove();
+    const pos = await this.posicao();
+    this.pararCamera();
+    $('areaCamera').classList.add('hide');
+    await fn({ score: dist == null ? null : Number(dist.toFixed(4)), liveness_ok: livenessOk, foto: cap.thumb || null,
+               lat: pos ? pos.coords.latitude : null, lng: pos ? pos.coords.longitude : null,
+               precisao_m: pos ? pos.coords.accuracy : null, deriva_ms: this.deriva });
+  },
+
+  /** Prova de vida reprovada na assinatura: pede outra tentativa com a câmera aberta. */
+  provaReprovada(pendente) {
+    this.falhasProva++;
+    this.giro = null;
+    $('dica').textContent = '';
+    const podeEnviar = this.falhasProva >= 2;
+    $('cartao').innerHTML = '<div class="cartao warn" id="cartaoProva"><div class="tit">Não vi você virar o rosto. Vamos tentar de novo</div>' +
+      '<div class="sub">Olhe para a câmera e, quando pedir, vire o rosto devagar para um lado e volte.</div>' +
+      '<button class="act big" id="btnProvaDeNovo" style="margin-top:12px">Tentar de novo</button>' +
+      (podeEnviar
+        ? '<button class="act ghost" id="btnProvaMesmoAssim" style="margin-top:8px">Enviar mesmo assim</button>' +
+          '<div class="sub" style="margin-top:6px">Se enviar assim, o RH vai conferir porque a prova de vida não passou.</div>'
+        : '') +
+      '</div>';
+    $('btnProvaDeNovo').onclick = () => {
+      $('cartao').innerHTML = '';
+      this.iniciarCiclo();
+    };
+    if (podeEnviar) $('btnProvaMesmoAssim').onclick = () => {
+      $('cartao').innerHTML = '';
+      this.entregarProva(pendente, false);
+    };
   },
 
   /* -------------------------------------------------------- geo + marcação */
@@ -577,9 +630,12 @@ export const Ponto = {
 
   fimFolha(msg, tipo, em) {
     this.aoProvar = null;
+    const semVida = this.provaSemVida;
+    this.provaSemVida = false;
     $('painelDia').innerHTML = '';
-    $('cartao').innerHTML = '<div class="cartao ' + tipo + '"><div class="tit">' + esc(msg) + '</div>' +
+    $('cartao').innerHTML = '<div class="cartao ' + (semVida && tipo === 'ok' ? 'warn' : tipo) + '"><div class="tit">' + esc(msg) + '</div>' +
       (em ? '<div class="sub">Registrado às ' + hora(em) + '</div>' : '') +
+      (semVida ? '<div class="sub">Enviado sem prova de vida: o RH vai conferir.</div>' : '') +
       '<button class="act ghost" id="btnFimFolha" style="margin-top:12px">Voltar</button></div>';
     $('btnFimFolha').onclick = () => this.sair();
   },

@@ -17,8 +17,8 @@ const proximoDia = d => new Date(Date.parse(d + 'T12:00:00Z') + 86400000).toISOS
 
 /**
  * Prazo da CAT: até o 1º dia útil seguinte ao acidente (Lei 8.213/91, art. 22).
- * Pula sábado, domingo e feriado (nacionais + os da empresa). Óbito é imediato,
- * o painel avisa à parte.
+ * Pula sábado, domingo e feriado (nacionais + os da empresa). Óbito é imediato
+ * (ver situacaoCat).
  */
 export function prazoCat(dia, feriadosDaEmpresa) {
   const fer = diasDeFeriado(dia, String(Number(dia.slice(0, 4)) + 1) + '-12-31', feriadosDaEmpresa);
@@ -30,8 +30,15 @@ export function prazoCat(dia, feriadosDaEmpresa) {
   }
 }
 
-/** Situação do prazo de um acidente ainda sem CAT: 'no_prazo' | 'vence_hoje' | 'atrasada'. */
+/**
+ * Situação do prazo de um acidente ainda sem CAT: 'no_prazo' | 'vence_hoje' | 'atrasada'.
+ * Com óbito (dados.obito) a comunicação é imediata: o prazo é o próprio dia do
+ * acidente e o retorno leva `obito: true`.
+ */
 export function situacaoCat(evento, hoje, feriadosDaEmpresa) {
+  if (evento.dados && evento.dados.obito) {
+    return { prazo: evento.data, situacao: hoje > evento.data ? 'atrasada' : 'vence_hoje', obito: true };
+  }
   const prazo = prazoCat(evento.data, feriadosDaEmpresa);
   return { prazo, situacao: hoje > prazo ? 'atrasada' : hoje === prazo ? 'vence_hoje' : 'no_prazo' };
 }

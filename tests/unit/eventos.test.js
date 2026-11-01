@@ -16,6 +16,13 @@ test('situação do prazo', () => {
   assert.equal(situacaoCat(ev, '2026-10-29').situacao, 'atrasada');
 });
 
+test('acidente com óbito: CAT imediata, vence no dia e atrasa no dia seguinte', () => {
+  const ev = { data: '2026-10-30', dados: { obito: true } };   // sexta: sem óbito o prazo iria a 03/11
+  assert.deepEqual(situacaoCat(ev, '2026-10-30'), { prazo: '2026-10-30', situacao: 'vence_hoje', obito: true });
+  assert.equal(situacaoCat(ev, '2026-10-31').situacao, 'atrasada');
+  assert.equal(situacaoCat({ data: '2026-10-30', dados: { obito: false } }, '2026-10-31').situacao, 'no_prazo');
+});
+
 test('rota de tabela nova antes da migração responde 503, não 500', async () => {
   const { faltaTabela, comTabelaNova } = await import('../../api/_lib/tabela-nova.js');
   assert.equal(faltaTabela(new Error('relation "evento" does not exist')), true);

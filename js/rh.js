@@ -13,14 +13,14 @@ import {
   exceptionsDoDia,
   jornadaDaEquipe, horasEntradaPorEquipe, csvDe,
   alertasDePlanejamento, horasPorColaborador, fmtMinutos, dia as diaDe, motivosDaRevisao, rotuloAuditoria,
-  tiposPelaOrdem, classificarPendente, diasDeFeriado, feriadosNacionais, horarioDoDia, folhaDoMes
+  tiposPelaOrdem, classificarPendente, diasDeFeriado, feriadosNacionais, horarioDoDia, folhaDoMes, problemasDaJornada
 } from './regras.js';
 import { $, esc, mostrar, toast, hora, data, definirFuso, reduzirImagem } from './ui.js';
-import { janelaDasFolhas, escreverFolhas, htmlFichaEpi } from './folha.js';
+import { janelaDasFolhas, escreverFolhas, htmlFichaEpi, textoRegistroFacial } from './folha.js';
 import { TIPOS_OCORRENCIA, ocorrenciaDoDia } from './ocorrencias.js';
 import { TIPOS_EVENTO, ESTADOS_EVENTO, situacaoCat } from './eventos.js';
-import { TIPOS_ITEM, ESTADOS_ENTREGA, alertasDaEntrega } from './almox.js';
-import { PERFIS, pode, ABA_MODULO } from './acessos.js';
+import { TIPOS_ITEM, ESTADOS_ENTREGA, alertasDaEntrega, caVencidoEm } from './almox.js';
+import { PERFIS, pode, ABA_MODULO, podeEditarJornadas } from './acessos.js';
 
 // Rótulo da aba na trilha do topo (breadcrumb) e no título de página.
 const TITULOS = {
@@ -272,7 +272,7 @@ export const Rh = {
       d.servidor_hora, (this.jornadaPadrao() || {}).entrada || cfg.horaEntrada || '08:00',
       horasEntradaPorEquipe(d.equipes, d.jornadas, this.hojeServidor(),   // hora-limite do dia pela jornada; feriado não cobra
         diasDeFeriado(this.hojeServidor(), this.hojeServidor(), cfg.feriados), this.jornadaPadrao()),
-      cfg.limiarAceite);
+      cfg.limiarAceite, (d.empresa || {}).fuso || 'America/Campo_Grande');   // agora no relógio da empresa
   },
 
   /** Fila de Pendências: exceções de hoje + marcações que ficaram pendentes em
@@ -745,7 +745,11 @@ export const Rh = {
 
     const ind = indicadores(d.marcacoes, d.pessoas, d.equipes);
     // Quem está de férias, atestado ou licença hoje não é esperado na obra.
-    const cards = presencaPorEquipe((d.pessoas || []).filter(p => !this.abonadoHoje(p.pessoa_id)), d.marcacoes, d.equipes, hoje);
+    // Só é previsto quem tem horário hoje pela jornada da equipe (domingo, folga e
+    // feriado não cobram; a escala do dia marca o dia como de trabalho).
+    const cards = presencaPorEquipe((d.pessoas || []).filter(p => !this.abonadoHoje(p.pessoa_id)), d.marcacoes, d.equipes, hoje,
+      { jornadas: d.jornadas, jornadaPadrao: this.jornadaPadrao(), feriados: diasDeFeriado(hoje, hoje, cfg.feriados), alocacoes: d.alocacoes_hoje });
+    const feriadoHoje = diasDeFeriado(hoje, hoje, cfg.feriados).has(hoje);
     const serie = serieDiaria(d.marcacoes, d.periodo_dias || this.dias, hoje);
     const motivos = pendenciasPorMotivo(d.marcacoes, d.recadastros, d.pessoas);
     const exc = this.pendenciasAbertas();   // mesmo número do badge e da aba Pendências
@@ -778,7 +782,8 @@ export const Rh = {
             '<span class="pill ' + (pct >= 90 ? 'ok' : 'warn') + '"><span class="dot"></span>' +
               (pct >= 90 ? 'Ativa' : 'Atenção') + '</span>' +
             '<span class="team-cnt">' + c.esperados + ' colaboradores</span></div>' +
-          '<div class="team-meta">🕑 ' + esc(this.jornadaDe(c.equipe_id)) + '</div>' +
+          '<div class="team-meta">🕑 ' + (c.horario ? 'Hoje das ' + esc(c.horario.entrada) + ' às ' + esc(c.horario.saida)
+            : 'Hoje é ' + (feriadoHoje ? 'feriado' : 'folga') + ' nesta jornada; quem bateu conta como presente') + '</div>' +
           '<div class="team-pres">' +
             '<div style="display:flex;align-items:baseline;gap:8px">' +
               '<span class="num">' + c.presentes + ' / ' + c.esperados + '</span>' +
@@ -832,7 +837,7 @@ export const Rh = {
       '</div></div>' +
 
       '<div class="kpis">' +
-        kpi('Previstos hoje', esp, (cards.length) + ' equipe(s) em operação') +
+        kpi('Previstos hoje', esp, cards.length ? cards.length + ' equipe(s) em operação' : (feriadoHoje ? 'Hoje é feriado: ninguém previsto' : 'Ninguém previsto hoje pela jornada')) +
         kpi('Presentes', pre, ind.taxaManual + '% por registro manual') +
         kpi('Presença', presencaHoje == null ? '—' : presencaHoje + '%', 'Meta operacional 95%') +
         kpi('Requerem atenção', exc.length, 'Exceções aguardando o RH', exc.length > 0) +
@@ -843,7 +848,8 @@ export const Rh = {
           '<div class="sec-tit"><h2>Equipes em operação</h2>' +
             '<button class="link" id="verPlanejamento">Ver ajustes do dia</button></div>' +
           (cards.length ? cards.map(teamCard).join('')
-            : '<div class="v2card" style="padding:20px;color:#64748b">Nenhuma equipe com pessoas ativas hoje.</div>') +
+            : '<div class="v2card" style="padding:20px;color:#64748b">' + (feriadoHoje ? 'Hoje é feriado: nenhuma equipe tem gente prevista.'
+              : 'Ninguém previsto hoje: é folga pela jornada das equipes ou não há pessoas ativas.') + '</div>') +
         '</section>' +
         '<div>' +
           '<section class="side-sec">' +
@@ -2160,6 +2166,8 @@ export const Rh = {
     const js = (this.dados.jornadas || []).slice().sort((a, b) => a.nome.localeCompare(b.nome));
     const eqs = (this.dados.equipes || []).slice().sort((a, b) => a.nome.localeCompare(b.nome));
     const pessoas = (this.dados.pessoas || []).filter(p => p.ativo);
+    // Gestor de obra não cria nem edita jornada (vale para a empresa toda); só associa às equipes dele.
+    const editaJornada = podeEditarJornadas(this.dados.acesso);
 
     const linhaJornada = j =>
       '<tr><td><b>' + esc(j.nome) + '</b></td>' +
@@ -2167,12 +2175,12 @@ export const Rh = {
       '<td>' + j.tolerancia_min + ' min</td>' +
       '<td>' + (j.intervalo_min != null ? j.intervalo_min : 60) + ' min</td>' +
       '<td><span class="pill ' + (j.ativa ? 'ok' : 'mut') + '"><span class="dot"></span>' + (j.ativa ? 'Ativa' : 'Inativa') + '</span></td>' +
-      '<td style="text-align:right"><button class="v2btn ghost mini" data-jed="' + esc(j.jornada_id) + '">Editar</button></td></tr>';
+      '<td style="text-align:right">' + (editaJornada ? '<button class="v2btn ghost mini" data-jed="' + esc(j.jornada_id) + '">Editar</button>' : '') + '</td></tr>';
 
     const linhaEquipe = e => {
-      const opts = '<option value="">— sem jornada (usa padrão) —</option>' +
+      const opts = '<option value="">Sem jornada (usa a padrão)</option>' +
         js.map(j => '<option value="' + j.jornada_id + '"' + (e.jornada_id === j.jornada_id ? ' selected' : '') + '>' + esc(j.nome) + '</option>').join('');
-      const sopts = '<option value="">— sem supervisor —</option>' +
+      const sopts = '<option value="">Sem supervisor</option>' +
         pessoas.map(p => '<option value="' + p.pessoa_id + '"' + (e.supervisor_id === p.pessoa_id ? ' selected' : '') + '>' + esc(p.nome) + '</option>').join('');
       return '<tr><td><b>' + esc(e.nome) + '</b></td>' +
         '<td><select class="inp" data-assoc-eq="' + esc(e.equipe_id) + '" data-assoc="jornada">' + opts + '</select></td>' +
@@ -2181,8 +2189,9 @@ export const Rh = {
 
     $('rh-jornadas').innerHTML =
       '<div class="pg-head"><div><h1 class="tit">Jornadas</h1>' +
-        '<p class="sub">Turnos de trabalho. A hora de entrada define quando a ausência vira pendência.</p></div>' +
-        '<div class="acoes"><button class="v2btn" id="btnNovaJornada">+ Nova jornada</button></div></div>' +
+        '<p class="sub">Turnos de trabalho. A hora de entrada define quando a ausência vira pendência.' +
+          (editaJornada ? '' : ' Só o RH cria e altera jornadas; aqui você escolhe a jornada e o supervisor das suas equipes.') + '</p></div>' +
+        (editaJornada ? '<div class="acoes"><button class="v2btn" id="btnNovaJornada">+ Nova jornada</button></div>' : '') + '</div>' +
       '<div id="areaJornada"></div>' +
       '<div class="tbl-wrap" style="margin-bottom:16px"><table class="adtable"><thead><tr>' +
         '<th>Jornada</th><th>Horário</th><th>Tolerância</th><th>Intervalo</th><th>Status</th><th></th></tr></thead><tbody>' +
@@ -2194,7 +2203,7 @@ export const Rh = {
         (eqs.length ? eqs.map(linhaEquipe).join('') : '<tr><td colspan="3" style="padding:30px;text-align:center;color:#64748b">Nenhuma equipe.</td></tr>') +
       '</tbody></table></div>';
 
-    $('btnNovaJornada').onclick = () => this.formJornada(null);
+    if (editaJornada) $('btnNovaJornada').onclick = () => this.formJornada(null);
     $('rh-jornadas').querySelectorAll('[data-jed]').forEach(b => {
       b.onclick = () => this.formJornada(js.find(j => j.jornada_id === b.dataset.jed));
     });
@@ -2245,12 +2254,17 @@ export const Rh = {
     $('btnSalvarJornada').onclick = async () => {
       const nome = $('jNome').value.trim();
       if (!nome) { toast('Informe o nome', 'warn'); return; }
-      const r = await ApiRh.jornada(this.token, {
+      // Tolerância 0 é válida (sem margem); só o campo vazio cai no padrão de 10 min.
+      const tv = String($('jTol').value).trim();
+      const corpo = {
         jornada_id: j.jornada_id, nome, entrada: $('jEntrada').value, saida: $('jSaida').value,
-        tolerancia_min: Number($('jTol').value) || 10,
+        tolerancia_min: tv === '' ? 10 : Math.round(Number(tv)),
         intervalo_min: Math.max(0, Number($('jInt').value) || 0),
         dias: this.lerDiasJornada()
-      });
+      };
+      const probs = problemasDaJornada(corpo);
+      if (probs.length) { toast(probs[0], 'warn'); return; }
+      const r = await ApiRh.jornada(this.token, corpo);
       if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
       toast('Jornada salva', 'ok');
       $('areaJornada').innerHTML = '';
@@ -2564,7 +2578,7 @@ export const Rh = {
           const [txt, cls] = ROT[f.situacao] || ROT.nao_enviada;
           const det = f.situacao === 'contestada' ? esc(f.contestacao || '')
             : f.assinatura ? 'em ' + esc(this.dataCurta(String(f.assinatura.em).slice(0, 10))) + ' às ' + hora(f.assinatura.em) +
-                (f.assinatura.liveness_ok ? '' : ' · sem prova de vida') : '';
+                ' · ' + textoRegistroFacial(f.assinatura) : '';
           return '<tr><td>' + esc(f.nome) + '</td><td><span class="pill ' + cls + '"><span class="dot"></span>' + txt + '</span></td><td>' + det + '</td></tr>';
         }).join('') +
       '</tbody></table></div>';
@@ -2609,7 +2623,7 @@ export const Rh = {
         '<td class="mono">' + fmtMinutos(x.previsto) + '</td><td class="mono">' + fmtMinutos(x.trabalhado) + '</td>' +
         '<td class="mono"' + (x.saldo != null ? saldoCls(x.saldo) : '') + '>' + (x.saldo != null ? fmtMinutos(x.saldo, true) : '—') + '</td>' +
         '<td class="mono">' + (x.atraso ? fmtMinutos(x.atraso) : '—') + '</td>' +
-        '<td>' + (x.ocorrencia && x.status === 'ocorrencia' ? TIPOS_OCORRENCIA[x.ocorrencia].rotulo : ST[x.status]) + (x.a_confirmar ? ' · ' + fmtMinutos(x.a_confirmar) + ' pendentes' : '') +
+        '<td>' + esc(this.rotuloSituacaoDia(x, ST)) + (x.a_confirmar ? ' · ' + fmtMinutos(x.a_confirmar) + ' pendentes' : '') +
           (x.intervalo_descontado ? ' · <span class="nota" title="Só 2 batidas: o intervalo da jornada foi descontado">intervalo ' + fmtMinutos(x.intervalo_descontado) + ' descontado</span>' : '') +
           (x.na_tolerancia ? ' · <span class="nota">dentro da tolerância</span>' : '') + '</td></tr>').join('') +
       '</tbody></table></td></tr>';
@@ -2629,13 +2643,23 @@ export const Rh = {
     });
   },
 
+  /** Situação do dia no relatório de horas. Com ocorrência no dia, o rótulo dela
+   *  sempre aparece: sozinho quando o dia é dela, "(com batida)" quando a pessoa
+   *  bateu num dia abonado, e junto da situação nos demais casos (viagem, aviso prévio). */
+  rotuloSituacaoDia(x, ST) {
+    const oc = x.ocorrencia && TIPOS_OCORRENCIA[x.ocorrencia] ? TIPOS_OCORRENCIA[x.ocorrencia].rotulo : '';
+    if (!oc) return ST[x.status] || '';
+    if (x.status === 'ocorrencia') return oc + (x.conflito_ocorrencia ? ' (com batida)' : '');
+    return oc + ' · ' + (ST[x.status] || '');
+  },
+
   csvHoras() {
     const h = this.horasLinhas; if (!h) return;
     const ST = { ok: 'OK', falta: 'Falta', incompleto: 'Incompleto', a_confirmar: 'A confirmar', folga: 'Folga (extra)', feriado: 'Feriado', afastado: 'Afastado', em_andamento: 'Em andamento' };
     const linhas = [];
     for (const l of h.linhas) for (const x of l.dias) {
       linhas.push([l.nome, l.matricula, x.dia, this.nomeEquipe(x.equipe_id), fmtMinutos(x.previsto), fmtMinutos(x.trabalhado),
-        x.saldo != null ? fmtMinutos(x.saldo, true) : '', x.atraso ? fmtMinutos(x.atraso) : '', x.ocorrencia && x.status === 'ocorrencia' ? TIPOS_OCORRENCIA[x.ocorrencia].rotulo : ST[x.status],
+        x.saldo != null ? fmtMinutos(x.saldo, true) : '', x.atraso ? fmtMinutos(x.atraso) : '', this.rotuloSituacaoDia(x, ST),
         x.a_confirmar ? fmtMinutos(x.a_confirmar) : '']);
     }
     this.baixarCsv('horas-' + h.de + '_' + h.ate + '.csv',
@@ -2811,11 +2835,14 @@ export const Rh = {
     const fotos = e => (e.tem_anexo ? '<button class="v2btn ghost mini" data-ev-foto="' + esc(e.id) + '">Ver foto</button> ' : '') +
       (e.tem_cat ? '<button class="v2btn ghost mini" data-ev-cat-foto="' + esc(e.id) + '">Ver CAT</button> ' : '');
     const situacao = e => {
-      if (e.estado === 'ciente') return pill('Ciente em ' + dm(String(e.ciencia && e.ciencia.em || '').slice(0, 10)), 'ok');
+      // Ciência: o que o app registrou do rosto (rosto e prova de vida, rosto sem prova de vida ou nada).
+      if (e.estado === 'ciente') return pill('Ciente em ' + dm(String(e.ciencia && e.ciencia.em || '').slice(0, 10)) + ' · ' + textoRegistroFacial(e.ciencia),
+        textoRegistroFacial(e.ciencia) === 'rosto e prova de vida' ? 'ok' : 'warn');
       if (e.estado === 'recusou') return pill('Recusou, com testemunhas', 'mut');
       if (e.estado === 'concluido') return pill('CAT ' + ((e.dados.cat || {}).numero || ''), 'ok');
       if (e.estado === 'aguardando_cat') {
         const s = situacaoCat(e, hoje, cfg.feriados);
+        if (s.obito) return pill(s.situacao === 'atrasada' ? 'Óbito: CAT atrasada (óbito em ' + dm(s.prazo) + ')' : 'Óbito: comunicar imediatamente', 'bad');
         return pill(s.situacao === 'atrasada' ? 'CAT atrasada (prazo ' + dm(s.prazo) + ')' : s.situacao === 'vence_hoje' ? 'CAT vence hoje' : 'Aguardando CAT até ' + dm(s.prazo),
           s.situacao === 'no_prazo' ? 'mut' : 'bad');
       }
@@ -2983,9 +3010,11 @@ export const Rh = {
     const ROT_AL = { ca_vencido: ['CA vencido na entrega', 'bad'], trocar: ['Trocar EPI', 'bad'], trocar_em_breve: ['Trocar em breve', 'mut'], atrasada: ['Devolução atrasada', 'bad'] };
     const inativo = id => { const p = this.pessoaDe(id); return p && !p.ativo; };
     const comAlerta = entregas.map(e => {
-      const a = alertasDaEntrega(e, itemDe(e.item_id), hoje).alertas.slice();
+      // Entrega trocada por uma mais nova do mesmo item não pede mais troca.
+      const r = alertasDaEntrega(e, itemDe(e.item_id), hoje, entregas);
+      const a = r.alertas.slice();
       if (inativo(e.colaborador_id) && e.estado !== 'devolvida' && (itemDe(e.item_id) || {}).tipo === 'ferramenta') a.push('desligado');
-      return Object.assign({}, e, { alertas: a });
+      return Object.assign({}, e, { alertas: a, substituida: !!r.substituida });
     });
     ROT_AL.desligado = ['Desligado com ferramenta', 'bad'];
     const busca = (this.alBusca || '').trim().toLowerCase(), so = this.alSoAlertas;
@@ -3010,10 +3039,12 @@ export const Rh = {
               '<td>' + esc(it.nome) + ' <span class="mt">(' + esc((TIPOS_ITEM[it.tipo] || {}).rotulo || '') + (e.ca ? ', CA ' + esc(e.ca) : '') + ')</span><div class="mt">' + e.quantidade + ' un.</div></td>' +
               '<td class="mono">' + dm(e.entregue_em) + (e.devolver_ate ? '<div class="mt">devolver até ' + dm(e.devolver_ate) + '</div>' : '') + '</td>' +
               '<td>' + pill(e.estado === 'devolvida' ? 'Devolvida em ' + dm(e.devolvido_em) : e.estado === 'confirmada' ? 'Confirmada no app' : ESTADOS_ENTREGA[e.estado] || e.estado,
-                    e.estado === 'aguardando_ciencia' ? 'mut' : 'ok') + '</td>' +
+                    e.estado === 'aguardando_ciencia' ? 'mut' : 'ok') +
+                (e.substituida && e.estado !== 'devolvida' ? ' ' + pill('Substituída por entrega mais nova', 'mut') : '') + '</td>' +
               '<td>' + e.alertas.map(a => pill(ROT_AL[a][0], ROT_AL[a][1])).join(' ') + '</td>' +
               '<td style="text-align:right;white-space:nowrap">' +
-                (it.tipo === 'ferramenta' && e.estado !== 'devolvida' ? '<button class="v2btn ghost mini" data-al-dev="' + esc(e.id) + '">Devolvida</button> ' : '') +
+                // Baixa: ferramenta devolvida; EPI devolvido ou trocado (sai dos alertas e continua na ficha NR-6).
+                (e.estado !== 'devolvida' ? '<button class="v2btn ghost mini" data-al-dev="' + esc(e.id) + '">' + (it.tipo === 'epi' ? 'Devolvido / trocado' : 'Devolvida') + '</button> ' : '') +
                 '<button class="v2btn ghost mini" data-al-cancel="' + esc(e.id) + '">Cancelar</button></td></tr>';
           }).join('') : '<tr><td colspan="6" style="padding:30px;text-align:center;color:#64748b">Nenhuma entrega.</td></tr>') +
         '</tbody></table></div>';
@@ -3044,7 +3075,7 @@ export const Rh = {
       $('alBusca').oninput = () => { this.alBusca = $('alBusca').value; this.pintarAlmox(); $('alBusca').focus(); };
       $('alSo').onchange = () => { this.alSoAlertas = $('alSo').checked; this.pintarAlmox(); };
       $('btnNovaEntrega').onclick = () => this.formEntrega();
-      el.querySelectorAll('[data-al-dev]').forEach(b => { b.onclick = () => acao({ acao: 'devolver', id: b.dataset.alDev, devolvido_em: hoje }, 'Devolução registrada'); });
+      el.querySelectorAll('[data-al-dev]').forEach(b => { b.onclick = () => acao({ acao: 'devolver', id: b.dataset.alDev, devolvido_em: hoje }, 'Baixa registrada'); });
       el.querySelectorAll('[data-al-cancel]').forEach(b => { b.onclick = () => { if (confirm('Cancelar esta entrega?')) acao({ acao: 'cancelar', id: b.dataset.alCancel }, 'Entrega cancelada'); }; });
     } else if (aba === 'itens') {
       $('btnNovoItem').onclick = () => this.formItem(null);
@@ -3100,6 +3131,11 @@ export const Rh = {
     $('btnEnOk').onclick = async () => {
       const colaboradores = [...$('enPessoas').querySelectorAll('input:checked')].map(c => c.value);
       if (!colaboradores.length) { toast('Escolha os colaboradores', 'warn'); return; }
+      // CA vencido na data da entrega: avisa, mas não impede (o RH decide).
+      const itSel = itens.find(i => i.id === $('enItem').value);
+      if (caVencidoEm(itSel, $('enData').value) &&
+          !confirm('O CA ' + (itSel.ca || '') + ' de ' + itSel.nome + ' venceu em ' + itSel.ca_validade.split('-').reverse().join('/') +
+            '. A NR-6 pede EPI com CA válido. Registrar a entrega mesmo assim?')) return;
       const r = await ApiRh.almox(this.token, { acao: 'entregar', item_id: $('enItem').value, colaboradores, quantidade: Number($('enQtd').value) || 1,
         entregue_em: $('enData').value, devolver_ate: $('enDev').value || null, equipe_id: $('enObra').value || null, observacao: $('enObs').value });
       if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
@@ -3116,7 +3152,7 @@ export const Rh = {
       const linhas = entregas.filter(e => e.colaborador_id === id).sort((a, b) => a.entregue_em.localeCompare(b.entregue_em)).map(e => {
         const it = itens.find(i => i.id === e.item_id) || {};
         return { entregue_em: e.entregue_em, item: it.nome || '?', ca: e.ca, quantidade: e.quantidade, obra: e.equipe_id ? this.nomeEquipe(e.equipe_id) : '',
-                 confirmada_em: e.ciencia && e.ciencia.em, devolvido_em: e.devolvido_em };
+                 confirmada_em: e.ciencia && e.ciencia.em, prova: e.ciencia || null, devolvido_em: e.devolvido_em };
       });
       return { nome: p.nome, matricula: p.matricula, funcao: p.papel && p.papel !== 'colaborador' ? this.nomePapel(p.papel) : '', linhas };
     }).sort((a, b) => a.nome.localeCompare(b.nome));
@@ -3441,23 +3477,37 @@ export const Rh = {
   },
 
   formNovoUsuario() {
+    // O perfil é escolhido já na criação (padrão RH): sem ele o usuário nascia administrador.
+    const eqs = (this.dados.equipes || []).filter(e => e.ativo).slice().sort((a, b) => a.nome.localeCompare(b.nome));
     $('areaNovoUsuario').innerHTML =
       '<div class="card"><h2>Novo usuário RH</h2>' +
         '<div class="form-grid">' +
           '<div><label class="lb2">Nome</label><input class="inp" id="nuNome"></div>' +
           '<div><label class="lb2">Usuário (login)</label><input class="inp" id="nuUsuario" autocapitalize="off" placeholder="ex.: maria.rh"></div>' +
+          '<div><label class="lb2">Perfil</label><select class="inp" id="nuPerfil">' +
+            Object.keys(PERFIS).map(k => '<option value="' + k + '"' + (k === 'rh' ? ' selected' : '') + '>' + esc(PERFIS[k].rotulo) + '</option>').join('') + '</select></div>' +
         '</div>' +
+        '<div id="nuObrasWrap" style="margin-top:10px"><label class="lb2">Obras que este gestor vê</label>' +
+          '<div style="max-height:200px;overflow:auto;border:1px solid var(--v2-linha);border-radius:8px;padding:8px;columns:2">' +
+            (eqs.length ? eqs.map(e => '<label style="display:flex;gap:6px;align-items:center;font-size:13px;break-inside:avoid"><input type="checkbox" value="' + esc(e.equipe_id) + '"> ' + esc(e.nome) + '</label>').join('')
+              : '<p class="nota" style="margin:0">Nenhuma obra ativa.</p>') +
+          '</div></div>' +
         '<div class="row2" style="margin-top:14px">' +
           '<button class="act" id="btnCriarUsuario">Criar</button>' +
           '<button class="act ghost" id="btnCancelarUsuario">Cancelar</button></div>' +
         '<div id="nuResultado"></div>' +
       '</div>';
+    const aj = () => { $('nuObrasWrap').style.display = $('nuPerfil').value === 'gestor_obra' ? '' : 'none'; };
+    $('nuPerfil').onchange = aj; aj();
     $('btnCancelarUsuario').onclick = () => { $('areaNovoUsuario').innerHTML = ''; };
     $('btnCriarUsuario').onclick = async () => {
       const nome = $('nuNome').value.trim(), usuario = $('nuUsuario').value.trim();
       if (!nome || !usuario) { toast('Informe nome e usuário', 'warn'); return; }
+      const perfil = $('nuPerfil').value;
+      const obras = perfil === 'gestor_obra' ? [...$('nuObrasWrap').querySelectorAll('input:checked')].map(c => c.value) : [];
+      if (perfil === 'gestor_obra' && !obras.length) { toast('Escolha as obras do gestor', 'warn'); return; }
       const btn = $('btnCriarUsuario'); btn.disabled = true; btn.textContent = 'Criando…';
-      const r = await ApiRh.usuario(this.token, { acao: 'criar', nome, usuario });
+      const r = await ApiRh.usuario(this.token, { acao: 'criar', nome, usuario, perfil, obras });
       btn.disabled = false; btn.textContent = 'Criar';
       if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
       // Atualiza a lista em segundo plano SEM repintar a aba (não perder a senha).
@@ -3465,7 +3515,8 @@ export const Rh = {
       if (d.ok) { this.dados = d.dados; this.aplicarConfig(); }
       // A senha temporária aparece UMA vez — mostra destacada para repassar.
       $('nuResultado').innerHTML = this.htmlSenhaTemporaria(r.dados.usuario, r.dados.senha_temporaria, 'criado');
-      $('nuNome').value = ''; $('nuUsuario').value = '';
+      $('nuNome').value = ''; $('nuUsuario').value = ''; $('nuPerfil').value = 'rh'; aj();
+      $('nuObrasWrap').querySelectorAll('input:checked').forEach(c => { c.checked = false; });
       this.ligarSenhaTemporaria(r.dados.senha_temporaria);
     };
     $('areaNovoUsuario').scrollIntoView({ behavior: 'smooth', block: 'start' });

@@ -42,6 +42,14 @@ export function obrasDe(acesso) {
   return Array.isArray(acesso && acesso.obras) ? acesso.obras : [];
 }
 
+/**
+ * Pode criar e editar jornadas? Jornada vale para a empresa inteira (e a padrão
+ * para todas as equipes), então perfil por obra não altera, mesmo editando o ponto.
+ */
+export function podeEditarJornadas(acesso) {
+  return pode(acesso, 'ponto', true) && !PERFIS[perfilDe(acesso)].porObra;
+}
+
 /** Aba do painel → módulo. */
 export const ABA_MODULO = {
   painel: 'operacao', planos: 'operacao', alocacao: 'operacao', mapa: 'operacao',
