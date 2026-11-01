@@ -14,6 +14,7 @@ import { autenticarDispositivo } from './_lib/auth.js';
 import { TERMO_ASSINATURA } from './_lib/folha.js';
 import { cors, ok, erro, corpo, exigeMetodo } from './_lib/http.js';
 import { conferirProva, limiarDaEmpresa } from './_lib/prova-facial.js';
+import { comFotoReal } from './_lib/imagem.js';
 
 const num = v => (v == null || v === '' || !Number.isFinite(Number(v))) ? null : Number(v);
 
@@ -55,7 +56,7 @@ export default async function handler(req, res) {
 
   // Sem 1:1 dentro do limiar e sem a foto da captura, não há assinatura.
   const p = b.prova || {};
-  const prova = conferirProva(p, await limiarDaEmpresa(sql, vinc.empresa_id));
+  const prova = comFotoReal(conferirProva(p, await limiarDaEmpresa(sql, vinc.empresa_id)));
   if (!prova.ok) return erro(res, prova.status, prova.codigo, prova.mensagem);
   const assinatura = {
     em: new Date().toISOString(), hash: f.hash, termo: TERMO_ASSINATURA,
