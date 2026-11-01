@@ -89,6 +89,10 @@ function miniatura(canvas, box, lado) {
 
 // Modo de teste: substitui a inferência por descritores determinísticos, para
 // que o fluxo (fila, envio, offline) possa ser testado sem rosto de verdade.
+// Miniatura JPEG real (48x48, cinza) do rosto simulado dos testes: o servidor confere
+// se a foto da prova é imagem de verdade (api/_lib/imagem.js).
+const MINIATURA_FINGIDA = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAwADADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwBl0Y4EY3c0bXRmEbSWsZ+6rpI4TB2soJzlsYIIwTzViGUX15cMEsojDAAJHiFuhjMfy7lDkMoPljaWwM4KnOQX2mSIvkL5UKSAiV0Em1eA7iMIUyBkqqkHA4zufbUsiPd21t9rlnuhGkczNJEkjSwbFD/NuLKejg8DJUnnJABSlgS51PTbWOCYidUN00EJia1beX/iBYKC2SRgdDk5Ap+xYtKljRWtryJ2czqY4EVkCkejOFX5gOQSCQSMYmI+2RLPNYxGEho3khjQyFghIcsingv82cEDIyGzhM+5t86It5psxltTndL5qQGItGqFDg/IScNg5X5UHpkA100+e2sZJLeO1/tAR+YPLcBmYiQRuAx+VVYI38IG0/LxwLLa2zpaWksMUSnYtvHM8ZZ1SQneDja3mInOSccEkNVe5s4NOt7eS8g2PAjJFFL8ySZGSqqAQVJk3Fmznb2y2Kl5d/2VZyXIljmbzQI7U7oUJALK6YbJxvAxkcMPvfKxAFWJra9ndJ3MBV5p4LaIKAgDg/e3Myk7WwF2HduIGRUktzDaK1rHEsOIzIUlkURwvkAJyy9ccjdzwwOAM29Q+zSywRQ2/n2sRAhmufnVXy+6NR90qUIIK8fIuQflzQurlprIRo1u8s6xvOrMN7Nt3FpBsI8tQMBAQVHAPzKKAH6e8v8AYE9tFaTOiqYY8o8YRlLbSCAF6nnB5ySw+8at6laSXVpcXSPdLMWcYYu/kKNxMwbdtyyhVG04OFGQMrWbNbXEFpHPE1jFZXCopjkkAWNt2TkKMsVHzZ4HJC5ztqawjc6bJp95AqzPE0dtJHPiR1jEmVyoAflNvAJxIuQR1AGTQCfSre4si0dkgkkgS3Bkj+XG52+RTnLFMlTgIchs5q2styNWWzco15AXQOhYhVbyy5dSpJyAMHdjjHaqztqdvYvA8okLb4E89h5sqjDqUKgnaBsAA6M5OcY2xyWaWc1peTXDXMDr5jPDPsQle4AX5z8wO45zkg5O7IBdmubOfS4L25NyiK2zdbys0kvzAr8xO85C4HQMSG4xwlnctNZXN/B9reC2XNuBF5Iicqd7JxtO3aTyPuOQckYqppUs6yWEYEj20uHaCWdCTHgMzY/iwM4U9MHByARKkLS2ssVxHP5U0axxFyqIEjBVHyrZKEKHyRxtcrnBoAfqdixuTZ3LvBaI/mNJhd5lLLGv7sKhOOoIzxwpHSpbWS7ja+doorpkgja4eN9hSQKx83y35JUjqxT5gffFVYFE8fmxPc+ftYQxgBFcB3kOyUFcbDwzBTycnO6r+jWbtIrSRTtPHtBhjZ3IORgZchTjaCMsSMbdoKsSAV7i+1A3Cwpa3E95CrQzsqbNskm7cVIJwHYq3zAY2jgAhal1CSW3ub2V48CWQGITXIXeiuSC3H3MgkH72AqjPahZ/urO0NzEBt2NLFJAUaRPkViPlBZcEDIDHCkHIyxteULaxQuTaRsPMjWO3MazTErskwDtZF2O3RcBAxUhgCAf/9k=';
+
 function fingido() { return window.__EFRAT_FAKE_FACE || null; }
 
 export const Face = {
@@ -258,7 +262,7 @@ export const Face = {
     const base = new Array(128).fill(0);
     const semente = String(f.pessoa || 'x');
     for (let i = 0; i < 128; i++) base[i] = ((semente.charCodeAt(i % semente.length) * (i + 7)) % 100) / 100;
-    return { descritor: base, thumb: 'data:image/jpeg;base64,TEST', qualidade: { ok: true, sharp: 300, bright: 120 } };
+    return { descritor: base, thumb: MINIATURA_FINGIDA, qualidade: { ok: true, sharp: 300, bright: 120 } };
   },
 
   /** Usa o último quadro aprovado se for recente; tenta algumas vezes antes de desistir. */
