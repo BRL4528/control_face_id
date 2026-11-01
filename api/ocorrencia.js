@@ -7,8 +7,7 @@ import { db, novoId } from './_lib/db.js';
 import { autenticarDispositivo } from './_lib/auth.js';
 import { anexoValido } from './_lib/ocorrencia.js';
 import { cors, ok, erro, corpo, exigeMetodo } from './_lib/http.js';
-
-const DIA = /^\d{4}-\d{2}-\d{2}$/;
+import { diaValido } from './_lib/data-real.js';
 
 export default async function handler(req, res) {
   if (cors(req, res)) return;
@@ -27,7 +26,9 @@ export default async function handler(req, res) {
     return ok(res, { ocorrencias: lista });
   }
   if (b.acao !== 'enviar') return erro(res, 400, 'CORPO_INVALIDO', 'acao inválida');
-  if (!DIA.test(b.inicio || '')) return erro(res, 400, 'CORPO_INVALIDO', 'data do atestado obrigatória');
+  if (!b.inicio) return erro(res, 400, 'CORPO_INVALIDO', 'data do atestado obrigatória');
+  // Data que não existe (30/02, mês 13) daria 500 no banco: responde 400.
+  if (!diaValido(b.inicio)) return erro(res, 400, 'CORPO_INVALIDO', 'data do atestado inválida');
   const dias = Math.max(1, Math.min(Number(b.dias) || 1, 365));
   if (!anexoValido(b.anexo)) return erro(res, 400, 'ANEXO_INVALIDO', 'tire a foto do atestado');
   const fim = new Date(Date.parse(b.inicio + 'T12:00:00Z') + (dias - 1) * 86400000).toISOString().slice(0, 10);
