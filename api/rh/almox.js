@@ -7,8 +7,11 @@
 //        Resposta traz aviso 'ca_vencido' quando o CA do EPI já venceu na data da
 //        entrega (não bloqueia: o EPI pode ter sido adquirido na vigência do CA)
 //   { acao: 'devolver', id, devolvido_em }   → baixa: ferramenta devolvida, ou EPI
-//        devolvido/trocado (a entrega sai dos alertas e continua na ficha NR-6)
-//   { acao: 'cancelar', id }
+//        devolvido/trocado (a entrega sai dos alertas e continua na ficha NR-6).
+//        Uma vez só: entrega já devolvida → 409 ENTREGA_JA_DEVOLVIDA
+//   { acao: 'cancelar', id, motivo? }        → só a que ainda aguarda a ciência no app
+//        (lançada por engano). Confirmada pelo rosto ou devolvida é histórico da
+//        ficha NR-6: 409 ENTREGA_NAO_CANCELAVEL, o caminho é a baixa ('devolver')
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
 import { comTabelaNova } from '../_lib/tabela-nova.js';
@@ -21,6 +24,14 @@ const txt = (v, n) => v == null ? null : (String(v).trim().slice(0, n) || null);
 /** O CA do EPI já estava vencido no dia da entrega? (mesma regra de js/almox.js) */
 export const caVencidoNaEntrega = (item, entregueEm) =>
   !!(item && item.tipo === 'epi' && item.ca_validade && item.ca_validade < entregueEm);
+
+/** Por que a entrega não pode ser cancelada (texto do 409 ENTREGA_NAO_CANCELAVEL). */
+export function motivoNaoCancelavel(estado) {
+  if (estado === 'confirmada') return 'entrega já confirmada pelo colaborador fica na ficha de EPI; para tirar de uso, registre a devolução';
+  if (estado === 'devolvida') return 'entrega já devolvida fica na ficha de EPI e não pode ser cancelada';
+  if (estado === 'cancelada') return 'esta entrega já foi cancelada';
+  return 'esta entrega não pode ser cancelada';
+}
 
 export default async function handler(req, res) {
   if (cors(req, res)) return;
@@ -94,8 +105,18 @@ export default async function handler(req, res) {
     }
 
     if (b.acao === 'cancelar') {
-      const r = await sql`UPDATE entrega SET estado='cancelada' WHERE id=${String(b.id || '')} AND empresa_id=${emp} RETURNING id`;
-      if (!r[0]) return erro(res, 404, 'ENTREGA_NAO_ENCONTRADA', 'entrega não encontrada');
+      const id = String(b.id || '');
+      const r = await sql`UPDATE entrega SET estado='cancelada'
+                          WHERE id=${id} AND empresa_id=${emp} AND estado='aguardando_ciencia' RETURNING id`;
+      if (!r[0]) {
+        const [en] = await sql`SELECT estado FROM entrega WHERE id=${id} AND empresa_id=${emp} LIMIT 1`;
+        if (!en) return erro(res, 404, 'ENTREGA_NAO_ENCONTRADA', 'entrega não encontrada');
+        return erro(res, 409, 'ENTREGA_NAO_CANCELAVEL', motivoNaoCancelavel(en.estado), { estado: en.estado });
+      }
+      // Quem cancelou e por quê ficam na auditoria (a entrega sai da lista e da ficha).
+      const motivo = String(b.motivo || '').trim().slice(0, 500);
+      await sql`INSERT INTO correcao (id, empresa_id, alvo_tipo, alvo_id, acao, motivo, usuario_rh_id)
+                VALUES (${novoId()}, ${emp}, 'entrega', ${r[0].id}, 'cancelar', ${motivo || 'lançada por engano, antes da confirmação no app'}, ${rh.sub})`;
       return ok(res, { id: r[0].id });
     }
 
@@ -103,13 +124,16 @@ export default async function handler(req, res) {
     if (b.acao === 'devolver') {
       if (b.devolvido_em && !diaValido(b.devolvido_em)) return erro(res, 400, 'CORPO_INVALIDO', 'data da devolução inválida');
       const data = b.devolvido_em || new Date().toISOString().slice(0, 10);
-      const [en] = await sql`SELECT id, to_char(entregue_em,'YYYY-MM-DD') AS entregue_em FROM entrega
+      const [en] = await sql`SELECT id, estado, to_char(entregue_em,'YYYY-MM-DD') AS entregue_em FROM entrega
                              WHERE id=${String(b.id || '')} AND empresa_id=${emp} AND estado <> 'cancelada' LIMIT 1`;
       if (!en) return erro(res, 404, 'ENTREGA_NAO_ENCONTRADA', 'entrega não encontrada');
+      // A data da baixa não se reescreve: uma devolução por entrega.
+      if (en.estado === 'devolvida') return erro(res, 409, 'ENTREGA_JA_DEVOLVIDA', 'esta entrega já foi devolvida');
       if (data < en.entregue_em) return erro(res, 400, 'CORPO_INVALIDO', 'a devolução não pode ser antes da entrega');
       const r = await sql`UPDATE entrega SET estado='devolvida', devolvido_em=${data}
-                          WHERE id=${en.id} AND empresa_id=${emp} AND estado <> 'cancelada' AND entregue_em <= ${data}::date RETURNING id`;
-      if (!r[0]) return erro(res, 404, 'ENTREGA_NAO_ENCONTRADA', 'entrega não encontrada');
+                          WHERE id=${en.id} AND empresa_id=${emp} AND estado NOT IN ('cancelada','devolvida') AND entregue_em <= ${data}::date RETURNING id`;
+      // Corrida com outra baixa ou cancelamento: quem chegou primeiro vale.
+      if (!r[0]) return erro(res, 409, 'ENTREGA_JA_DEVOLVIDA', 'esta entrega já foi devolvida ou cancelada');
       return ok(res, { id: r[0].id, devolvido_em: data });
     }
     return erro(res, 400, 'CORPO_INVALIDO', 'acao inválida');

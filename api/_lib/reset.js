@@ -43,6 +43,13 @@ export async function zerarEmpresa(sql, empresaId) {
     txn`DELETE FROM dispositivo WHERE empresa_id=${empresaId} OR colaborador_id IN (SELECT id FROM colaborador WHERE empresa_id=${empresaId})`,
     txn`DELETE FROM template_facial WHERE colaborador_id IN (SELECT id FROM colaborador WHERE empresa_id=${empresaId})`,
     txn`UPDATE equipe SET supervisor_id=NULL, jornada_id=NULL WHERE empresa_id=${empresaId}`,
+    // Referência cruzada que escapou de validação antiga (as FKs não olham
+    // empresa_id): registro de OUTRA empresa apontando para algo daqui travaria
+    // os DELETEs abaixo (500). Só se solta a referência inválida, nada de lá é apagado.
+    txn`UPDATE equipe SET supervisor_id=NULL WHERE empresa_id<>${empresaId} AND supervisor_id IN (SELECT id FROM colaborador WHERE empresa_id=${empresaId})`,
+    txn`UPDATE colaborador SET equipe_padrao=NULL WHERE empresa_id<>${empresaId} AND equipe_padrao IN (SELECT id FROM equipe WHERE empresa_id=${empresaId})`,
+    txn`UPDATE equipe SET local_id=NULL WHERE empresa_id<>${empresaId} AND local_id IN (SELECT id FROM local WHERE empresa_id=${empresaId})`,
+    txn`UPDATE equipe SET jornada_id=NULL WHERE empresa_id<>${empresaId} AND jornada_id IN (SELECT id FROM jornada WHERE empresa_id=${empresaId})`,
     txn`DELETE FROM colaborador WHERE empresa_id=${empresaId}`,
     txn`DELETE FROM equipe WHERE empresa_id=${empresaId}`,
     txn`DELETE FROM local WHERE empresa_id=${empresaId}`,

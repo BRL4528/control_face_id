@@ -32,8 +32,10 @@ test('toda aba e todo perfil apontam para módulos existentes', () => {
 
 test('servidor: exigeAcesso barra perfil sem permissão e usuário desativado; noEscopo por obra', async () => {
   const { exigeAcesso, noEscopo } = await import('../../api/_lib/acesso.js');
+  const { carimboSenha } = await import('../../api/_lib/auth.js');
   const usuarios = { u1: { ativo: true, perfil: 'almox', obras: null }, u2: { ativo: false, perfil: null }, u3: { ativo: true, perfil: null, obras: null },
-                     u4: { ativo: true, perfil: 'gestor_obra', obras: ['e1'] } };
+                     u4: { ativo: true, perfil: 'gestor_obra', obras: ['e1'] }, u5: { ativo: true, perfil: null, obras: null, trocar_senha: true } };
+  for (const u of Object.values(usuarios)) u.chave_hash = 'hash-atual';
   const colabs = { c1: { equipe_padrao: 'e1' }, c2: { equipe_padrao: 'e2' } };
   const sql = (partes, ...v) => {
     const q = partes.join('?');
@@ -42,12 +44,18 @@ test('servidor: exigeAcesso barra perfil sem permissão e usuário desativado; n
     return Promise.resolve([]);
   };
   const res = () => ({ statusCode: 0, body: null, status(c) { this.statusCode = c; return this; }, json(b) { this.body = b; return this; }, setHeader() {}, end() {} });
+  const cs = carimboSenha('hash-atual');
   let r = res();
-  assert.equal(await exigeAcesso(r, sql, { sub: 'u1', empresa_id: 'x' }, 'ponto', true), null); assert.equal(r.statusCode, 403);
-  r = res(); assert.ok(await exigeAcesso(r, sql, { sub: 'u1', empresa_id: 'x' }, 'almox', true));
-  r = res(); assert.equal(await exigeAcesso(r, sql, { sub: 'u2', empresa_id: 'x' }, 'ponto', false), null); assert.equal(r.statusCode, 401);
-  r = res(); assert.ok(await exigeAcesso(r, sql, { sub: 'u3', empresa_id: 'x' }, 'config', true));   // sem perfil = admin
-  const g = await exigeAcesso(res(), sql, { sub: 'u4', empresa_id: 'x' }, 'ponto', true);
+  assert.equal(await exigeAcesso(r, sql, { sub: 'u1', empresa_id: 'x', cs }, 'ponto', true), null); assert.equal(r.statusCode, 403);
+  r = res(); assert.ok(await exigeAcesso(r, sql, { sub: 'u1', empresa_id: 'x', cs }, 'almox', true));
+  r = res(); assert.equal(await exigeAcesso(r, sql, { sub: 'u2', empresa_id: 'x', cs }, 'ponto', false), null); assert.equal(r.statusCode, 401);
+  r = res(); assert.ok(await exigeAcesso(r, sql, { sub: 'u3', empresa_id: 'x', cs }, 'config', true));   // sem perfil = admin
+  // Senha trocada depois do login: o carimbo do token não bate mais.
+  r = res(); assert.equal(await exigeAcesso(r, sql, { sub: 'u3', empresa_id: 'x', cs: carimboSenha('hash-velho') }, 'config', true), null); assert.equal(r.statusCode, 401);
+  // Senha temporária: só troca a senha.
+  r = res(); assert.equal(await exigeAcesso(r, sql, { sub: 'u5', empresa_id: 'x', cs }, 'ponto', false), null); assert.equal(r.statusCode, 403);
+  assert.equal(r.body.erro.codigo, 'TROCAR_SENHA');
+  const g = await exigeAcesso(res(), sql, { sub: 'u4', empresa_id: 'x', cs }, 'ponto', true);
   assert.equal(await noEscopo(sql, g, 'x', 'c1'), true);
   assert.equal(await noEscopo(sql, g, 'x', 'c2'), false);
 });

@@ -18,6 +18,36 @@ function diaNoFuso(d, fuso) {
   catch { return d.toISOString().slice(0, 10); }
 }
 
+/**
+ * Sessão com senha temporária: só o necessário para o painel abrir a tela de
+ * troca (nome do usuário, empresa, perfil). As listas vão vazias, com as mesmas
+ * chaves da resposta completa, para o painel não quebrar; nada da operação sai
+ * antes da troca. Depois de trocar, o painel recarrega com o token novo.
+ */
+export function respostaSenhaTemporaria({ rh, empresa, acesso, dias, hoje, perfil, rotulo }) {
+  return {
+    usuario: { id: rh.sub, nome: rh.nome, usuario: rh.usuario },
+    empresa_id: rh.empresa_id,
+    empresa: { nome: (empresa && empresa.nome) || '', fuso: (empresa && empresa.fuso) || 'America/Campo_Grande', link_token: null },
+    trocar_senha: true,
+    aparelhos_pendentes: [],
+    acesso: { perfil, rotulo, obras: obrasDe(acesso) },
+    config: {},
+    periodo_dias: dias,
+    servidor_hora: new Date().toISOString(),
+    hoje,
+    equipes: [], pessoas: [], marcacoes: [], locais: [], jornadas: [], planos: [], papeis: [], ocorrencias: [],
+    usuarios_rh: [], correcoes: [], alocacoes: [], alocacoes_hoje: [], recadastros: []
+  };
+}
+
+async function dadosSenhaTemporaria(sql, rh, acesso, dias) {
+  const [empresa] = await sql`SELECT nome, fuso FROM empresa WHERE id = ${rh.empresa_id} LIMIT 1`;
+  const fuso = (empresa && empresa.fuso) || 'America/Campo_Grande';
+  const perfil = perfilDe(acesso);
+  return respostaSenhaTemporaria({ rh, empresa, acesso, dias, hoje: diaNoFuso(new Date(), fuso), perfil, rotulo: PERFIS[perfil].rotulo });
+}
+
 export default async function handler(req, res) {
   if (cors(req, res)) return;
   if (exigeMetodo(req, res, 'POST')) return;
@@ -30,6 +60,7 @@ export default async function handler(req, res) {
   const sql = db();
   const acesso = await acessoDe(sql, rh);
   if (!acesso) return erro(res, 401, 'SESSAO_INVALIDA', 'faça login novamente');
+  if (acesso.trocar_senha) return ok(res, await dadosSenhaTemporaria(sql, rh, acesso, dias));
   const visao = visaoDados(acesso);
   const nada = Promise.resolve([]);
 

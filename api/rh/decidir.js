@@ -7,6 +7,9 @@ import { exigeAcesso, noEscopo } from '../_lib/acesso.js';
 import { obrasDe } from '../../js/acessos.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 import { dentroDaCerca } from '../_lib/geo.js';
+import { cercaVigente } from '../_lib/escala.js';
+import { ocorrenciaVigente } from '../_lib/ocorrencia.js';
+import { daEmpresa } from '../_lib/validar.js';
 import { comentarNoCard, montarComentario } from '../_lib/bitrix-saida.js';
 
 export default async function handler(req, res) {
@@ -46,7 +49,7 @@ export default async function handler(req, res) {
     const dono = await sql`SELECT c.id, c.nome, c.matricula, c.bitrix_card_id, m.tipo, m.origem, m.veredito, m.motivo AS motivo_revisao,
                                   m.marcado_em, m.dentro_cerca, m.distancia_cerca_m, m.liveness_ok, m.lat, m.lng, m.precisao_m,
                                   eq.nome AS equipe
-                           FROM marcacao m LEFT JOIN colaborador c ON c.id=m.colaborador_id LEFT JOIN equipe eq ON eq.id=m.equipe_id
+                           FROM marcacao m LEFT JOIN colaborador c ON c.id=m.colaborador_id LEFT JOIN equipe eq ON eq.id=m.equipe_id AND eq.empresa_id=m.empresa_id
                            WHERE m.id_cliente=${b.id} AND m.empresa_id=${rh.empresa_id} LIMIT 1`;
     alvoColab = dono[0] && dono[0].id ? dono[0] : null;
     if (obrasDe(acesso) && !(alvoColab && await noEscopo(sql, acesso, rh.empresa_id, alvoColab.id))) return erro(res, 403, 'SEM_PERMISSAO', 'batida fora das suas obras');
@@ -81,6 +84,40 @@ export default async function handler(req, res) {
   }
   return ok(res, { decidido: true });
 }
+
+/**
+ * Batida de aparelho pendente atribuída pelo RH: continua em revisão? Mesmas
+ * regras de /api/ponto, menos as de identidade (o RH acabou de confirmar quem é).
+ *   temCerca  há cerca no dia (escala ou local da equipe, cercaVigente)
+ *   cerca     { dentro, distancia_m } medida contra ela
+ *   ocorrencia  ocorrenciaVigente do dia (viagem dispensa a cerca; férias,
+ *             afastamento e licença bloqueiam a batida e mandam para o RH)
+ *   deriva_ms relógio do aparelho contra o servidor (fora de 2 min vai para o RH)
+ * Devolve { revisar, motivo, cerca } (cerca já com a dispensa da viagem). O motivo
+ * junta todas as razões, em texto (vai para o painel e para o card do Bitrix).
+ */
+export function revisaoDaAtribuicao({ temCerca, cerca, liveness_ok, afastado, ocorrencia, deriva_ms }) {
+  const oc = ocorrencia || null;
+  let c = cerca || { dentro: null, distancia_m: null };
+  const externo = !!(oc && oc.semCerca) && c.dentro !== true;
+  if (externo) c = { dentro: true, distancia_m: c.distancia_m };
+  const motivos = [];
+  if (afastado) motivos.push('colaborador afastado');
+  if (oc && oc.bloqueia) motivos.push('colaborador em ' + rotuloMinusculo(oc.rotulo));
+  if (!temCerca && !externo) motivos.push('sem cerca no dia');
+  if (c.dentro === false) motivos.push('fora da cerca');
+  if (liveness_ok === false) motivos.push('sem prova de vida');
+  if (Math.abs(Number(deriva_ms) || 0) > DERIVA_MAX_MS) motivos.push('relógio do aparelho fora do horário');
+  const revisar = motivos.length > 0;
+  const motivo = revisar ? motivos.join(' · ') : 'identificado pelo RH' + (externo ? ' · trabalho externo (viagem)' : '');
+  return { revisar, motivo, cerca: c };
+}
+
+// Mesmo limite de /api/ponto: relógio do aparelho a mais de 2 min do servidor.
+const DERIVA_MAX_MS = 120000;
+
+// 'Afastamento INSS' → 'afastamento INSS': baixa só a 1ª letra, a sigla fica.
+const rotuloMinusculo = r => { const t = String(r || ''); return t.charAt(0).toLowerCase() + t.slice(1); };
 
 /**
  * Aparelho PENDENTE (bateu ponto pelo link da empresa, sem identidade).
@@ -124,10 +161,14 @@ async function decidirDispositivo(req, res, rh, b) {
   } else if (b.novo && b.novo.nome && b.novo.matricula) {
     const nome = String(b.novo.nome).trim(), mat = String(b.novo.matricula).trim();
     const existe = (await sql`SELECT id FROM colaborador WHERE empresa_id=${rh.empresa_id} AND matricula=${mat} LIMIT 1`)[0];
-    if (existe) return erro(res, 409, 'MATRICULA_EM_USO', 'já existe colaborador com esta matrícula — selecione-o na lista');
+    if (existe) return erro(res, 409, 'MATRICULA_EM_USO', 'já existe colaborador com esta matrícula; selecione-o na lista');
+    // A equipe tem de ser desta empresa (a FK não olha empresa_id): conferida antes
+    // de gravar qualquer coisa, para o aparelho continuar pendente se for recusada.
+    const equipeId = b.novo.equipe_id ? String(b.novo.equipe_id) : null;
+    if (equipeId && !(await daEmpresa(sql, 'equipe', equipeId, rh.empresa_id))) return erro(res, 404, 'EQUIPE_NAO_ENCONTRADA', 'equipe não encontrada');
     const id = novoId();
     await sql`INSERT INTO colaborador (id, empresa_id, nome, matricula, papel, equipe_padrao)
-              VALUES (${id}, ${rh.empresa_id}, ${nome}, ${mat}, 'colaborador', ${b.novo.equipe_id || null})`;
+              VALUES (${id}, ${rh.empresa_id}, ${nome}, ${mat}, 'colaborador', ${equipeId})`;
     colab = { id, nome };
   } else {
     return erro(res, 400, 'CORPO_INVALIDO', 'informe colaborador_id ou novo {nome, matricula}');
@@ -149,8 +190,9 @@ async function decidirDispositivo(req, res, rh, b) {
 
   // 4) Marcações pendentes do aparelho → valem para a pessoa. marcacao é IMUTÁVEL
   //    (trigger REP-P): cada uma vira um LANÇAMENTO NOVO no nome do colaborador
-  //    (mesma hora/GPS/foto, cerca reconferida contra a alocação do dia) e a
-  //    original recebe a correção 'atribuir' que a tira da fila e aponta a nova.
+  //    (mesma hora/GPS/foto, cerca reconferida como em /api/ponto: a escala do dia
+  //    se houver, senão o local da equipe da pessoa, cercaVigente) e a original
+  //    recebe a correção 'atribuir' que a tira da fila e aponta a nova.
   // Datas como texto: DATE vem como Date do driver e String(Date) vira 'Tue Sep 08'.
   const pend = await sql`SELECT m.id_cliente, m.tipo, m.marcado_em, to_char(m.marcado_dia,'YYYY-MM-DD') AS marcado_dia,
                                 m.deriva_ms, m.lat, m.lng, m.precisao_m, m.liveness_ok, m.foto_url
@@ -159,18 +201,21 @@ async function decidirDispositivo(req, res, rh, b) {
   let atribuidas = 0, emRevisao = 0;
   for (const m of pend) {
     const dia = String(m.marcado_dia).slice(0, 10);
-    const aloc = (await sql`SELECT equipe_id, cerca_lat, cerca_lng, cerca_raio_m FROM alocacao
-                            WHERE empresa_id=${rh.empresa_id} AND colaborador_id=${colab.id} AND dia=${dia} LIMIT 1`)[0] || null;
-    const cerca = aloc ? dentroDaCerca(aloc, m.lat, m.lng, m.precisao_m) : { dentro: null, distancia_m: null };
-    // O RH acabou de confirmar a identidade: só continua em revisão se a CERCA falhar.
-    const revisar = !aloc || cerca.dentro === false || m.liveness_ok === false;
+    const aloc = await cercaVigente(sql, rh.empresa_id, colab.id, dia);
+    const temCerca = !!(aloc && aloc.cerca_lat != null);
+    const medida = temCerca ? dentroDaCerca(aloc, m.lat, m.lng, m.precisao_m) : { dentro: null, distancia_m: null };
+    const oc = await ocorrenciaVigente(sql, rh.empresa_id, colab.id, dia);
+    // O RH acabou de confirmar a identidade: só continua em revisão pelo resto
+    // (cerca, prova de vida, afastamento, ocorrência que bloqueia a batida).
+    const { revisar, motivo, cerca } = revisaoDaAtribuicao({ temCerca, cerca: medida, liveness_ok: m.liveness_ok,
+                                                             afastado: !!(aloc && aloc.afastado), ocorrencia: oc, deriva_ms: m.deriva_ms });
     const novoIdCliente = novoId();
     await sql`
       INSERT INTO marcacao (id_cliente, empresa_id, colaborador_id, dispositivo_id, equipe_id, tipo, origem, veredito,
         score, liveness_ok, motivo, marcado_em, marcado_dia, deriva_ms, lat, lng, precisao_m,
         dentro_cerca, distancia_cerca_m, foto_url, requer_revisao)
-      VALUES (${novoIdCliente}, ${rh.empresa_id}, ${colab.id}, ${disp.id}, ${aloc ? aloc.equipe_id : null}, ${m.tipo}, 'biometria',
-        ${revisar ? 'revisar' : 'aceito'}, NULL, ${m.liveness_ok}, ${revisar ? (!aloc ? 'sem_alocacao' : cerca.dentro === false ? 'fora_da_cerca' : 'sem_liveness') : 'identificado pelo RH'},
+      VALUES (${novoIdCliente}, ${rh.empresa_id}, ${colab.id}, ${disp.id}, ${(aloc && aloc.equipe_id) || null}, ${m.tipo}, 'biometria',
+        ${revisar ? 'revisar' : 'aceito'}, NULL, ${m.liveness_ok}, ${motivo},
         ${m.marcado_em}, ${dia}, ${m.deriva_ms || 0}, ${m.lat}, ${m.lng}, ${m.precisao_m},
         ${cerca.dentro}, ${cerca.distancia_m}, ${revisar ? m.foto_url : null}, ${revisar})`;
     await sql`INSERT INTO correcao (id, empresa_id, alvo_tipo, alvo_id, acao, motivo, usuario_rh_id)

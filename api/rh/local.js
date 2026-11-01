@@ -29,9 +29,10 @@ export default async function handler(req, res) {
   const raio = Math.max(30, Math.min(Number(b.raio_m) || padrao, 5000));
 
   if (b.local_id) {
-    await sql`UPDATE local SET nome=${nome}, lat=${b.lat}, lng=${b.lng}, raio_m=${raio},
-              ativo=${b.ativo === false ? false : true}
-              WHERE id=${b.local_id} AND empresa_id=${rh.empresa_id}`;
+    const r = await sql`UPDATE local SET nome=${nome}, lat=${b.lat}, lng=${b.lng}, raio_m=${raio},
+                          ativo=${b.ativo === false ? false : true}
+                        WHERE id=${b.local_id} AND empresa_id=${rh.empresa_id} RETURNING id`;
+    if (!r[0]) return erro(res, 404, 'LOCAL_NAO_ENCONTRADO', 'local não encontrado');
     return ok(res, { local_id: b.local_id, atualizado: true });
   }
   const id = novoId();

@@ -44,8 +44,10 @@ export default async function handler(req, res) {
   const confere = u ? await bcrypt.compare(chave, u.chave_hash) : false;
   if (!confere) return erro(res, 401, 'CREDENCIAL_INVALIDA', 'usuário ou senha inválidos');
 
-  // Emite a sessão mesmo com senha temporária: o cliente usa o token só para
-  // chamar /rh/usuario (trocar_senha) antes de liberar o resto do painel.
+  // Emite a sessão mesmo com senha temporária, mas o servidor só a deixa trocar
+  // a senha (/rh/usuario acao 'trocar_senha') e ler o mínimo de /rh/dados; o resto
+  // responde 403 TROCAR_SENHA (api/_lib/acesso.js). O token leva o carimbo da
+  // senha atual: trocar ou redefinir a senha derruba esta sessão.
   return ok(res, {
     token: emitirTokenRh(u),
     trocar_senha: !!u.trocar_senha,
