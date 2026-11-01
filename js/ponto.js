@@ -610,6 +610,7 @@ export const Ponto = {
       if (!motivo) { toast('Escreva o que não confere', 'warn'); return; }
       $('btnEnviarContestacao').disabled = true;
       const r = await Api.folha(this.dispositivo.credencial, { acao: 'contestar', id: folha.id, hash: folha.hash, motivo });
+      if (!r.ok && this.folhaMudou(r)) { await this.recarregarFolha(folha, termo, r.codigo); return; }
       if (!r.ok) { $('btnEnviarContestacao').disabled = false; toast(r.erro || 'Não consegui enviar. Tente com sinal.', 'bad'); return; }
       this.fimFolha('O RH recebeu sua contestação e vai corrigir a folha.', 'warn');
     };
@@ -621,11 +622,34 @@ export const Ponto = {
     const r = await Api.folha(this.dispositivo.credencial, { acao: 'assinar', id: folha.id, hash: folha.hash, prova });
     if (!r.ok) {
       $('cartao').innerHTML = '';
-      toast(r.codigo === 'FOLHA_ALTERADA' ? 'O RH atualizou a folha. Volte e confira de novo.' : (r.erro || 'Não consegui enviar. Tente com sinal.'), 'bad');
+      // Folha refeita pelo RH (ou já respondida): reenviar o hash velho daria 409 de novo.
+      if (this.folhaMudou(r)) { await this.recarregarFolha(folha, termo, r.codigo); return; }
+      toast(r.erro || 'Não consegui enviar. Tente com sinal.', 'bad');
       this.pintarFolha(folha, termo);
       return;
     }
     this.fimFolha('Folha assinada. Obrigado!', 'ok', r.em);
+  },
+
+  /** A resposta diz que a folha que está na tela não é mais a do servidor? */
+  folhaMudou(r) {
+    return r && (r.codigo === 'FOLHA_ALTERADA' || r.codigo === 'JA_ASSINADA' || r.codigo === 'FOLHA_NAO_ENCONTRADA');
+  },
+
+  /**
+   * Busca a folha de novo e repinta a conferência com o conteúdo atual (aceite
+   * desmarcado). Sem folha aguardando, ou sem rede, encerra com aviso.
+   */
+  async recarregarFolha(folha, termo, codigo) {
+    this.aoProvar = null;
+    if (codigo === 'JA_ASSINADA') { this.fimFolha('Esta folha já foi assinada.', 'ok'); return; }
+    const r = await Api.folha(this.dispositivo.credencial, { acao: 'listar' });
+    if (!r.ok) { this.fimFolha('O RH atualizou a folha. Abra de novo para conferir.', 'warn'); return; }
+    const fs = r.folhas || [];
+    const nova = fs.find(f => f.id === folha.id && f.estado === 'aguardando') || fs.find(f => f.estado === 'aguardando');
+    if (!nova) { this.fimFolha('Não há folha aguardando assinatura agora.', 'warn'); return; }
+    this.pintarFolha(nova, r.termo || termo);
+    toast('O RH atualizou a folha. Confira de novo antes de assinar.', 'warn');
   },
 
   fimFolha(msg, tipo, em) {
