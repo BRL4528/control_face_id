@@ -22,7 +22,7 @@
 // obras, e só valem equipes ATIVAS desta empresa.
 import bcrypt from 'bcryptjs';
 import { db, novoId } from '../_lib/db.js';
-import { autenticarRh, emitirTokenRh } from '../_lib/auth.js';
+import { autenticarRh, emitirTokenRh, carimboConfere } from '../_lib/auth.js';
 import { acessoDe, exigeAcesso } from '../_lib/acesso.js';
 import { comTabelaNova } from '../_lib/tabela-nova.js';
 import { PERFIS } from '../../js/acessos.js';
@@ -114,14 +114,16 @@ export default async function handler(req, res) {
     if (!(await acessoDe(sql, rh))) return erro(res, 401, 'SESSAO_INVALIDA', 'faça login novamente');
     const [u] = await sql`SELECT chave_hash, trocar_senha FROM usuario_rh
                           WHERE id=${rh.sub} AND empresa_id=${rh.empresa_id} AND ativo=true LIMIT 1`;
-    if (!u) return erro(res, 401, 'SESSAO_INVALIDA', 'faça login novamente');
+    // O carimbo é conferido contra ESTA leitura e o UPDATE só vale para este hash:
+    // se o administrador redefinir a senha no meio, a sessão velha não troca nada.
+    if (!u || !carimboConfere(rh, u.chave_hash)) return erro(res, 401, 'SESSAO_INVALIDA', 'faça login novamente');
     if (!u.trocar_senha) {
       const confere = typeof b.chave_atual === 'string' && b.chave_atual && await bcrypt.compare(b.chave_atual, u.chave_hash);
       if (!confere) return erro(res, 401, 'SENHA_ATUAL_INVALIDA', 'senha atual não confere');
     }
     const hash = await bcrypt.hash(b.chave_nova, 10);
     const r = await sql`UPDATE usuario_rh SET chave_hash=${hash}, sal=${b.sal_novo}, iteracoes=${ITER}, trocar_senha=false
-                        WHERE id=${rh.sub} AND empresa_id=${rh.empresa_id} AND ativo=true RETURNING id`;
+                        WHERE id=${rh.sub} AND empresa_id=${rh.empresa_id} AND ativo=true AND chave_hash=${u.chave_hash} RETURNING id`;
     if (!r[0]) return erro(res, 401, 'SESSAO_INVALIDA', 'faça login novamente');
     // O token desta chamada caiu junto com a senha velha: devolve um novo.
     const token = emitirTokenRh({ id: rh.sub, empresa_id: rh.empresa_id, usuario: rh.usuario, nome: rh.nome, chave_hash: hash });

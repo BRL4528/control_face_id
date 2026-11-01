@@ -25,7 +25,7 @@ export default async function handler(req, res) {
     const [p] = await sql`SELECT id FROM papel WHERE id=${b.papel_id} AND empresa_id=${rh.empresa_id} LIMIT 1`;
     if (!p) return erro(res, 404, 'PAPEL_NAO_ENCONTRADO', 'papel não encontrado');
     const uso = await sql`SELECT count(*)::int AS n FROM colaborador WHERE empresa_id=${rh.empresa_id} AND papel=${b.papel_id}`;
-    if (uso[0].n) return erro(res, 409, 'PAPEL_EM_USO', `${uso[0].n} colaborador(es) usam este papel — desative em vez de excluir`);
+    if (uso[0].n) return erro(res, 409, 'PAPEL_EM_USO', `${uso[0].n} colaborador(es) usam este papel; desative em vez de excluir`);
     const r = await sql`DELETE FROM papel WHERE id=${p.id} AND empresa_id=${rh.empresa_id} RETURNING id`;
     if (!r[0]) return erro(res, 404, 'PAPEL_NAO_ENCONTRADO', 'papel não encontrado');
     return ok(res, { excluido: true });

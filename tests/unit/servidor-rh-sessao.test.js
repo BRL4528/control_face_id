@@ -109,3 +109,12 @@ test('EPI: mensagens do 409 ao cancelar entrega confirmada ou devolvida, sem tra
   }
   assert.match(motivoNaoCancelavel('confirmada'), /devolução/);
 });
+
+test('atribuir batida: relógio do aparelho a mais de 2 min do servidor vai para o RH, como em /api/ponto', () => {
+  const base = { temCerca: true, cerca: { dentro: true, distancia_m: 5 }, liveness_ok: true };
+  assert.equal(revisaoDaAtribuicao(Object.assign({}, base, { deriva_ms: 60000 })).revisar, false);
+  assert.equal(revisaoDaAtribuicao(Object.assign({}, base, { deriva_ms: null })).revisar, false);
+  const r = revisaoDaAtribuicao(Object.assign({}, base, { deriva_ms: -180000 }));
+  assert.equal(r.revisar, true);
+  assert.match(r.motivo, /relógio/);
+});

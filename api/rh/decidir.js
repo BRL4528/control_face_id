@@ -92,10 +92,11 @@ export default async function handler(req, res) {
  *   cerca     { dentro, distancia_m } medida contra ela
  *   ocorrencia  ocorrenciaVigente do dia (viagem dispensa a cerca; férias,
  *             afastamento e licença bloqueiam a batida e mandam para o RH)
+ *   deriva_ms relógio do aparelho contra o servidor (fora de 2 min vai para o RH)
  * Devolve { revisar, motivo, cerca } (cerca já com a dispensa da viagem). O motivo
  * junta todas as razões, em texto (vai para o painel e para o card do Bitrix).
  */
-export function revisaoDaAtribuicao({ temCerca, cerca, liveness_ok, afastado, ocorrencia }) {
+export function revisaoDaAtribuicao({ temCerca, cerca, liveness_ok, afastado, ocorrencia, deriva_ms }) {
   const oc = ocorrencia || null;
   let c = cerca || { dentro: null, distancia_m: null };
   const externo = !!(oc && oc.semCerca) && c.dentro !== true;
@@ -106,10 +107,14 @@ export function revisaoDaAtribuicao({ temCerca, cerca, liveness_ok, afastado, oc
   if (!temCerca && !externo) motivos.push('sem cerca no dia');
   if (c.dentro === false) motivos.push('fora da cerca');
   if (liveness_ok === false) motivos.push('sem prova de vida');
+  if (Math.abs(Number(deriva_ms) || 0) > DERIVA_MAX_MS) motivos.push('relógio do aparelho fora do horário');
   const revisar = motivos.length > 0;
   const motivo = revisar ? motivos.join(' · ') : 'identificado pelo RH' + (externo ? ' · trabalho externo (viagem)' : '');
   return { revisar, motivo, cerca: c };
 }
+
+// Mesmo limite de /api/ponto: relógio do aparelho a mais de 2 min do servidor.
+const DERIVA_MAX_MS = 120000;
 
 // 'Afastamento INSS' → 'afastamento INSS': baixa só a 1ª letra, a sigla fica.
 const rotuloMinusculo = r => { const t = String(r || ''); return t.charAt(0).toLowerCase() + t.slice(1); };
@@ -156,7 +161,7 @@ async function decidirDispositivo(req, res, rh, b) {
   } else if (b.novo && b.novo.nome && b.novo.matricula) {
     const nome = String(b.novo.nome).trim(), mat = String(b.novo.matricula).trim();
     const existe = (await sql`SELECT id FROM colaborador WHERE empresa_id=${rh.empresa_id} AND matricula=${mat} LIMIT 1`)[0];
-    if (existe) return erro(res, 409, 'MATRICULA_EM_USO', 'já existe colaborador com esta matrícula — selecione-o na lista');
+    if (existe) return erro(res, 409, 'MATRICULA_EM_USO', 'já existe colaborador com esta matrícula; selecione-o na lista');
     // A equipe tem de ser desta empresa (a FK não olha empresa_id): conferida antes
     // de gravar qualquer coisa, para o aparelho continuar pendente se for recusada.
     const equipeId = b.novo.equipe_id ? String(b.novo.equipe_id) : null;
@@ -203,7 +208,7 @@ async function decidirDispositivo(req, res, rh, b) {
     // O RH acabou de confirmar a identidade: só continua em revisão pelo resto
     // (cerca, prova de vida, afastamento, ocorrência que bloqueia a batida).
     const { revisar, motivo, cerca } = revisaoDaAtribuicao({ temCerca, cerca: medida, liveness_ok: m.liveness_ok,
-                                                             afastado: !!(aloc && aloc.afastado), ocorrencia: oc });
+                                                             afastado: !!(aloc && aloc.afastado), ocorrencia: oc, deriva_ms: m.deriva_ms });
     const novoIdCliente = novoId();
     await sql`
       INSERT INTO marcacao (id_cliente, empresa_id, colaborador_id, dispositivo_id, equipe_id, tipo, origem, veredito,
