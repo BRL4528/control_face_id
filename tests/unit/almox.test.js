@@ -36,6 +36,12 @@ test('EPI trocado: entrega substituída por outra mais nova do mesmo item não p
   assert.equal(entregaSubstituida(velha, [{ ...nova, estado: 'cancelada' }, outroItem, outraPessoa]), false);
   // CA vencido continua aparecendo mesmo substituída (fato da entrega)
   assert.deepEqual(alertasDaEntrega(velha, { ...luva, ca_validade: '2026-08-01' }, '2026-10-20', [velha, nova]).alertas, ['ca_vencido']);
+  // ferramenta emprestada de novo não é "substituída": a anterior continua com a pessoa
+  const furadeira = { tipo: 'ferramenta' };
+  const f1 = { id: 'f1', item_id: 'fur', colaborador_id: 'p1', entregue_em: '2026-09-01', devolver_ate: '2026-09-10', estado: 'confirmada' };
+  const f2 = { ...f1, id: 'f2', entregue_em: '2026-10-01', devolver_ate: '2026-10-30' };
+  const rf = alertasDaEntrega(f1, furadeira, '2026-10-20', [f1, f2]);
+  assert.deepEqual([rf.alertas, rf.substituida], [['atrasada'], false]);
   assert.equal(caVencidoEm({ tipo: 'epi', ca_validade: '2026-10-01' }, '2026-10-02'), true);
   assert.equal(caVencidoEm({ tipo: 'epi', ca_validade: '2026-10-01' }, '2026-10-01'), false);
   assert.equal(caVencidoEm({ tipo: 'ferramenta', ca_validade: '2026-10-01' }, '2026-10-02'), false);

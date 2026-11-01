@@ -272,9 +272,10 @@ export function presencaPorEquipe(pessoas, marcacoes, equipes, hoje, agenda) {
   // Equipe de afastamento (INSS, licença) não está em operação: ninguém ali é esperado.
   return (equipes || []).filter(e => !e.afastamento).map(e => {
     const j = ag ? jornadaDoTime(e) : null;
-    const horario = ag ? horarioDoDia(j, hoje, feriados, false) : null;
     const devidoHoje = p => !ag || bateuHoje.has(p.pessoa_id) || !!horarioDoDia(j, hoje, feriados, alocados.has(p.pessoa_id));
     const doTime = ativosTodos.filter(p => p.equipe_id === e.equipe_id && devidoHoje(p));
+    // Horário do card: o da jornada; em dia de folga com gente escalada, o horário base da escala.
+    const horario = ag ? horarioDoDia(j, hoje, feriados, doTime.some(p => alocados.has(p.pessoa_id))) : null;
     const esperados = doTime.length;
     const marcaram = presentesPorEquipe[e.equipe_id] || new Set();
     const presentes = doTime.filter(p => marcaram.has(p.pessoa_id)).length;

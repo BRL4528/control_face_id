@@ -43,7 +43,8 @@ export function caVencidoEm(item, dia) {
 export function alertasDaEntrega(entrega, item, hoje, outras) {
   const a = [];
   if (!item || entrega.estado === 'devolvida' || entrega.estado === 'cancelada') return { alertas: a };
-  const substituida = typeof outras === 'boolean' ? outras : entregaSubstituida(entrega, outras);
+  // Só EPI é trocado: ferramenta emprestada de novo continua sendo outra ferramenta com a pessoa.
+  const substituida = item.tipo === 'epi' && (typeof outras === 'boolean' ? outras : entregaSubstituida(entrega, outras));
   let trocaEm = null;
   if (item.tipo === 'epi') {
     if (caVencidoEm(item, entrega.entregue_em)) a.push('ca_vencido');

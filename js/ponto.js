@@ -112,6 +112,7 @@ export const Ponto = {
   fecharCamera() {
     this.pararCamera();
     const aviso = $('cartaoProva'); if (aviso) aviso.remove();   // aviso de prova de vida reprovada
+    this.provaSemVida = false;   // envio sem prova de vida que falhou não marca o próximo fim (contestação, atestado)
     $('areaCamera') && $('areaCamera').classList.add('hide');
     $('painelDia') && $('painelDia').classList.remove('hide');
     this.estado = 'parado';

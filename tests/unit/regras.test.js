@@ -665,4 +665,6 @@ test('presencaPorEquipe com jornada: domingo e feriado não cobram, quem bateu n
   // Sábado escalado (alocação do dia) torna Beto esperado na obra
   const esc = presencaPorEquipe(pessoas, [], equipes, '2026-11-07', { ...agenda, alocacoes: [{ colaborador_id: 'b', equipe_id: 'obra', dia: '2026-11-07' }] });
   assert.deepEqual(esc.find(c => c.equipe_id === 'obra').ausentes, ['Beto']);
+  // ...e o card mostra o horário base da escala, não "folga"
+  assert.deepEqual(esc.find(c => c.equipe_id === 'obra').horario, { entrada: '07:00', saida: '17:00' });
 });
