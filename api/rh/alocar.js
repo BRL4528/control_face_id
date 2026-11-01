@@ -12,6 +12,7 @@ import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
 import { exigeAcesso } from '../_lib/acesso.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
+import { diaValido, foraDaEmpresa } from '../_lib/validar.js';
 
 export default async function handler(req, res) {
   if (cors(req, res)) return;
@@ -20,8 +21,9 @@ export default async function handler(req, res) {
   if (!rh) return erro(res, 401, 'SESSAO_INVALIDA', 'faça login novamente');
 
   const b = corpo(req);
-  const dia = String(b.dia || new Date().toISOString().slice(0, 10)).slice(0, 10);
-  const equipeId = b.equipe_id;
+  const dia = b.dia ? String(b.dia) : new Date().toISOString().slice(0, 10);
+  if (!diaValido(dia)) return erro(res, 400, 'CORPO_INVALIDO', 'dia inválido');
+  const equipeId = b.equipe_id ? String(b.equipe_id) : null;
   const cercaBase = b.cerca || {};
   const sql = db();
   if (!(await exigeAcesso(res, sql, rh, 'operacao', true))) return;
@@ -38,15 +40,28 @@ export default async function handler(req, res) {
 
   const itens = Array.isArray(b.colaboradores) ? b.colaboradores : [];
   if (!itens.length) return erro(res, 400, 'CORPO_INVALIDO', 'nenhum colaborador para alocar');
-  let gravadas = 0;
+
+  // Cada item pode ser só o id (usa a cerca base) ou um objeto com cerca própria.
+  const linhas = [];
   for (const it of itens) {
-    // Cada item pode ser só o id (usa a cerca base) ou um objeto com cerca própria.
+    if (!it) continue;
     const colaboradorId = typeof it === 'string' ? it : it.colaborador_id;
     if (!colaboradorId) continue;
     const cerca = (typeof it === 'object' && it.cerca) ? it.cerca : cercaBase;
     const eq = (typeof it === 'object' && it.equipe_id) || equipeId;
     if (cerca.lat == null || cerca.lng == null || !eq) continue;
+    linhas.push({ colaboradorId: String(colaboradorId), eq: String(eq), cerca });
+  }
 
+  // Isolamento de tenant: pessoas e equipes (inclusive as por item) têm de ser
+  // desta empresa, senão o app da outra empresa passa a mostrar a obra daqui.
+  const colabFora = await foraDaEmpresa(sql, 'colaborador', linhas.map(l => l.colaboradorId), rh.empresa_id);
+  if (colabFora.length) return erro(res, 404, 'COLABORADOR_NAO_ENCONTRADO', 'colaborador não encontrado', { colaboradores: colabFora });
+  const eqFora = await foraDaEmpresa(sql, 'equipe', linhas.map(l => l.eq), rh.empresa_id);
+  if (eqFora.length) return erro(res, 404, 'EQUIPE_NAO_ENCONTRADA', 'equipe não encontrada', { equipes: eqFora });
+
+  let gravadas = 0;
+  for (const { colaboradorId, eq, cerca } of linhas) {
     // origem='manual': é ajuste pontual do RH. A re-materialização de um plano
     // NÃO sobrescreve linhas manuais (ver api/rh/plano.js), então este dia fica
     // "cravado" mesmo que um plano cubra a mesma data.

@@ -15,8 +15,7 @@ import { autenticarRh } from '../_lib/auth.js';
 import { exigeAcesso } from '../_lib/acesso.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 import { materializarPlano, normalizarPlano } from '../_lib/escala.js';
-
-const HORA_DIA = /^\d{4}-\d{2}-\d{2}$/;
+import { diaValido, daEmpresa, foraDaEmpresa } from '../_lib/validar.js';
 
 export default async function handler(req, res) {
   if (cors(req, res)) return;
@@ -44,18 +43,31 @@ export default async function handler(req, res) {
   const equipeId = b.equipe_id;
   const nome = String(b.nome || '').trim().slice(0, 80) || null;   // projeto/obra; opcional
   const cerca = b.cerca || {};
-  const colaboradores = Array.isArray(b.colaboradores) ? b.colaboradores.filter(Boolean) : [];
+  const colaboradores = Array.isArray(b.colaboradores) ? [...new Set(b.colaboradores.filter(Boolean).map(String))] : [];
   const diasSemana = Array.isArray(b.dias_semana) && b.dias_semana.length
     ? b.dias_semana.map(Number).filter(n => n >= 1 && n <= 7) : [1, 2, 3, 4, 5];
-  const vigInicio = HORA_DIA.test(b.vigencia_inicio) ? b.vigencia_inicio : hoje;
-  const vigFim = HORA_DIA.test(b.vigencia_fim) ? b.vigencia_fim : null;
+  // Data informada precisa existir; ausente cai no padrão (hoje / sem fim).
+  if (b.vigencia_inicio && !diaValido(b.vigencia_inicio)) return erro(res, 400, 'CORPO_INVALIDO', 'início da vigência inválido');
+  if (b.vigencia_fim && !diaValido(b.vigencia_fim)) return erro(res, 400, 'CORPO_INVALIDO', 'fim da vigência inválido');
+  const vigInicio = b.vigencia_inicio || hoje;
+  const vigFim = b.vigencia_fim || null;
 
   if (!equipeId) return erro(res, 400, 'CORPO_INVALIDO', 'equipe_id obrigatório');
   if (cerca.lat == null || cerca.lng == null) return erro(res, 400, 'CORPO_INVALIDO', 'cerca (lat/lng) obrigatória');
   if (vigFim && vigFim < vigInicio) return erro(res, 400, 'CORPO_INVALIDO', 'fim da vigência antes do início');
 
+  // Isolamento de tenant: o plano editado, a equipe e as pessoas têm de ser desta
+  // empresa. Sem isso um plano_id de outra empresa era sobrescrito pelo upsert e
+  // as alocações dela apagadas e recriadas com gente desta.
+  if (b.plano_id && !(await daEmpresa(sql, 'plano_alocacao', b.plano_id, rh.empresa_id))) {
+    return erro(res, 404, 'PLANO_NAO_ENCONTRADO', 'escala não encontrada');
+  }
+  if (!(await daEmpresa(sql, 'equipe', equipeId, rh.empresa_id))) return erro(res, 404, 'EQUIPE_NAO_ENCONTRADA', 'equipe não encontrada');
+  const estranhos = await foraDaEmpresa(sql, 'colaborador', colaboradores, rh.empresa_id);
+  if (estranhos.length) return erro(res, 404, 'COLABORADOR_NAO_ENCONTRADO', 'colaborador não encontrado', { colaboradores: estranhos });
+
   const raio = Math.max(30, Math.min(Number(cerca.raio_m) || 200, 5000));
-  const planoId = b.plano_id || novoId();
+  const planoId = b.plano_id ? String(b.plano_id) : novoId();
 
   // Outros planos ativos da empresa que disputam as mesmas pessoas nos mesmos
   // dias da semana, com vigências que se cruzam.
@@ -95,7 +107,10 @@ export default async function handler(req, res) {
       cerca_lat=EXCLUDED.cerca_lat, cerca_lng=EXCLUDED.cerca_lng, cerca_raio_m=EXCLUDED.cerca_raio_m,
       dias_semana=EXCLUDED.dias_semana, vigencia_inicio=EXCLUDED.vigencia_inicio,
       vigencia_fim=EXCLUDED.vigencia_fim, ativo=true, atualizado_em=now()
+    WHERE plano_alocacao.empresa_id = EXCLUDED.empresa_id
     RETURNING *`;
+  // Defesa em profundidade: id de outra empresa não atualiza nada.
+  if (!plano) return erro(res, 404, 'PLANO_NAO_ENCONTRADO', 'escala não encontrada');
 
   const r = await materializarPlano(sql, normalizarPlano(plano), hoje, { recriar: true });
   return ok(res, { plano_id: planoId, dias_materializados: r.dias, alocacoes_gravadas: r.gravadas, planos_ajustados: conflitos.length });
