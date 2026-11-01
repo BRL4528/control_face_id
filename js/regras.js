@@ -240,9 +240,16 @@ export const LIMIAR_PRESENCA = { bom: 0.95, atencao: 0.85, serio: 0.70 };
  * Equipe sem esperados não vira card (não há o que cobrar). Equipe com
  * esperados e zero presentes é presenca 0 — o caso que o RH precisa ver.
  * `hoje` entra como parâmetro ('YYYY-MM-DD') para a função ser testável.
+ *
+ * `agenda` (opcional): { jornadas, jornadaPadrao, feriados (Set), alocacoes }.
+ * Com ela, só é esperado quem tem horário hoje pela jornada da equipe (folga,
+ * domingo e feriado não cobram ninguém; a escala do dia marca o dia como de
+ * trabalho). Quem bateu em dia de folga conta como esperado e presente. Cada
+ * card leva `horario` ({ entrada, saida } ou null = folga/feriado). Sem `agenda`,
+ * todo ativo da equipe é esperado (legado).
  */
-export function presencaPorEquipe(pessoas, marcacoes, equipes, hoje) {
-  const ativos = (pessoas || []).filter(p => p && p.ativo);
+export function presencaPorEquipe(pessoas, marcacoes, equipes, hoje, agenda) {
+  const ativosTodos = (pessoas || []).filter(p => p && p.ativo);
   const presentesPorEquipe = {};
   const nomesPresentes = {};
   for (const m of (marcacoes || [])) {
@@ -250,10 +257,24 @@ export function presencaPorEquipe(pessoas, marcacoes, equipes, hoje) {
     (nomesPresentes[m.equipe_id] = nomesPresentes[m.equipe_id] || new Set()).add(m.pessoa_id);
   }
   for (const k of Object.keys(nomesPresentes)) presentesPorEquipe[k] = nomesPresentes[k];
+  const bateuHoje = new Set();
+  for (const k of Object.keys(nomesPresentes)) for (const id of nomesPresentes[k]) bateuHoje.add(id);
+
+  // Horário de hoje da jornada da equipe (a dela, senão a padrão da empresa).
+  const ag = agenda || null;
+  const feriados = ag && ag.feriados instanceof Set ? ag.feriados : new Set();
+  const alocados = new Set(((ag && ag.alocacoes) || []).filter(a => !a.dia || a.dia === hoje).map(a => a.colaborador_id));
+  const jornadaDoTime = e => {
+    const j = (e.jornada_id && ((ag && ag.jornadas) || []).find(x => x.jornada_id === e.jornada_id)) || (ag && ag.jornadaPadrao) || null;
+    return Object.assign({}, JORNADA_FIXA, j || {});
+  };
 
   // Equipe de afastamento (INSS, licença) não está em operação: ninguém ali é esperado.
   return (equipes || []).filter(e => !e.afastamento).map(e => {
-    const doTime = ativos.filter(p => p.equipe_id === e.equipe_id);
+    const j = ag ? jornadaDoTime(e) : null;
+    const horario = ag ? horarioDoDia(j, hoje, feriados, false) : null;
+    const devidoHoje = p => !ag || bateuHoje.has(p.pessoa_id) || !!horarioDoDia(j, hoje, feriados, alocados.has(p.pessoa_id));
+    const doTime = ativosTodos.filter(p => p.equipe_id === e.equipe_id && devidoHoje(p));
     const esperados = doTime.length;
     const marcaram = presentesPorEquipe[e.equipe_id] || new Set();
     const presentes = doTime.filter(p => marcaram.has(p.pessoa_id)).length;
@@ -262,6 +283,7 @@ export function presencaPorEquipe(pessoas, marcacoes, equipes, hoje) {
     return {
       equipe_id: e.equipe_id, nome: e.nome,
       esperados, presentes, presenca,
+      horario: horario && horario.entrada && horario.saida ? { entrada: horario.entrada, saida: horario.saida } : null,
       ausentes,
       status: presenca == null ? null : statusPresenca(presenca, LIMIAR_PRESENCA)
     };
@@ -377,7 +399,7 @@ export const HORA_ENTRADA_PADRAO = '08:00';
  * vez de ler o relógio. `hoje` é 'YYYY-MM-DD'. Retorna ordenado por severidade
  * (crítico primeiro) e, dentro disso, por horário.
  */
-export function exceptionsDoDia(marcacoes, pessoas, alocacoesHoje, hoje, agoraISO, horaEntrada, horaPorEquipe, limiarAceite) {
+export function exceptionsDoDia(marcacoes, pessoas, alocacoesHoje, hoje, agoraISO, horaEntrada, horaPorEquipe, limiarAceite, fuso) {
   const ativos = {};
   for (const p of (pessoas || [])) ativos[p.pessoa_id] = p;
   const porEquipe = horaPorEquipe || {};   // equipe_id -> 'HH:MM' (jornada real); senão cai no default
@@ -401,7 +423,9 @@ export function exceptionsDoDia(marcacoes, pessoas, alocacoesHoje, hoje, agoraIS
 
   // 2) "Sem entrada" — derivada da alocação, só depois da hora-limite. A hora
   //    limite é a da jornada da equipe (se houver); senão o default da empresa.
-  const agora16 = String(agoraISO || '').slice(0, 16);
+  //    A hora-limite está no relógio da empresa; o agora vem do servidor em UTC,
+  //    então é convertido para o fuso dela antes de comparar.
+  const agora16 = agoraNoRelogio(agoraISO, fuso);
   for (const a of (alocacoesHoje || [])) {
     const p = ativos[a.colaborador_id];
     if (!p || !p.ativo) continue;
@@ -422,6 +446,17 @@ export function exceptionsDoDia(marcacoes, pessoas, alocacoesHoje, hoje, agoraIS
   const peso = { critico: 0, atencao: 1 };
   return itens.sort((x, y) =>
     (peso[x.severidade] - peso[y.severidade]) || String(x.hora).localeCompare(String(y.hora)));
+}
+
+/**
+ * 'YYYY-MM-DDTHH:MM' de um instante no relógio de `fuso`. Sem fuso, ou com um
+ * valor que não é um instante, devolve os 16 primeiros caracteres (legado). Pura.
+ */
+export function agoraNoRelogio(agoraISO, fuso) {
+  const s = String(agoraISO || '');
+  if (!fuso || !s || isNaN(new Date(s))) return s.slice(0, 16);
+  const h = horaNoFuso(s, fuso);
+  return h ? dia(s, fuso) + 'T' + h : s.slice(0, 16);
 }
 
 /**
@@ -780,7 +815,11 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
 
       let status = 'ok', saldo = null;
       const folga = ehFeriado.has(dia) ? 'feriado' : 'folga';
+      // Dia abonado (férias, atestado...) com batida: o dia continua sendo da ocorrência,
+      // sem previsto e sem gerar extra. Fica marcado para o RH conferir o conflito.
+      const conflitoOcorrencia = abonado && marcas.length > 0;
       if (!marcas.length) status = abonado ? 'ocorrencia' : afastado ? 'afastado' : !horario ? folga : dia >= hoje ? 'em_andamento' : 'falta';
+      else if (abonado) { status = 'ocorrencia'; saldo = 0; }
       else if (pendentes) status = 'a_confirmar';
       else if (ok.incompleto) status = dia >= hoje ? 'em_andamento' : 'incompleto';
       else if (!escalado) status = folga;
@@ -798,7 +837,8 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
       if (marcas.length) tot.dias++;
       dias.push({ dia, equipe_id: equipeId, status, ocorrencia: oc ? oc.tipo : null, previsto, trabalhado: ok.minutos, saldo, a_confirmar: aConfirmar,
                   atraso: atrasado ? atraso : 0, marcacoes: marcas.length,
-                  intervalo_descontado: semBaterIntervalo ? intervalo : 0, na_tolerancia: naTolerancia });
+                  intervalo_descontado: semBaterIntervalo ? intervalo : 0, na_tolerancia: naTolerancia,
+                  conflito_ocorrencia: conflitoOcorrencia });
     }
     linhas.push({ pessoa_id: id, nome: pessoa.nome, matricula: pessoa.matricula, totais: tot, dias });
   }

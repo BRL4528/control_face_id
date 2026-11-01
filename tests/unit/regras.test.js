@@ -5,7 +5,7 @@ import {
   itensParaRemover, agoraCorrigido, calcularDeriva, cargaValida, euclidiana, dia,
   indicadores, espelho, gestorDeveMarcar,
   presencaPorEquipe, statusPresenca, serieDiaria, pendenciasPorMotivo, LIMIAR_PRESENCA
-, pontosDoDia, exceptionsDoDia, TIPOS_EXCECAO,
+, pontosDoDia, exceptionsDoDia, agoraNoRelogio, TIPOS_EXCECAO,
   jornadaDaEquipe, horaEntradaDaEquipe, horasEntradaPorEquipe, csvDe,
   materializarDias, alertasDePlanejamento, horaNoFuso, classificarPendente } from '../../js/regras.js';
 
@@ -419,11 +419,21 @@ test('exceptionsDoDia não cobra "sem entrada" de pessoa inativa', () => {
 });
 
 test('exceptionsDoDia: antes da hora de entrada não cobra ausência', () => {
-  const cedo = XHOJE + 'T06:30:00Z';   // antes das 08:00
-  const x = exceptionsDoDia(XMARCS, XPESSOAS, XALOC, XHOJE, cedo, '08:00');
+  // 11:30 UTC = 07:30 em Campo Grande (UTC-4): ainda antes das 08:00 locais.
+  const cedo = XHOJE + 'T11:30:00Z';
+  const x = exceptionsDoDia(XMARCS, XPESSOAS, XALOC, XHOJE, cedo, '08:00', null, undefined, 'America/Campo_Grande');
   assert.equal(x.some(i => i.tipo === 'sem_entrada'), false);
   // mas as exceções ancoradas em marcação continuam valendo
   assert.equal(x.some(i => i.tipo === 'fora_da_cerca'), true);
+  // 12:30 UTC = 08:30 locais: agora cobra
+  const depois = exceptionsDoDia(XMARCS, XPESSOAS, XALOC, XHOJE, XHOJE + 'T12:30:00Z', '08:00', null, undefined, 'America/Campo_Grande');
+  assert.equal(depois.some(i => i.pessoa_id === 'c' && i.tipo === 'sem_entrada'), true);
+});
+
+test('agoraNoRelogio converte o instante UTC para o relógio da empresa', () => {
+  assert.equal(agoraNoRelogio('2026-08-14T11:30:00Z', 'America/Campo_Grande'), '2026-08-14T07:30');
+  assert.equal(agoraNoRelogio('2026-08-15T02:10:00.000Z', 'America/Campo_Grande'), '2026-08-14T22:10');   // vira o dia
+  assert.equal(agoraNoRelogio('2026-08-14T11:30:00Z'), '2026-08-14T11:30');   // sem fuso: legado
 });
 
 test('exceptionsDoDia: quem apareceu não vira "sem entrada" mesmo sem bater todos os pontos', () => {
@@ -629,4 +639,30 @@ test('presencaPorEquipe: equipe de afastamento não entra em operação', () => 
   const pessoas = [{ pessoa_id: 'a', equipe_id: 'inss', ativo: true }, { pessoa_id: 'b', equipe_id: 'obra', ativo: true }];
   const equipes = [{ equipe_id: 'inss', nome: 'Afastado INSS', afastamento: true }, { equipe_id: 'obra', nome: 'Obra 574' }];
   assert.deepEqual(presencaPorEquipe(pessoas, [], equipes, '2026-10-28').map(c => c.equipe_id), ['obra']);
+});
+
+test('presencaPorEquipe com jornada: domingo e feriado não cobram, quem bateu na folga conta presente', () => {
+  const pessoas = [{ pessoa_id: 'a', nome: 'Ana', equipe_id: 'obra', ativo: true }, { pessoa_id: 'b', nome: 'Beto', equipe_id: 'obra', ativo: true },
+                   { pessoa_id: 'c', nome: 'Caio', equipe_id: 'sab', ativo: true }];
+  const equipes = [{ equipe_id: 'obra', nome: 'Obra 574', jornada_id: 'j1' }, { equipe_id: 'sab', nome: 'Sábado', jornada_id: 'j2' }];
+  const jornadas = [{ jornada_id: 'j1', entrada: '07:00', saida: '17:00' },
+                    { jornada_id: 'j2', entrada: '07:00', saida: '17:00', dias: { '6': { entrada: '07:00', saida: '11:00' } } }];
+  const agenda = { jornadas, jornadaPadrao: null, feriados: new Set(), alocacoes: [] };
+  // 2026-11-01 é domingo: ninguém previsto
+  assert.deepEqual(presencaPorEquipe(pessoas, [], equipes, '2026-11-01', agenda), []);
+  // Domingo com batida de Ana: ela conta como esperada e presente, Beto não é cobrado
+  const dom = presencaPorEquipe(pessoas, [{ pessoa_id: 'a', equipe_id: 'obra', marcado_dia: '2026-11-01' }], equipes, '2026-11-01', agenda);
+  assert.deepEqual(dom.map(c => [c.equipe_id, c.esperados, c.presentes, c.horario]), [['obra', 1, 1, null]]);
+  // Segunda: a obra cobra os dois; a equipe de sábado não cobra ninguém
+  const seg = presencaPorEquipe(pessoas, [], equipes, '2026-11-02', agenda);
+  assert.deepEqual(seg.map(c => [c.equipe_id, c.esperados, c.presentes]), [['obra', 2, 0]]);
+  assert.deepEqual(seg[0].horario, { entrada: '07:00', saida: '17:00' });
+  // Sábado: só a equipe com sábado na jornada, com o horário do dia
+  const sab = presencaPorEquipe(pessoas, [], equipes, '2026-11-07', agenda);
+  assert.deepEqual(sab.map(c => [c.equipe_id, c.esperados, c.horario]), [['sab', 1, { entrada: '07:00', saida: '11:00' }]]);
+  // Feriado numa segunda: ninguém previsto
+  assert.deepEqual(presencaPorEquipe(pessoas, [], equipes, '2026-11-02', { ...agenda, feriados: new Set(['2026-11-02']) }), []);
+  // Sábado escalado (alocação do dia) torna Beto esperado na obra
+  const esc = presencaPorEquipe(pessoas, [], equipes, '2026-11-07', { ...agenda, alocacoes: [{ colaborador_id: 'b', equipe_id: 'obra', dia: '2026-11-07' }] });
+  assert.deepEqual(esc.find(c => c.equipe_id === 'obra').ausentes, ['Beto']);
 });

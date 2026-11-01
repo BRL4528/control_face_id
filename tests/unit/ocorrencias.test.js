@@ -44,3 +44,18 @@ test('aviso prévio: dia trabalhado normal e a folha marca SOBRE AVISO', () => {
   assert.equal(f.dias[20].ocorrencia, 'SOBRE AVISO');
   assert.equal(f.dias[21].ocorrencia, 'FALTA');   // 22/10 sem batida: aviso prévio não abona
 });
+
+test('dia de férias com batida continua ocorrência: saldo 0, sem hora extra, conflito marcado', () => {
+  const pessoas = [{ pessoa_id: 'p1', nome: 'Ana', matricula: '1', ativo: true, equipe_id: 'e1', desde: '2026-10-01' }];
+  const em = h => '2026-10-06T' + String(h + 4).padStart(2, '0') + ':00:00Z';
+  const marcacoes = [7, 11, 12, 17].map(h => ({ pessoa_id: 'p1', equipe_id: 'e1', tipo: 'entrada', marcado_em: em(h), marcado_dia: '2026-10-06', estado: 'aceita' }));
+  const [l] = horasPorColaborador({ marcacoes, alocacoes: [], pessoas, equipes: [{ equipe_id: 'e1' }], jornadas: [],
+    de: '2026-10-01', ate: '2026-10-31', hoje: '2026-10-28', fuso: 'America/Campo_Grande', ocorrencias: [oc('ferias', '2026-10-05', '2026-10-09')] });
+  const d = l.dias.find(x => x.dia === '2026-10-06');
+  assert.deepEqual([d.status, d.ocorrencia, d.saldo, d.conflito_ocorrencia], ['ocorrencia', 'ferias', 0, true]);
+  assert.equal(l.dias.find(x => x.dia === '2026-10-07').conflito_ocorrencia, false);   // férias sem batida: sem conflito
+  const f = folhaDoMes({ linha: l, marcacoes, mes: '2026-10', fuso: 'America/Campo_Grande', nomeEquipe: () => 'X' });
+  assert.equal(f.dias[5].extra, 0);
+  assert.equal(f.totais.extra, 0);
+  assert.equal(f.dias[5].ocorrencia, 'FÉRIAS');
+});

@@ -272,7 +272,7 @@ export const Rh = {
       d.servidor_hora, (this.jornadaPadrao() || {}).entrada || cfg.horaEntrada || '08:00',
       horasEntradaPorEquipe(d.equipes, d.jornadas, this.hojeServidor(),   // hora-limite do dia pela jornada; feriado não cobra
         diasDeFeriado(this.hojeServidor(), this.hojeServidor(), cfg.feriados), this.jornadaPadrao()),
-      cfg.limiarAceite);
+      cfg.limiarAceite, (d.empresa || {}).fuso || 'America/Campo_Grande');   // agora no relógio da empresa
   },
 
   /** Fila de Pendências: exceções de hoje + marcações que ficaram pendentes em
@@ -745,7 +745,11 @@ export const Rh = {
 
     const ind = indicadores(d.marcacoes, d.pessoas, d.equipes);
     // Quem está de férias, atestado ou licença hoje não é esperado na obra.
-    const cards = presencaPorEquipe((d.pessoas || []).filter(p => !this.abonadoHoje(p.pessoa_id)), d.marcacoes, d.equipes, hoje);
+    // Só é previsto quem tem horário hoje pela jornada da equipe (domingo, folga e
+    // feriado não cobram; a escala do dia marca o dia como de trabalho).
+    const cards = presencaPorEquipe((d.pessoas || []).filter(p => !this.abonadoHoje(p.pessoa_id)), d.marcacoes, d.equipes, hoje,
+      { jornadas: d.jornadas, jornadaPadrao: this.jornadaPadrao(), feriados: diasDeFeriado(hoje, hoje, cfg.feriados), alocacoes: d.alocacoes_hoje });
+    const feriadoHoje = diasDeFeriado(hoje, hoje, cfg.feriados).has(hoje);
     const serie = serieDiaria(d.marcacoes, d.periodo_dias || this.dias, hoje);
     const motivos = pendenciasPorMotivo(d.marcacoes, d.recadastros, d.pessoas);
     const exc = this.pendenciasAbertas();   // mesmo número do badge e da aba Pendências
@@ -778,7 +782,8 @@ export const Rh = {
             '<span class="pill ' + (pct >= 90 ? 'ok' : 'warn') + '"><span class="dot"></span>' +
               (pct >= 90 ? 'Ativa' : 'Atenção') + '</span>' +
             '<span class="team-cnt">' + c.esperados + ' colaboradores</span></div>' +
-          '<div class="team-meta">🕑 ' + esc(this.jornadaDe(c.equipe_id)) + '</div>' +
+          '<div class="team-meta">🕑 ' + (c.horario ? 'Hoje das ' + esc(c.horario.entrada) + ' às ' + esc(c.horario.saida)
+            : 'Hoje é ' + (feriadoHoje ? 'feriado' : 'folga') + ' nesta jornada; quem bateu conta como presente') + '</div>' +
           '<div class="team-pres">' +
             '<div style="display:flex;align-items:baseline;gap:8px">' +
               '<span class="num">' + c.presentes + ' / ' + c.esperados + '</span>' +
@@ -832,7 +837,7 @@ export const Rh = {
       '</div></div>' +
 
       '<div class="kpis">' +
-        kpi('Previstos hoje', esp, (cards.length) + ' equipe(s) em operação') +
+        kpi('Previstos hoje', esp, cards.length ? cards.length + ' equipe(s) em operação' : (feriadoHoje ? 'Hoje é feriado: ninguém previsto' : 'Ninguém previsto hoje pela jornada')) +
         kpi('Presentes', pre, ind.taxaManual + '% por registro manual') +
         kpi('Presença', presencaHoje == null ? '—' : presencaHoje + '%', 'Meta operacional 95%') +
         kpi('Requerem atenção', exc.length, 'Exceções aguardando o RH', exc.length > 0) +
@@ -843,7 +848,8 @@ export const Rh = {
           '<div class="sec-tit"><h2>Equipes em operação</h2>' +
             '<button class="link" id="verPlanejamento">Ver ajustes do dia</button></div>' +
           (cards.length ? cards.map(teamCard).join('')
-            : '<div class="v2card" style="padding:20px;color:#64748b">Nenhuma equipe com pessoas ativas hoje.</div>') +
+            : '<div class="v2card" style="padding:20px;color:#64748b">' + (feriadoHoje ? 'Hoje é feriado: nenhuma equipe tem gente prevista.'
+              : 'Ninguém previsto hoje: é folga pela jornada das equipes ou não há pessoas ativas.') + '</div>') +
         '</section>' +
         '<div>' +
           '<section class="side-sec">' +
@@ -2609,7 +2615,7 @@ export const Rh = {
         '<td class="mono">' + fmtMinutos(x.previsto) + '</td><td class="mono">' + fmtMinutos(x.trabalhado) + '</td>' +
         '<td class="mono"' + (x.saldo != null ? saldoCls(x.saldo) : '') + '>' + (x.saldo != null ? fmtMinutos(x.saldo, true) : '—') + '</td>' +
         '<td class="mono">' + (x.atraso ? fmtMinutos(x.atraso) : '—') + '</td>' +
-        '<td>' + (x.ocorrencia && x.status === 'ocorrencia' ? TIPOS_OCORRENCIA[x.ocorrencia].rotulo : ST[x.status]) + (x.a_confirmar ? ' · ' + fmtMinutos(x.a_confirmar) + ' pendentes' : '') +
+        '<td>' + esc(this.rotuloSituacaoDia(x, ST)) + (x.a_confirmar ? ' · ' + fmtMinutos(x.a_confirmar) + ' pendentes' : '') +
           (x.intervalo_descontado ? ' · <span class="nota" title="Só 2 batidas: o intervalo da jornada foi descontado">intervalo ' + fmtMinutos(x.intervalo_descontado) + ' descontado</span>' : '') +
           (x.na_tolerancia ? ' · <span class="nota">dentro da tolerância</span>' : '') + '</td></tr>').join('') +
       '</tbody></table></td></tr>';
@@ -2629,13 +2635,23 @@ export const Rh = {
     });
   },
 
+  /** Situação do dia no relatório de horas. Com ocorrência no dia, o rótulo dela
+   *  sempre aparece: sozinho quando o dia é dela, "(com batida)" quando a pessoa
+   *  bateu num dia abonado, e junto da situação nos demais casos (viagem, aviso prévio). */
+  rotuloSituacaoDia(x, ST) {
+    const oc = x.ocorrencia && TIPOS_OCORRENCIA[x.ocorrencia] ? TIPOS_OCORRENCIA[x.ocorrencia].rotulo : '';
+    if (!oc) return ST[x.status] || '';
+    if (x.status === 'ocorrencia') return oc + (x.conflito_ocorrencia ? ' (com batida)' : '');
+    return oc + ' · ' + (ST[x.status] || '');
+  },
+
   csvHoras() {
     const h = this.horasLinhas; if (!h) return;
     const ST = { ok: 'OK', falta: 'Falta', incompleto: 'Incompleto', a_confirmar: 'A confirmar', folga: 'Folga (extra)', feriado: 'Feriado', afastado: 'Afastado', em_andamento: 'Em andamento' };
     const linhas = [];
     for (const l of h.linhas) for (const x of l.dias) {
       linhas.push([l.nome, l.matricula, x.dia, this.nomeEquipe(x.equipe_id), fmtMinutos(x.previsto), fmtMinutos(x.trabalhado),
-        x.saldo != null ? fmtMinutos(x.saldo, true) : '', x.atraso ? fmtMinutos(x.atraso) : '', x.ocorrencia && x.status === 'ocorrencia' ? TIPOS_OCORRENCIA[x.ocorrencia].rotulo : ST[x.status],
+        x.saldo != null ? fmtMinutos(x.saldo, true) : '', x.atraso ? fmtMinutos(x.atraso) : '', this.rotuloSituacaoDia(x, ST),
         x.a_confirmar ? fmtMinutos(x.a_confirmar) : '']);
     }
     this.baixarCsv('horas-' + h.de + '_' + h.ate + '.csv',
