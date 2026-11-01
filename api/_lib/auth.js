@@ -10,7 +10,7 @@
 // da sessão do dispositivo, no ato do ponto. Quem prova "sou este celular" é a
 // credencial; quem prova "sou esta pessoa viva agora" é a face + liveness.
 import jwt from 'jsonwebtoken';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { db } from './db.js';
 
 function bearer(req) {
@@ -60,13 +60,33 @@ export async function autenticarDispositivo(req) {
 const SEGREDO = () => process.env.JWT_SECRET || 'dev-inseguro-troque-em-producao';
 const TTL_RH = '12h';
 
+/**
+ * Carimbo da senha que vai no JWT (`cs`): 8 caracteres de um HMAC do chave_hash
+ * atual. Trocar ou redefinir a senha muda o chave_hash, o carimbo deixa de bater
+ * e toda sessão aberta antes cai (401) na próxima requisição, sem coluna nova no
+ * banco. HMAC com o segredo do JWT: o carimbo, que é legível no token, não dá
+ * nenhuma pista do hash da senha.
+ */
+export function carimboSenha(chaveHash) {
+  if (!chaveHash) return null;
+  return createHmac('sha256', SEGREDO()).update('senha:' + String(chaveHash)).digest('base64url').slice(0, 8);
+}
+
+/** O token foi emitido para a senha que o usuário tem hoje? Token sem carimbo não vale. */
+export const carimboConfere = (rh, chaveHash) => !!(rh && rh.cs && chaveHash && rh.cs === carimboSenha(chaveHash));
+
+/** `usuario` precisa trazer chave_hash (o carimbo sai dele). */
 export function emitirTokenRh(usuario) {
   return jwt.sign(
-    { sub: usuario.id, empresa_id: usuario.empresa_id, usuario: usuario.usuario, nome: usuario.nome },
+    { sub: usuario.id, empresa_id: usuario.empresa_id, usuario: usuario.usuario, nome: usuario.nome, cs: carimboSenha(usuario.chave_hash) },
     SEGREDO(), { expiresIn: TTL_RH });
 }
 
-/** Valida o JWT do RH. Devolve o payload ou null. */
+/**
+ * Valida o JWT do RH (assinatura e validade). Devolve o payload ou null. O
+ * carimbo da senha, o usuário ativo e a senha temporária são conferidos contra o
+ * banco em acessoDe (api/_lib/acesso.js), que toda rota do RH chama.
+ */
 export function autenticarRh(req) {
   const t = bearer(req);
   if (!t) return null;

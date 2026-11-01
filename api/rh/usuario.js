@@ -12,12 +12,17 @@
 //     do fluxo de senha temporária exige também a chave ATUAL (chave_atual, derivada
 //     com o sal/iterações de hoje): um token de 12 h não basta para tomar a conta.
 //
+// Sessões: o JWT do RH leva um carimbo do chave_hash (api/_lib/auth.js). Trocar ou
+// redefinir a senha muda o hash e derruba as sessões abertas daquele usuário. Na
+// troca da própria senha a resposta traz `token` novo, que o painel passa a usar
+// (o token com que ele chamou já não vale).
+//
 // Perfil (acao 'criar' e 'acesso'): um de js/acessos.js. Sem perfil no 'criar', o
 // usuário nasce 'leitura' (o mais restrito), nunca administrador. gestor_obra exige
 // obras, e só valem equipes ATIVAS desta empresa.
 import bcrypt from 'bcryptjs';
 import { db, novoId } from '../_lib/db.js';
-import { autenticarRh } from '../_lib/auth.js';
+import { autenticarRh, emitirTokenRh } from '../_lib/auth.js';
 import { acessoDe, exigeAcesso } from '../_lib/acesso.js';
 import { comTabelaNova } from '../_lib/tabela-nova.js';
 import { PERFIS } from '../../js/acessos.js';
@@ -94,8 +99,10 @@ export default async function handler(req, res) {
     const alvo = await sql`SELECT usuario, nome FROM usuario_rh WHERE id=${b.usuario_id} AND empresa_id=${rh.empresa_id} LIMIT 1`;
     if (!alvo[0]) return erro(res, 404, 'USUARIO_NAO_ENCONTRADO', 'usuário não encontrado');
     const nova = await novaSenhaTemporaria();
-    await sql`UPDATE usuario_rh SET sal=${nova.sal}, iteracoes=${ITER}, chave_hash=${nova.chaveHash}, trocar_senha=true
-              WHERE id=${b.usuario_id} AND empresa_id=${rh.empresa_id}`;
+    // chave_hash novo: as sessões abertas desse usuário caem (carimbo do JWT).
+    const r = await sql`UPDATE usuario_rh SET sal=${nova.sal}, iteracoes=${ITER}, chave_hash=${nova.chaveHash}, trocar_senha=true
+                        WHERE id=${b.usuario_id} AND empresa_id=${rh.empresa_id} RETURNING id`;
+    if (!r[0]) return erro(res, 404, 'USUARIO_NAO_ENCONTRADO', 'usuário não encontrado');
     return ok(res, { usuario_id: b.usuario_id, usuario: alvo[0].usuario, nome: alvo[0].nome, senha_temporaria: nova.senha });
   }
 
@@ -116,7 +123,9 @@ export default async function handler(req, res) {
     const r = await sql`UPDATE usuario_rh SET chave_hash=${hash}, sal=${b.sal_novo}, iteracoes=${ITER}, trocar_senha=false
                         WHERE id=${rh.sub} AND empresa_id=${rh.empresa_id} AND ativo=true RETURNING id`;
     if (!r[0]) return erro(res, 401, 'SESSAO_INVALIDA', 'faça login novamente');
-    return ok(res, { trocado: true });
+    // O token desta chamada caiu junto com a senha velha: devolve um novo.
+    const token = emitirTokenRh({ id: rh.sub, empresa_id: rh.empresa_id, usuario: rh.usuario, nome: rh.nome, chave_hash: hash });
+    return ok(res, { trocado: true, token });
   }
 
   // Criar: gera senha temporária, deriva e guarda o bcrypt.
