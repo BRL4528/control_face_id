@@ -25,7 +25,8 @@ export function hashCredencial(credencial) {
 /**
  * Autentica o dispositivo pela credencial no Bearer. Devolve o vínculo
  * { dispositivo_id, estado, empresa_id, colaborador_id|null, nome, papel, bloqueado }
- * ou null (credencial desconhecida / aparelho substituído — ambos 401).
+ * ou null (credencial desconhecida / aparelho substituído / empresa do aparelho
+ * diferente da do colaborador: todos 401).
  *
  * Estados: 'pendente' (bateu ponto pelo link da empresa, RH ainda não
  * identificou — sem colaborador), 'ativo' (pareado a um colaborador) e
@@ -44,6 +45,9 @@ export async function autenticarDispositivo(req) {
     FROM dispositivo d
     LEFT JOIN colaborador c ON c.id = d.colaborador_id
     WHERE d.credencial_hash = ${hash}
+      -- Aparelho de uma empresa amarrado a colaborador de outra não autentica
+      -- (sobra de re-pareamento cruzado): o COALESCE acima não pode escolher.
+      AND (d.empresa_id IS NULL OR c.id IS NULL OR d.empresa_id = c.empresa_id)
     LIMIT 1`;
   const r = linhas[0];
   if (!r || !r.disp_ativo) return null;
