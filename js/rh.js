@@ -1209,18 +1209,18 @@ export const Rh = {
     const cfgFace = window.EFRAT_CFG || {};
     const limAceite = Number(cfgFace.limiarAceite ?? 0.45), limCinza = Number(cfgFace.limiarCinza ?? 0.58);
     const score = m && m.score != null && Number.isFinite(Number(m.score)) ? Number(m.score) : null;
-    const fmtLim = v => v.toFixed(2).replace('.', ',');
+    const fmtLim = v => v.toFixed(2).replace('.', ','), fmtDist = v => v.toFixed(3).replace('.', ',');
     let match, matchStyle = '';
     if (score == null) {
       match = m && m.foto_auditoria ? 'Batida sem distância facial para comparar' : 'Batida sem foto de auditoria para comparar';
       matchStyle = ' style="background:#fff7ed;color:#9a3412"';
     } else if (score <= limAceite) {
-      match = '✓ Distância facial ' + score.toFixed(3) + ' (menor = melhor)';
+      match = '✓ Distância facial ' + fmtDist(score) + ' (menor = melhor)';
     } else if (score <= limCinza) {
-      match = '⚠ Distância facial ' + score.toFixed(3) + ', acima do aceite (' + fmtLim(limAceite) + '). Confira o rosto';
+      match = '⚠ Distância facial ' + fmtDist(score) + ', acima do aceite (' + fmtLim(limAceite) + '). Confira o rosto';
       matchStyle = ' style="background:#fff7ed;color:#9a3412"';
     } else {
-      match = '⚠ Distância facial ' + score.toFixed(3) + ', acima do limite (' + fmtLim(limCinza) + '). Rosto não confere';
+      match = '⚠ Distância facial ' + fmtDist(score) + ', acima do limite (' + fmtLim(limCinza) + '). Rosto não confere';
       matchStyle = ' style="background:#fef3f2;color:#b42318"';
     }
 
