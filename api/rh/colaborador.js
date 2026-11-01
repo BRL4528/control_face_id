@@ -5,6 +5,7 @@ import { autenticarRh } from '../_lib/auth.js';
 import { exigeAcesso } from '../_lib/acesso.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 import { sincronizarBloqueios } from '../_lib/dispositivos.js';
+import { daEmpresa } from '../_lib/validar.js';
 
 export default async function handler(req, res) {
   if (cors(req, res)) return;
@@ -17,9 +18,11 @@ export default async function handler(req, res) {
   const matricula = String(b.matricula || '').trim();
   if (!nome || !matricula) return erro(res, 400, 'CORPO_INVALIDO', 'nome e matrícula obrigatórios');
   const papelPedido = String(b.papel || 'colaborador');
-  const equipeId = b.equipe_id || null;
+  const equipeId = b.equipe_id ? String(b.equipe_id) : null;
   const sql = db();
   if (!(await exigeAcesso(res, sql, rh, 'pessoas', true))) return;
+  // A equipe padrão tem de ser desta empresa (a FK não olha empresa_id).
+  if (equipeId && !(await daEmpresa(sql, 'equipe', equipeId, rh.empresa_id))) return erro(res, 404, 'EQUIPE_NAO_ENCONTRADA', 'equipe não encontrada');
 
   const existentes = await sql`
     SELECT id, bitrix_contact_id, papel FROM colaborador WHERE empresa_id = ${rh.empresa_id} AND matricula = ${matricula} LIMIT 1`;

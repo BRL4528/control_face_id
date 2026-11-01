@@ -8,15 +8,47 @@
 //     UMA vez ao RH criador (para repassar). Nasce com trocar_senha=true.
 //   • redefinir_senha → mesma geração, para outro usuário da empresa (esqueceu ou
 //     não anotou a temporária). Também devolve a senha UMA vez.
-//   • trocar → o cliente deriva a chave nova no navegador e envia só a chave.
+//   • trocar → o cliente deriva a chave nova no navegador e envia só a chave. Fora
+//     do fluxo de senha temporária exige também a chave ATUAL (chave_atual, derivada
+//     com o sal/iterações de hoje): um token de 12 h não basta para tomar a conta.
+//
+// Perfil (acao 'criar' e 'acesso'): um de js/acessos.js. Sem perfil no 'criar', o
+// usuário nasce 'leitura' (o mais restrito), nunca administrador. gestor_obra exige
+// obras, e só valem equipes ATIVAS desta empresa.
 import bcrypt from 'bcryptjs';
 import { db, novoId } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
-import { exigeAcesso } from '../_lib/acesso.js';
+import { acessoDe, exigeAcesso } from '../_lib/acesso.js';
 import { comTabelaNova } from '../_lib/tabela-nova.js';
 import { PERFIS } from '../../js/acessos.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 import { ITER, novaSenhaTemporaria } from '../_lib/senha-rh.js';
+import { idsDaEmpresa, listaDeIds } from '../_lib/validar.js';
+
+export const PERFIL_PADRAO_NOVO = 'leitura';
+
+/**
+ * Perfil e obras pedidos, já conferidos. `obrasValidas` = Set das equipes ativas
+ * da empresa (só é consultado para gestor_obra). Devolve { perfil, obras } ou
+ * { erro }. Obra de fora da empresa, inexistente ou desativada é descartada; se
+ * não sobrar nenhuma, é erro.
+ */
+export function perfilPedido(b, obrasValidas, padrao) {
+  const perfil = b.perfil == null || b.perfil === '' ? padrao : b.perfil;
+  if (!PERFIS[perfil]) return { erro: 'perfil inválido' };
+  if (perfil !== 'gestor_obra') return { perfil, obras: null };
+  const pedidas = Array.isArray(b.obras) ? listaDeIds(b.obras).slice(0, 200) : [];
+  const obras = pedidas.filter(id => obrasValidas && obrasValidas.has(id));
+  if (!obras.length) return { erro: pedidas.length ? 'escolha obras válidas da empresa' : 'escolha as obras do gestor' };
+  return { perfil, obras };
+}
+
+/** Equipes ativas da empresa entre as obras pedidas (só para gestor_obra). */
+async function obrasDaEmpresa(sql, b, empresaId) {
+  const perfil = b.perfil;
+  if (perfil !== 'gestor_obra' || !Array.isArray(b.obras)) return new Set();
+  return idsDaEmpresa(sql, 'equipe', listaDeIds(b.obras).slice(0, 200), empresaId, { ativos: true });
+}
 
 export default async function handler(req, res) {
   if (cors(req, res)) return;
@@ -34,13 +66,13 @@ export default async function handler(req, res) {
     if (!b.usuario_id) return erro(res, 400, 'CORPO_INVALIDO', 'usuario_id obrigatório');
     if (b.usuario_id === rh.sub) return erro(res, 400, 'PROIBIDO', 'não é possível mudar o próprio perfil');
     if (!PERFIS[b.perfil]) return erro(res, 400, 'CORPO_INVALIDO', 'perfil inválido');
-    const obras = b.perfil === 'gestor_obra' && Array.isArray(b.obras) ? [...new Set(b.obras.map(String))].slice(0, 200) : null;
-    if (b.perfil === 'gestor_obra' && !(obras && obras.length)) return erro(res, 400, 'CORPO_INVALIDO', 'escolha as obras do gestor');
+    const p = perfilPedido(b, await obrasDaEmpresa(sql, b, rh.empresa_id), null);
+    if (p.erro) return erro(res, 400, 'CORPO_INVALIDO', p.erro);
     return comTabelaNova(res, async () => {
-      const r = await sql`UPDATE usuario_rh SET perfil=${b.perfil}, obras=${obras ? JSON.stringify(obras) : null}::jsonb
+      const r = await sql`UPDATE usuario_rh SET perfil=${p.perfil}, obras=${p.obras ? JSON.stringify(p.obras) : null}::jsonb
                           WHERE id=${b.usuario_id} AND empresa_id=${rh.empresa_id} RETURNING id`;
       if (!r[0]) return erro(res, 404, 'USUARIO_NAO_ENCONTRADO', 'usuário não encontrado');
-      return ok(res, { usuario_id: b.usuario_id, perfil: b.perfil, obras });
+      return ok(res, { usuario_id: b.usuario_id, perfil: p.perfil, obras: p.obras });
     });
   }
 
@@ -48,8 +80,9 @@ export default async function handler(req, res) {
   if (acao === 'ativar' || acao === 'desativar') {
     if (!b.usuario_id) return erro(res, 400, 'CORPO_INVALIDO', 'usuario_id obrigatório');
     if (b.usuario_id === rh.sub) return erro(res, 400, 'PROIBIDO', 'não é possível desativar o próprio usuário');
-    await sql`UPDATE usuario_rh SET ativo=${acao === 'ativar'}
-              WHERE id=${b.usuario_id} AND empresa_id=${rh.empresa_id}`;
+    const r = await sql`UPDATE usuario_rh SET ativo=${acao === 'ativar'}
+                        WHERE id=${b.usuario_id} AND empresa_id=${rh.empresa_id} RETURNING id`;
+    if (!r[0]) return erro(res, 404, 'USUARIO_NAO_ENCONTRADO', 'usuário não encontrado');
     return ok(res, { usuario_id: b.usuario_id, ativo: acao === 'ativar' });
   }
 
@@ -59,20 +92,30 @@ export default async function handler(req, res) {
     if (!b.usuario_id) return erro(res, 400, 'CORPO_INVALIDO', 'usuario_id obrigatório');
     if (b.usuario_id === rh.sub) return erro(res, 400, 'PROIBIDO', 'para trocar a própria senha, use a troca de senha do seu acesso');
     const alvo = await sql`SELECT usuario, nome FROM usuario_rh WHERE id=${b.usuario_id} AND empresa_id=${rh.empresa_id} LIMIT 1`;
-    if (!alvo[0]) return erro(res, 404, 'NAO_ENCONTRADO', 'usuário não encontrado');
+    if (!alvo[0]) return erro(res, 404, 'USUARIO_NAO_ENCONTRADO', 'usuário não encontrado');
     const nova = await novaSenhaTemporaria();
     await sql`UPDATE usuario_rh SET sal=${nova.sal}, iteracoes=${ITER}, chave_hash=${nova.chaveHash}, trocar_senha=true
               WHERE id=${b.usuario_id} AND empresa_id=${rh.empresa_id}`;
     return ok(res, { usuario_id: b.usuario_id, usuario: alvo[0].usuario, nome: alvo[0].nome, senha_temporaria: nova.senha });
   }
 
-  // Trocar a própria senha (usada no fluxo de senha temporária). O cliente já
-  // derivou a chave nova; guardamos o bcrypt e zeramos trocar_senha.
+  // Trocar a própria senha. O cliente já derivou a chave nova; guardamos o bcrypt
+  // e zeramos trocar_senha. Usuário desativado não troca (o JWT vale 12 h, mas o
+  // banco manda). Fora do fluxo de senha temporária, exige a chave atual.
   if (acao === 'trocar_senha') {
     if (!b.chave_nova || !b.sal_novo) return erro(res, 400, 'CORPO_INVALIDO', 'chave_nova e sal_novo obrigatórios');
+    if (!(await acessoDe(sql, rh))) return erro(res, 401, 'SESSAO_INVALIDA', 'faça login novamente');
+    const [u] = await sql`SELECT chave_hash, trocar_senha FROM usuario_rh
+                          WHERE id=${rh.sub} AND empresa_id=${rh.empresa_id} AND ativo=true LIMIT 1`;
+    if (!u) return erro(res, 401, 'SESSAO_INVALIDA', 'faça login novamente');
+    if (!u.trocar_senha) {
+      const confere = typeof b.chave_atual === 'string' && b.chave_atual && await bcrypt.compare(b.chave_atual, u.chave_hash);
+      if (!confere) return erro(res, 401, 'SENHA_ATUAL_INVALIDA', 'senha atual não confere');
+    }
     const hash = await bcrypt.hash(b.chave_nova, 10);
-    await sql`UPDATE usuario_rh SET chave_hash=${hash}, sal=${b.sal_novo}, iteracoes=${ITER}, trocar_senha=false
-              WHERE id=${rh.sub} AND empresa_id=${rh.empresa_id}`;
+    const r = await sql`UPDATE usuario_rh SET chave_hash=${hash}, sal=${b.sal_novo}, iteracoes=${ITER}, trocar_senha=false
+                        WHERE id=${rh.sub} AND empresa_id=${rh.empresa_id} AND ativo=true RETURNING id`;
+    if (!r[0]) return erro(res, 401, 'SESSAO_INVALIDA', 'faça login novamente');
     return ok(res, { trocado: true });
   }
 
@@ -80,7 +123,10 @@ export default async function handler(req, res) {
   const usuario = String(b.usuario || '').trim().toLowerCase();
   const nome = String(b.nome || '').trim();
   if (!usuario || !nome) return erro(res, 400, 'CORPO_INVALIDO', 'usuario e nome obrigatórios');
-  if (!/^[a-z0-9._-]{3,32}$/.test(usuario)) return erro(res, 400, 'CORPO_INVALIDO', 'usuário: 3–32 letras/números/._-');
+  if (!/^[a-z0-9._-]{3,32}$/.test(usuario)) return erro(res, 400, 'CORPO_INVALIDO', 'usuário: de 3 a 32 letras, números ou . _ -');
+  // Perfil: o mesmo crivo da acao 'acesso'; sem perfil, o mais restrito.
+  const p = perfilPedido(b, await obrasDaEmpresa(sql, b, rh.empresa_id), PERFIL_PADRAO_NOVO);
+  if (p.erro) return erro(res, 400, 'CORPO_INVALIDO', p.erro);
 
   // Único no sistema inteiro (o login não pede empresa) — ver ux_usuario_rh_usuario.
   const jaExiste = await sql`SELECT 1 FROM usuario_rh WHERE lower(usuario)=${usuario} LIMIT 1`;
@@ -88,10 +134,12 @@ export default async function handler(req, res) {
 
   const { senha, sal, chaveHash } = await novaSenhaTemporaria();
   const id = novoId();
-  await sql`
-    INSERT INTO usuario_rh (id, empresa_id, usuario, nome, sal, iteracoes, chave_hash, trocar_senha)
-    VALUES (${id}, ${rh.empresa_id}, ${usuario}, ${nome}, ${sal}, ${ITER}, ${chaveHash}, ${true})`;
-
-  // A senha em texto sai UMA vez, só aqui, para o RH criador repassar.
-  return ok(res, { usuario_id: id, usuario, senha_temporaria: senha });
+  return comTabelaNova(res, async () => {
+    await sql`
+      INSERT INTO usuario_rh (id, empresa_id, usuario, nome, sal, iteracoes, chave_hash, trocar_senha, perfil, obras)
+      VALUES (${id}, ${rh.empresa_id}, ${usuario}, ${nome}, ${sal}, ${ITER}, ${chaveHash}, ${true},
+              ${p.perfil}, ${p.obras ? JSON.stringify(p.obras) : null}::jsonb)`;
+    // A senha em texto sai UMA vez, só aqui, para o RH criador repassar.
+    return ok(res, { usuario_id: id, usuario, perfil: p.perfil, obras: p.obras, senha_temporaria: senha });
+  });
 }

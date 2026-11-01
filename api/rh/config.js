@@ -9,6 +9,7 @@ import { gerarLinkToken } from '../_lib/dispositivos.js';
 import { hashCredencial } from '../_lib/auth.js';
 import { randomBytes } from 'node:crypto';
 import { contarDados, zerarEmpresa } from '../_lib/reset.js';
+import { daEmpresa } from '../_lib/validar.js';
 
 // Whitelist de parâmetros aceitos em config_empresa.dados, com coerção segura.
 const num = (v, lo, hi, def) => {
@@ -87,6 +88,17 @@ export default async function handler(req, res) {
     return ok(res, r);
   }
 
+  // Parâmetros conferidos ANTES de gravar qualquer coisa (nada pela metade).
+  const patch = sanear(b.dados);
+  const atual = Object.keys(patch).length ? await sql`SELECT dados FROM config_empresa WHERE empresa_id=${rh.empresa_id} LIMIT 1` : [];
+  const base = (atual[0] && atual[0].dados) || {};
+  // Jornada padrão NOVA tem de ser uma jornada ativa desta empresa (a já gravada
+  // passa, para a tela poder salvar o resto mesmo se ela foi desativada depois).
+  if (patch.jornadaPadraoId && patch.jornadaPadraoId !== base.jornadaPadraoId &&
+      !(await daEmpresa(sql, 'jornada', patch.jornadaPadraoId, rh.empresa_id, { ativos: true }))) {
+    return erro(res, 404, 'JORNADA_NAO_ENCONTRADA', 'jornada padrão não encontrada');
+  }
+
   // Dados da empresa (nome, fuso).
   const nome = b.empresa_nome != null ? String(b.empresa_nome).trim() : null;
   const fuso = b.fuso != null ? String(b.fuso).trim() : null;
@@ -94,10 +106,7 @@ export default async function handler(req, res) {
   if (fuso) await sql`UPDATE empresa SET fuso=${fuso} WHERE id=${rh.empresa_id}`;
 
   // Parâmetros: merge sobre o que já existe (patch parcial).
-  const patch = sanear(b.dados);
   if (Object.keys(patch).length) {
-    const atual = await sql`SELECT dados FROM config_empresa WHERE empresa_id=${rh.empresa_id} LIMIT 1`;
-    const base = (atual[0] && atual[0].dados) || {};
     const merged = Object.assign({}, base, patch);
     await sql`
       INSERT INTO config_empresa (empresa_id, dados, atualizada_em)

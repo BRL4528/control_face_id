@@ -40,7 +40,7 @@ export function materializarDias(plano, hoje, horizonteDias) {
  * Devolve { dias, gravadas }.
  */
 export async function materializarPlano(sql, plano, hoje, { recriar = false } = {}) {
-  if (recriar) await sql`DELETE FROM alocacao WHERE plano_id=${plano.id} AND dia >= ${hoje} AND origem='plano'`;
+  if (recriar) await sql`DELETE FROM alocacao WHERE plano_id=${plano.id} AND empresa_id=${plano.empresa_id} AND dia >= ${hoje} AND origem='plano'`;
 
   const dias = materializarDias(plano, hoje, HORIZONTE_DIAS);
   const colaboradores = (plano.colaboradores || []).filter(Boolean);
@@ -76,10 +76,13 @@ export async function materializarPlano(sql, plano, hoje, { recriar = false } = 
  * O caso comum é o 2: equipe = obra, cerca definida uma vez, nada materializado.
  * Devolve sempre a equipe (para carimbar a marcação), mesmo sem cerca; sem cerca
  * as coordenadas vêm null e o chamador manda a marcação para revisão.
+ * Equipe e local só valem se forem da MESMA empresa do colaborador (defesa em
+ * profundidade: as FKs não olham empresa_id; uma referência cruzada que escape
+ * da validação das rotas não vaza nome, cerca nem afastamento de outra empresa).
  */
 export async function cercaVigente(sql, empresaId, colaboradorId, dia) {
   const [r] = await sql`
-    SELECT COALESCE(a.equipe_id, c.equipe_padrao)        AS equipe_id,
+    SELECT e.id                                          AS equipe_id,
            e.nome                                        AS equipe_nome,
            COALESCE(e.afastamento, false)                AS afastado,
            COALESCE(a.cerca_lat,    l.lat)               AS cerca_lat,
@@ -88,8 +91,8 @@ export async function cercaVigente(sql, empresaId, colaboradorId, dia) {
            CASE WHEN a.id IS NOT NULL THEN 'alocacao' WHEN l.id IS NOT NULL THEN 'equipe' END AS cerca_origem
     FROM colaborador c
     LEFT JOIN alocacao a ON a.empresa_id=c.empresa_id AND a.colaborador_id=c.id AND a.dia=${dia}::date
-    LEFT JOIN equipe   e ON e.id = COALESCE(a.equipe_id, c.equipe_padrao)
-    LEFT JOIN local    l ON l.id = e.local_id AND l.ativo=true
+    LEFT JOIN equipe   e ON e.id = COALESCE(a.equipe_id, c.equipe_padrao) AND e.empresa_id = c.empresa_id
+    LEFT JOIN local    l ON l.id = e.local_id AND l.empresa_id = c.empresa_id AND l.ativo=true
     WHERE c.id=${colaboradorId} AND c.empresa_id=${empresaId}
     LIMIT 1`;
   if (!r || r.cerca_lat == null) return r ? Object.assign({}, r, { cerca_lat: null, cerca_lng: null, cerca_raio_m: null }) : null;

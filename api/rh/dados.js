@@ -2,9 +2,14 @@
 // alocações de hoje e pendências. Os indicadores e o espelho de ponto são
 // calculados no cliente (js/regras.js), como no piloto — as mesmas funções que
 // os testes de unidade cobrem.
+//
+// O que sai depende do perfil (visaoDados em api/_lib/acesso.js): batidas e
+// jornadas só para quem vê operação/ponto/relatórios, escala e planos só para
+// operação, ocorrências completas só com o módulo ocorrências (leitura recebe um
+// resumo sem observação, para o espelho). O que o perfil não vê nem é consultado.
 import { db } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
-import { acessoDe } from '../_lib/acesso.js';
+import { acessoDe, visaoDados, ocorrenciasVisiveis } from '../_lib/acesso.js';
 import { pode, obrasDe, perfilDe, PERFIS } from '../../js/acessos.js';
 import { cors, ok, erro, exigeMetodo } from '../_lib/http.js';
 
@@ -25,6 +30,8 @@ export default async function handler(req, res) {
   const sql = db();
   const acesso = await acessoDe(sql, rh);
   if (!acesso) return erro(res, 401, 'SESSAO_INVALIDA', 'faça login novamente');
+  const visao = visaoDados(acesso);
+  const nada = Promise.resolve([]);
 
   const [equipes, pessoas, marcacoes, alocacoes, locais, jornadas, empresaRow, configRow, usuariosRh, correcoes, planos, aparelhosPendentes, papeis, ocorrencias] = await Promise.all([
     sql`SELECT id AS equipe_id, nome, ativo, jornada_id, supervisor_id, local_id, bitrix_stage_id, afastamento FROM equipe WHERE empresa_id = ${empresa} ORDER BY nome`,
@@ -33,7 +40,7 @@ export default async function handler(req, res) {
                EXISTS(SELECT 1 FROM template_facial t WHERE t.colaborador_id = c.id AND t.estado='ativo') AS tem_biometria,
                (SELECT miniatura_url FROM template_facial t WHERE t.colaborador_id=c.id AND t.estado='ativo' ORDER BY versao DESC LIMIT 1) AS miniatura
         FROM colaborador c WHERE c.empresa_id = ${empresa} ORDER BY c.nome`,
-    sql`SELECT m.id_cliente, m.colaborador_id AS pessoa_id, m.equipe_id, m.tipo, m.origem, m.veredito,
+    !visao.marcacoes ? nada : sql`SELECT m.id_cliente, m.colaborador_id AS pessoa_id, m.equipe_id, m.tipo, m.origem, m.veredito,
                m.marcado_em, to_char(m.marcado_dia,'YYYY-MM-DD') AS marcado_dia, m.deriva_ms AS deriva_relogio_ms, m.dentro_cerca,
                m.distancia_cerca_m, m.lat, m.lng, m.foto_url AS foto_auditoria, m.requer_revisao, m.score, m.liveness_ok,
                (m.requer_revisao AND NOT EXISTS(
@@ -46,13 +53,13 @@ export default async function handler(req, res) {
         ORDER BY m.marcado_em DESC`,
     // Alocações de uma janela em torno de hoje (ontem..+30): cobre as tabs de dia
     // e os alertas de planejamento (pessoa em 2 equipes, sem plano futuro).
-    sql`SELECT to_char(a.dia,'YYYY-MM-DD') AS dia, a.colaborador_id, a.equipe_id, a.cerca_lat, a.cerca_lng, a.cerca_raio_m,
+    !visao.alocacoes ? nada : sql`SELECT to_char(a.dia,'YYYY-MM-DD') AS dia, a.colaborador_id, a.equipe_id, a.cerca_lat, a.cerca_lng, a.cerca_raio_m,
                a.origem, a.plano_id
         FROM alocacao a
         WHERE a.empresa_id = ${empresa} AND a.dia BETWEEN (CURRENT_DATE - 1) AND (CURRENT_DATE + 30)`,
     sql`SELECT id AS local_id, nome, lat, lng, raio_m FROM local
         WHERE empresa_id = ${empresa} AND ativo = true ORDER BY nome`,
-    sql`SELECT id AS jornada_id, nome, to_char(entrada,'HH24:MI') AS entrada, to_char(saida,'HH24:MI') AS saida,
+    !visao.jornadas ? nada : sql`SELECT id AS jornada_id, nome, to_char(entrada,'HH24:MI') AS entrada, to_char(saida,'HH24:MI') AS saida,
                tolerancia_min, intervalo_min, dias, ativa FROM jornada WHERE empresa_id = ${empresa} ORDER BY nome`,
     sql`SELECT nome, fuso, link_token, (integracao_token_hash IS NOT NULL) AS integracao_ativa FROM empresa WHERE id = ${empresa} LIMIT 1`,
     sql`SELECT dados FROM config_empresa WHERE empresa_id = ${empresa} LIMIT 1`,
@@ -70,7 +77,7 @@ export default async function handler(req, res) {
         WHERE co.empresa_id = ${empresa}
         ORDER BY co.criada_em DESC LIMIT 500`,
     // Planos de alocação recorrente ativos (para a aba Planos e os alertas).
-    sql`SELECT id AS plano_id, nome, equipe_id, colaboradores, cerca_lat, cerca_lng, cerca_raio_m,
+    !visao.alocacoes ? nada : sql`SELECT id AS plano_id, nome, equipe_id, colaboradores, cerca_lat, cerca_lng, cerca_raio_m,
                dias_semana, to_char(vigencia_inicio,'YYYY-MM-DD') AS vigencia_inicio,
                to_char(vigencia_fim,'YYYY-MM-DD') AS vigencia_fim, ativo
         FROM plano_alocacao WHERE empresa_id = ${empresa} AND ativo = true ORDER BY criado_em DESC`,
@@ -92,7 +99,7 @@ export default async function handler(req, res) {
     sql`SELECT p.id, p.nome, p.ativo, (SELECT count(*)::int FROM colaborador c WHERE c.empresa_id = p.empresa_id AND c.papel = p.id) AS em_uso
         FROM papel p WHERE p.empresa_id = ${empresa} ORDER BY lower(p.nome)`,
     // Ocorrências que tocam o período (ou em aberto) e as pendentes; a foto vem à parte.
-    sql`SELECT id, colaborador_id, tipo, to_char(inicio,'YYYY-MM-DD') AS inicio, to_char(fim,'YYYY-MM-DD') AS fim,
+    !visao.ocorrencias ? nada : sql`SELECT id, colaborador_id, tipo, to_char(inicio,'YYYY-MM-DD') AS inicio, to_char(fim,'YYYY-MM-DD') AS fim,
                observacao, estado, origem, (anexo IS NOT NULL) AS tem_anexo, criada_em
         FROM ocorrencia
         WHERE empresa_id = ${empresa} AND estado <> 'cancelada'
@@ -108,7 +115,7 @@ export default async function handler(req, res) {
   // dava "Tue Sep 08" — a lista de hoje saía sempre vazia (mapa sem cercas).
   // Perfil por obra (gestor de obra): o painel inteiro recorta para as obras dele.
   const obras = obrasDe(acesso);
-  let eqs = equipes, pes = pessoas, mar = marcacoes, alo = alocacoes, ocs = ocorrencias, pla = planos;
+  let eqs = equipes, pes = pessoas, mar = marcacoes, alo = alocacoes, ocs = ocorrenciasVisiveis(ocorrencias, visao), pla = planos;
   if (obras) {
     const ok_ = new Set(obras);
     eqs = equipes.filter(e => ok_.has(e.equipe_id));
@@ -116,7 +123,7 @@ export default async function handler(req, res) {
     const ids = new Set(pes.map(p => p.pessoa_id));
     mar = marcacoes.filter(m => ids.has(m.pessoa_id));
     alo = alocacoes.filter(a => ids.has(a.colaborador_id));
-    ocs = ocorrencias.filter(o => ids.has(o.colaborador_id));
+    ocs = ocs.filter(o => ids.has(o.colaborador_id));
     pla = planos.filter(p => ok_.has(p.equipe_id));
   }
   const alocacoesHoje = alo.filter(a => a.dia === hoje);
