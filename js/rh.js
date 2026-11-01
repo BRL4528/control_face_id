@@ -70,6 +70,7 @@ export const Rh = {
     this.usuarioLogin = usuario;
     this.precisaTrocarSenha = !!login.dados.trocar_senha;
     const d = await ApiRh.dados(this.token, this.dias);
+    if (d.ok && d.dados && d.dados.trocar_senha === true) this.precisaTrocarSenha = true;   // versão mínima do servidor
     if (!d.ok && !this.semDadosAteTrocar(d)) return { ok: false, erro: d.erro || 'falha ao carregar' };
     this.dados = d.ok ? d.dados : { usuario: login.dados.usuario || { nome: usuario } };
     this.eventos = undefined; this.almox = undefined;
@@ -78,9 +79,12 @@ export const Rh = {
     return { ok: true };
   },
 
-  /** Com senha temporária o servidor pode recusar os dados até a troca; a tela de troca só precisa do nome. */
+  /**
+   * Com senha temporária o servidor pode recusar os dados até a troca (403
+   * TROCAR_SENHA, api/_lib/acesso.js); a tela de troca só precisa do nome.
+   */
   semDadosAteTrocar(d) {
-    return this.precisaTrocarSenha && d && d.codigo === 'SENHA_TEMPORARIA';
+    return this.precisaTrocarSenha && d && (d.codigo === 'TROCAR_SENHA' || d.codigo === 'SENHA_TEMPORARIA');
   },
 
   /* --------------------------------------------------- sessão do RH
@@ -122,7 +126,7 @@ export const Rh = {
     const exp = this.validadeDoToken(ses.token);
     if (exp && exp <= Date.now()) { await this.esquecerSessao(); return false; }
     const d = await ApiRh.dados(ses.token, this.dias);
-    this.precisaTrocarSenha = !!ses.trocar_senha;
+    this.precisaTrocarSenha = !!ses.trocar_senha || !!(d.ok && d.dados && d.dados.trocar_senha === true);
     if (!d.ok && !this.semDadosAteTrocar(d)) { this.precisaTrocarSenha = false; await this.esquecerSessao(); return false; }
     this.token = ses.token;
     this.usuarioLogin = ses.usuario || null;
@@ -166,7 +170,8 @@ export const Rh = {
   pintarPapel() {
     const el = $('rhPapel');
     const ac = this.dados && this.dados.acesso;
-    if (el) el.textContent = ac ? (ac.rotulo || PERFIS[perfilDe(ac)].rotulo) : '';
+    // Sem `acesso` (servidor antigo) o painel trata como administrador (pode()), e o rótulo acompanha.
+    if (el) el.textContent = (ac && ac.rotulo) || PERFIS[perfilDe(ac)].rotulo;
   },
 
   abrir(aoSair) {
@@ -3127,7 +3132,8 @@ export const Rh = {
       (this.almoxErro ? '<div class="cartao warn" style="margin-bottom:12px">' + esc(this.almoxErro) + '</div>' : '') + tabs + corpo;
 
     el.querySelectorAll('[data-al-aba]').forEach(b => { b.onclick = () => { this.alAba = b.dataset.alAba; this.pintarAlmox(); }; });
-    const acao = async (c, msg) => { const r = await ApiRh.almox(this.token, c); if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; } toast(msg, 'ok'); await this.carregarAlmox(); };
+    // 409 (ex.: baixa já registrada em outra aba): a lista está velha, recarrega.
+    const acao = async (c, msg) => { const r = await ApiRh.almox(this.token, c); if (!r.ok) { toast(r.erro || 'Falha', 'bad'); if (r.status === 409) await this.carregarAlmox(); return; } toast(msg, 'ok'); await this.carregarAlmox(); };
     if (aba === 'entregas') {
       $('alBusca').oninput = () => { this.alBusca = $('alBusca').value; this.pintarAlmox(); $('alBusca').focus(); };
       $('alSo').onchange = () => { this.alSoAlertas = $('alSo').checked; this.pintarAlmox(); };
@@ -3625,7 +3631,8 @@ export const Rh = {
       // Recarrega com a sessão já liberada (antes da troca os dados podem ter vindo vazios).
       const d = await ApiRh.dados(this.token, this.dias);
       if (d.ok) { this.dados = d.dados; this.aplicarConfig(); }
-      else if (!this.dados || !this.dados.acesso) { toast(d.erro || 'Falha ao carregar o painel. Entre de novo.', 'bad'); if (this.aoSair) this.aoSair(); return; }
+      // Sem os dados completos (só a versão mínima de antes da troca), o painel abriria vazio.
+      else if (!this.dados || !this.dados.acesso || this.dados.trocar_senha === true) { toast(d.erro || 'Falha ao carregar o painel. Entre de novo.', 'bad'); if (this.aoSair) this.aoSair(); return; }
       this.abrir(this.aoSair);   // agora entra normalmente
     };
   }

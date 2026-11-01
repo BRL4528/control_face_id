@@ -642,12 +642,18 @@ export const Ponto = {
    */
   async recarregarFolha(folha, termo, codigo) {
     this.aoProvar = null;
+    // Nada foi gravado nesta tentativa: o aviso "enviado sem prova de vida" do
+    // fimFolha não vale aqui.
+    this.provaSemVida = false;
     if (codigo === 'JA_ASSINADA') { this.fimFolha('Esta folha já foi assinada.', 'ok'); return; }
     const r = await Api.folha(this.dispositivo.credencial, { acao: 'listar' });
     if (!r.ok) { this.fimFolha('O RH atualizou a folha. Abra de novo para conferir.', 'warn'); return; }
+    // A mesma folha (o RH refaz no mesmo registro, api/rh/folha.js); nunca a de
+    // outro mês no lugar, que a pessoa não pediu para conferir.
     const fs = r.folhas || [];
-    const nova = fs.find(f => f.id === folha.id && f.estado === 'aguardando') || fs.find(f => f.estado === 'aguardando');
-    if (!nova) { this.fimFolha('Não há folha aguardando assinatura agora.', 'warn'); return; }
+    const nova = fs.find(f => f.id === folha.id) || fs.find(f => f.mes === folha.mes);
+    if (nova && nova.estado === 'assinada') { this.fimFolha('Esta folha já foi assinada.', 'ok'); return; }
+    if (!nova || nova.estado !== 'aguardando') { this.fimFolha('Esta folha não está mais aguardando assinatura.', 'warn'); return; }
     this.pintarFolha(nova, r.termo || termo);
     toast('O RH atualizou a folha. Confira de novo antes de assinar.', 'warn');
   },
