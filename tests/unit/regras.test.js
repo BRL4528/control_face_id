@@ -6,7 +6,7 @@ import {
   indicadores, espelho, gestorDeveMarcar,
   presencaPorEquipe, statusPresenca, serieDiaria, pendenciasPorMotivo, LIMIAR_PRESENCA
 , pontosDoDia, exceptionsDoDia, agoraNoRelogio, TIPOS_EXCECAO,
-  jornadaDaEquipe, horaEntradaDaEquipe, horasEntradaPorEquipe, csvDe,
+  jornadaDaEquipe, jornadaDoDiaTexto, horaEntradaDaEquipe, horasEntradaPorEquipe, csvDe,
   materializarDias, alertasDePlanejamento, horaNoFuso, classificarPendente } from '../../js/regras.js';
 
 const CFG = { limiarAceite: 0.45, limiarCinza: 0.58 };
@@ -481,6 +481,27 @@ test('jornadaDaEquipe usa a jornada associada', () => {
 });
 test('jornadaDaEquipe cai no default quando a equipe não tem jornada', () => {
   assert.equal(jornadaDaEquipe('e2', JEQUIPES, JORNADAS, '07:00–17:00'), '07:00–17:00');
+});
+test('jornadaDoDiaTexto usa o horário do dia da semana, feriado e folga', () => {
+  const eqs = [{ equipe_id: 'e1', jornada_id: 'j1' }, { equipe_id: 'e2', jornada_id: null }];
+  const jor = [{ jornada_id: 'j1', entrada: '08:00', saida: '18:00',
+    dias: { 1: { entrada: '07:00', saida: '16:00' }, 6: { entrada: '07:00', saida: '11:00' } } }];
+  // 2026-11-02 é segunda e feriado (Finados); 2026-11-09 é segunda; 2026-11-10 terça; 2026-11-08 domingo.
+  assert.equal(jornadaDoDiaTexto('e1', eqs, jor, null, '2026-11-09', new Set(), false), '07:00–16:00');
+  assert.equal(jornadaDoDiaTexto('e1', eqs, jor, null, '2026-11-14', new Set(), false), '07:00–11:00');
+  assert.equal(jornadaDoDiaTexto('e1', eqs, jor, null, '2026-11-10', new Set(), false), 'Folga (sem jornada no dia)');
+  assert.equal(jornadaDoDiaTexto('e1', eqs, jor, null, '2026-11-10', new Set(), true), '08:00–18:00');
+  assert.equal(jornadaDoDiaTexto('e1', eqs, jor, null, '2026-11-02', new Set(['2026-11-02']), false), 'Feriado');
+  // Sem dia: jornada base, como jornadaDaEquipe.
+  assert.equal(jornadaDoDiaTexto('e1', eqs, jor, null, null, null, false), '08:00–18:00');
+});
+test('jornadaDoDiaTexto sem jornada da equipe cai na padrão e não cobra fim de semana', () => {
+  const eqs = [{ equipe_id: 'e2', jornada_id: null }];
+  const padrao = { entrada: '06:30', saida: '15:30' };
+  assert.equal(jornadaDoDiaTexto('e2', eqs, [], padrao, '2026-11-09', new Set(), false), '06:30–15:30');
+  assert.equal(jornadaDoDiaTexto('e2', eqs, [], null, '2026-11-09', new Set(), false, '06:00–14:00'), '06:00–14:00');
+  assert.equal(jornadaDoDiaTexto('e2', eqs, [], null, '2026-11-08', new Set(), false, '06:00–14:00'), 'Folga (sem jornada no dia)');
+  assert.equal(jornadaDoDiaTexto('x', [], [], null, '2026-11-09', new Set(), false), '07:00–17:00');
 });
 test('horaEntradaDaEquipe devolve a entrada da jornada ou o padrão', () => {
   assert.equal(horaEntradaDaEquipe('e1', JEQUIPES, JORNADAS, '08:00'), '08:00');

@@ -11,7 +11,7 @@ import {
   indicadores, espelho, euclidiana,
   presencaPorEquipe, serieDiaria, pendenciasPorMotivo,
   exceptionsDoDia,
-  jornadaDaEquipe, horasEntradaPorEquipe, csvDe,
+  jornadaDaEquipe, jornadaDoDiaTexto, horasEntradaPorEquipe, csvDe,
   alertasDePlanejamento, horasPorColaborador, fmtMinutos, dia as diaDe, motivosDaRevisao, rotuloAuditoria,
   tiposPelaOrdem, classificarPendente, diasDeFeriado, feriadosNacionais, horarioDoDia, folhaDoMes, problemasDaJornada
 } from './regras.js';
@@ -20,7 +20,7 @@ import { janelaDasFolhas, escreverFolhas, htmlFichaEpi, textoRegistroFacial } fr
 import { TIPOS_OCORRENCIA, ocorrenciaDoDia } from './ocorrencias.js';
 import { TIPOS_EVENTO, ESTADOS_EVENTO, situacaoCat } from './eventos.js';
 import { TIPOS_ITEM, ESTADOS_ENTREGA, alertasDaEntrega, caVencidoEm } from './almox.js';
-import { PERFIS, pode, ABA_MODULO, podeEditarJornadas } from './acessos.js';
+import { PERFIS, pode, perfilDe, ABA_MODULO, podeEditarJornadas } from './acessos.js';
 
 // Rótulo da aba na trilha do topo (breadcrumb) e no título de página.
 const TITULOS = {
@@ -70,12 +70,17 @@ export const Rh = {
     this.usuarioLogin = usuario;
     this.precisaTrocarSenha = !!login.dados.trocar_senha;
     const d = await ApiRh.dados(this.token, this.dias);
-    if (!d.ok) return { ok: false, erro: d.erro || 'falha ao carregar' };
-    this.dados = d.dados;
+    if (!d.ok && !this.semDadosAteTrocar(d)) return { ok: false, erro: d.erro || 'falha ao carregar' };
+    this.dados = d.ok ? d.dados : { usuario: login.dados.usuario || { nome: usuario } };
     this.eventos = undefined; this.almox = undefined;
     this.aplicarConfig();
     await this.guardarSessao();
     return { ok: true };
+  },
+
+  /** Com senha temporária o servidor pode recusar os dados até a troca; a tela de troca só precisa do nome. */
+  semDadosAteTrocar(d) {
+    return this.precisaTrocarSenha && d && d.codigo === 'SENHA_TEMPORARIA';
   },
 
   /* --------------------------------------------------- sessão do RH
@@ -117,11 +122,11 @@ export const Rh = {
     const exp = this.validadeDoToken(ses.token);
     if (exp && exp <= Date.now()) { await this.esquecerSessao(); return false; }
     const d = await ApiRh.dados(ses.token, this.dias);
-    if (!d.ok) { await this.esquecerSessao(); return false; }
+    this.precisaTrocarSenha = !!ses.trocar_senha;
+    if (!d.ok && !this.semDadosAteTrocar(d)) { this.precisaTrocarSenha = false; await this.esquecerSessao(); return false; }
     this.token = ses.token;
     this.usuarioLogin = ses.usuario || null;
-    this.precisaTrocarSenha = !!ses.trocar_senha;
-    this.dados = d.dados;
+    this.dados = d.ok ? d.dados : { usuario: { nome: ses.usuario || 'RH' } };
     this.eventos = undefined; this.almox = undefined;
     this.aplicarConfig();
     return true;
@@ -153,8 +158,15 @@ export const Rh = {
       if (this.aoSair) this.aoSair();
       return;
     }
-    if (d.ok) { this.dados = d.dados; this.aplicarConfig(); }
+    if (d.ok) { this.dados = d.dados; this.aplicarConfig(); this.pintarPapel(); }
     this.pintar();
+  },
+
+  /** Rótulo do perfil no rodapé da sidebar (Administrador, RH, Almoxarifado...). */
+  pintarPapel() {
+    const el = $('rhPapel');
+    const ac = this.dados && this.dados.acesso;
+    if (el) el.textContent = ac ? (ac.rotulo || PERFIS[perfilDe(ac)].rotulo) : '';
   },
 
   abrir(aoSair) {
@@ -164,6 +176,7 @@ export const Rh = {
     if (this.precisaTrocarSenha) { this.telaTrocarSenha(); return; }
     const nome = this.dados.usuario.nome || 'RH';
     $('rhNome').textContent = nome;
+    this.pintarPapel();
     $('rhIniciais').textContent = this.iniciais(nome);
     $('rhEmpresa').textContent = this.dados.usuario.usuario ? ('@' + this.dados.usuario.usuario) : 'Painel do RH';
     $('rhPeriodo').textContent = 'últimos ' + this.dados.periodo_dias + ' dias';
@@ -324,6 +337,19 @@ export const Rh = {
     const jp = this.jornadaPadrao();
     return jornadaDaEquipe(equipeId, this.dados.equipes, this.dados.jornadas,
       jp ? jp.entrada + '–' + jp.saida : cfg.jornadaPadrao);
+  },
+
+  /**
+   * Jornada prevista no dia da pendência (horário daquele dia da semana, feriado
+   * ou folga), e não só a jornada base da equipe.
+   */
+  jornadaNoDia(x) {
+    const d = this.dados || {}, cfg = window.EFRAT_CFG || {};
+    const dia = (x.marcacao && x.marcacao.marcado_dia) || (x.alocacao && x.alocacao.dia) || this.hojeServidor();
+    const alocado = !!x.alocacao || [].concat(d.alocacoes || [], d.alocacoes_hoje || [])
+      .some(a => a.colaborador_id === x.pessoa_id && (a.dia || this.hojeServidor()) === dia);
+    return jornadaDoDiaTexto(x.equipe_id, d.equipes, d.jornadas, this.jornadaPadrao(), dia,
+      diasDeFeriado(dia, dia, cfg.feriados), alocado, cfg.jornadaPadrao);
   },
 
   nomeDe(id) {
@@ -1178,13 +1204,29 @@ export const Rh = {
     // prova biométrica: miniatura do cadastro × foto de auditoria (quando houver)
     const fotoCad = p && p.miniatura ? '<img src="' + p.miniatura + '">' : '👤';
     const fotoReg = m && m.foto_auditoria ? '<img src="' + m.foto_auditoria + '">' : '👤';
-    const match = m && m.score != null
-      ? '✓ Distância facial ' + Number(m.score).toFixed(3) + ' (menor = melhor)'
-      : 'Batida sem foto de auditoria para comparar';
+    // ✓ só quando o rosto confere (distância até o limiar de aceite); acima dele é
+    // zona cinzenta (atenção) e, passando do limiar cinza, rosto não confere.
+    const cfgFace = window.EFRAT_CFG || {};
+    const limAceite = Number(cfgFace.limiarAceite ?? 0.45), limCinza = Number(cfgFace.limiarCinza ?? 0.58);
+    const score = m && m.score != null && Number.isFinite(Number(m.score)) ? Number(m.score) : null;
+    const fmtLim = v => v.toFixed(2).replace('.', ',');
+    let match, matchStyle = '';
+    if (score == null) {
+      match = m && m.foto_auditoria ? 'Batida sem distância facial para comparar' : 'Batida sem foto de auditoria para comparar';
+      matchStyle = ' style="background:#fff7ed;color:#9a3412"';
+    } else if (score <= limAceite) {
+      match = '✓ Distância facial ' + score.toFixed(3) + ' (menor = melhor)';
+    } else if (score <= limCinza) {
+      match = '⚠ Distância facial ' + score.toFixed(3) + ', acima do aceite (' + fmtLim(limAceite) + '). Confira o rosto';
+      matchStyle = ' style="background:#fff7ed;color:#9a3412"';
+    } else {
+      match = '⚠ Distância facial ' + score.toFixed(3) + ', acima do limite (' + fmtLim(limCinza) + '). Rosto não confere';
+      matchStyle = ' style="background:#fef3f2;color:#b42318"';
+    }
 
     const fatos = [
       ['Onde deveria estar', cerca ? (this.nomeEquipe(x.equipe_id) + ' · cerca ' + cerca.cerca_raio_m + ' m') : 'Sem alocação'],
-      ['Jornada prevista', this.jornadaDe(x.equipe_id)],
+      ['Jornada prevista', this.jornadaNoDia(x)],
       ['Origem', m ? (m.origem === 'manual' ? 'Registro manual' : 'Biometria facial · app') : 'Ausência detectada']
     ];
     if (m) fatos.push(['Desvio', m.distancia_cerca_m != null ? (m.distancia_cerca_m + ' m do centro') : '-']);
@@ -1218,7 +1260,7 @@ export const Rh = {
         '<section><h2>Prova biométrica</h2><div class="fotos">' +
           '<div><div class="foto">' + fotoCad + '</div><div class="cap">Cadastro</div></div>' +
           '<div><div class="foto">' + fotoReg + '</div><div class="cap">Registro' + (m ? ' · ' + x.hora : '') + '</div></div>' +
-        '</div><div class="match"' + (m && m.score != null ? '' : ' style="background:#fff7ed;color:#9a3412"') + '>' + esc(match) + '</div></section>' +
+        '</div><div class="match"' + matchStyle + '>' + esc(match) + '</div></section>' +
         '<section><h2>Local esperado × registrado</h2>' +
           '<div class="foto" style="aspect-ratio:auto;height:186px">' + this.svgMapaProva(m, cerca) + '</div>' +
           '<div class="cap">' + (cerca ? ('Cerca ' + cerca.cerca_raio_m + ' m') : 'Sem cerca definida') +
@@ -3531,6 +3573,7 @@ export const Rh = {
     $('rhCrumb').textContent = 'Trocar senha';
     $('rhNome').textContent = this.dados.usuario.nome || 'RH';
     $('rhIniciais').textContent = this.iniciais(this.dados.usuario.nome || 'RH');
+    this.pintarPapel();
     $('rh-painel').innerHTML =
       '<div class="cfg-sec" style="max-width:460px;margin:40px auto">' +
         '<h2>Defina uma nova senha</h2>' +
@@ -3550,7 +3593,14 @@ export const Rh = {
       if (!r.ok) { toast(r.erro || 'Falha ao trocar senha', 'bad'); return; }
       toast('Senha atualizada', 'ok');
       this.precisaTrocarSenha = false;
+      // Trocar a senha pode invalidar o token antigo: quando o servidor devolve
+      // um token novo, é ele que passa a valer (e é ele que fica guardado).
+      if (r.dados && typeof r.dados.token === 'string' && r.dados.token) this.token = r.dados.token;
       await this.guardarSessao();   // o F5 não pode voltar a pedir a troca
+      // Recarrega com a sessão já liberada (antes da troca os dados podem ter vindo vazios).
+      const d = await ApiRh.dados(this.token, this.dias);
+      if (d.ok) { this.dados = d.dados; this.aplicarConfig(); }
+      else if (!this.dados || !this.dados.acesso) { toast(d.erro || 'Falha ao carregar o painel. Entre de novo.', 'bad'); if (this.aoSair) this.aoSair(); return; }
       this.abrir(this.aoSair);   // agora entra normalmente
     };
   }
