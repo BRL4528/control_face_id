@@ -16,7 +16,7 @@ import {
   tiposPelaOrdem, classificarPendente, diasDeFeriado, feriadosNacionais, horarioDoDia, folhaDoMes
 } from './regras.js';
 import { $, esc, mostrar, toast, hora, data, definirFuso, reduzirImagem } from './ui.js';
-import { janelaDasFolhas, escreverFolhas, htmlFichaEpi } from './folha.js';
+import { janelaDasFolhas, escreverFolhas, htmlFichaEpi, textoRegistroFacial } from './folha.js';
 import { TIPOS_OCORRENCIA, ocorrenciaDoDia } from './ocorrencias.js';
 import { TIPOS_EVENTO, ESTADOS_EVENTO, situacaoCat } from './eventos.js';
 import { TIPOS_ITEM, ESTADOS_ENTREGA, alertasDaEntrega } from './almox.js';
@@ -2570,7 +2570,7 @@ export const Rh = {
           const [txt, cls] = ROT[f.situacao] || ROT.nao_enviada;
           const det = f.situacao === 'contestada' ? esc(f.contestacao || '')
             : f.assinatura ? 'em ' + esc(this.dataCurta(String(f.assinatura.em).slice(0, 10))) + ' às ' + hora(f.assinatura.em) +
-                (f.assinatura.liveness_ok ? '' : ' · sem prova de vida') : '';
+                ' · ' + textoRegistroFacial(f.assinatura) : '';
           return '<tr><td>' + esc(f.nome) + '</td><td><span class="pill ' + cls + '"><span class="dot"></span>' + txt + '</span></td><td>' + det + '</td></tr>';
         }).join('') +
       '</tbody></table></div>';
@@ -2827,7 +2827,9 @@ export const Rh = {
     const fotos = e => (e.tem_anexo ? '<button class="v2btn ghost mini" data-ev-foto="' + esc(e.id) + '">Ver foto</button> ' : '') +
       (e.tem_cat ? '<button class="v2btn ghost mini" data-ev-cat-foto="' + esc(e.id) + '">Ver CAT</button> ' : '');
     const situacao = e => {
-      if (e.estado === 'ciente') return pill('Ciente em ' + dm(String(e.ciencia && e.ciencia.em || '').slice(0, 10)), 'ok');
+      // Ciência: o que o app registrou do rosto (rosto e prova de vida, rosto sem prova de vida ou nada).
+      if (e.estado === 'ciente') return pill('Ciente em ' + dm(String(e.ciencia && e.ciencia.em || '').slice(0, 10)) + ' · ' + textoRegistroFacial(e.ciencia),
+        textoRegistroFacial(e.ciencia) === 'rosto e prova de vida' ? 'ok' : 'warn');
       if (e.estado === 'recusou') return pill('Recusou, com testemunhas', 'mut');
       if (e.estado === 'concluido') return pill('CAT ' + ((e.dados.cat || {}).numero || ''), 'ok');
       if (e.estado === 'aguardando_cat') {
@@ -3132,7 +3134,7 @@ export const Rh = {
       const linhas = entregas.filter(e => e.colaborador_id === id).sort((a, b) => a.entregue_em.localeCompare(b.entregue_em)).map(e => {
         const it = itens.find(i => i.id === e.item_id) || {};
         return { entregue_em: e.entregue_em, item: it.nome || '?', ca: e.ca, quantidade: e.quantidade, obra: e.equipe_id ? this.nomeEquipe(e.equipe_id) : '',
-                 confirmada_em: e.ciencia && e.ciencia.em, devolvido_em: e.devolvido_em };
+                 confirmada_em: e.ciencia && e.ciencia.em, prova: e.ciencia || null, devolvido_em: e.devolvido_em };
       });
       return { nome: p.nome, matricula: p.matricula, funcao: p.papel && p.papel !== 'colaborador' ? this.nomePapel(p.papel) : '', linhas };
     }).sort((a, b) => a.nome.localeCompare(b.nome));

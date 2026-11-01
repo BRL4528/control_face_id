@@ -45,19 +45,50 @@ td.oc.neutro { color: #475569 }
 @media print { body { background: #fff } .barra { display: none } .pagina { margin: 0; box-shadow: none } }
 `;
 
+/**
+ * O que a prova de uma assinatura, ciência ou confirmação registra do rosto:
+ * 'rosto_e_vida' (comparação 1:1 com score e prova de vida), 'rosto_sem_vida'
+ * (score sem prova de vida) ou 'sem_registro' (nenhum score: valeu só a
+ * credencial do aparelho). Só um score numérico conta como reconhecimento. Pura.
+ */
+export function registroFacial(prova) {
+  const p = prova || {};
+  const score = typeof p.score === 'number' ? p.score : (p.score != null && p.score !== '' ? Number(p.score) : NaN);
+  if (!Number.isFinite(score)) return 'sem_registro';
+  return p.liveness_ok === true ? 'rosto_e_vida' : 'rosto_sem_vida';
+}
+
+/** Rótulo curto do registro facial, para tabelas do painel e da ficha. Pura. */
+export function textoRegistroFacial(prova) {
+  const reg = registroFacial(prova);
+  if (reg === 'rosto_e_vida') return 'rosto e prova de vida';
+  if (reg === 'rosto_sem_vida') return 'rosto, sem prova de vida';
+  return prova && prova.liveness_ok === true ? 'sem registro facial' : 'sem registro facial nem prova de vida';
+}
+
+/** Nome e função em maiúsculas, só na exibição (o conteúdo assinado não muda). Pura. */
+export function nomeEFuncao(nome, funcao) {
+  const up = v => String(v == null ? '' : v).toLocaleUpperCase('pt-BR');
+  return esc(up(nome)) + (funcao ? ' (' + esc(up(funcao)) + ')' : '');
+}
+
 /** Selo da assinatura eletrônica no lugar da linha de assinatura em papel. */
-function seloAssinatura(f, nomeLinha) {
+export function seloAssinatura(f, nomeLinha) {
   const a = f.assinatura, d = new Date(a.em);
   const data = isNaN(d) ? '' : String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear();
-  return '<div class="selo"><b>Assinado eletronicamente</b> por ' + nomeLinha + ' em ' + data + ' às ' + hora(a.em) +
-    ', no aplicativo de ponto, com reconhecimento facial' + (a.liveness_ok ? ' e prova de vida' : '') + '.' +
+  const reg = registroFacial(a);
+  // Só afirma reconhecimento facial quando há score registrado; a falta de prova de vida é dita sempre.
+  const como = reg === 'rosto_e_vida' ? ', no aplicativo de ponto, com reconhecimento facial e prova de vida'
+    : reg === 'rosto_sem_vida' ? ', no aplicativo de ponto, com reconhecimento facial, sem prova de vida'
+    : ', no aplicativo de ponto, pela credencial do aparelho, sem verificação facial registrada' + (a.liveness_ok ? '' : ' e sem prova de vida');
+  return '<div class="selo"><b>Assinado eletronicamente</b> por ' + nomeLinha + ' em ' + data + ' às ' + hora(a.em) + como + '.' +
     '<br>Código de verificação da folha: <span class="mono">' + esc(String(a.hash || '').slice(0, 16).toUpperCase()) + '</span></div>';
 }
 
 function pagina(f, ctx) {
   const { empresa, timbrado, logo } = ctx;
   const [ano, mes] = f.mes.split('-').map(Number);
-  const nomeLinha = esc(f.nome) + (f.funcao ? ' (' + esc(f.funcao) + ')' : '');
+  const nomeLinha = nomeEFuncao(f.nome, f.funcao);
   const classeOc = oc => oc === 'FALTA' ? 'falta' : (oc === 'INCOMPLETO' || oc === 'A CONFIRMAR') ? 'aviso' : 'neutro';
   const linhas = f.dias.map(d =>
     '<tr' + (d.semana === 'SÁBADO' || d.semana === 'DOMINGO' ? ' class="fds"' : '') + '>' +
@@ -122,7 +153,8 @@ export function htmlFolhas(folhas, ctx) {
 /**
  * Ficha de EPI (NR-6) de um colaborador: cada entrega com data, item, CA, quantidade
  * e a confirmação pelo rosto no app (data e hora), mais devolução. Uma página A4.
- * `ficha`: { nome, funcao, matricula, linhas: [{ entregue_em, item, tipo, ca, quantidade, confirmada_em, devolvido_em, obra }] }.
+ * `ficha`: { nome, funcao, matricula, linhas: [{ entregue_em, item, tipo, ca, quantidade, confirmada_em, prova, devolvido_em, obra }] }
+ * (`prova`: a ciência da entrega, com score e liveness_ok).
  */
 export function htmlFichaEpi(fichas, ctx) {
   const { empresa, timbrado, logo } = ctx;
@@ -133,17 +165,18 @@ export function htmlFichaEpi(fichas, ctx) {
       '<div class="cab">' + (logo ? '<img src="' + logo + '" alt="">' : '') +
         '<div class="emp">' + esc(empresa.razao || empresa.nome || '') + (empresa.cnpj ? ' &nbsp;' + esc(empresa.cnpj) : '') +
           '<br>FICHA DE ENTREGA DE EPI E FERRAMENTAS</div></div>' +
-      '<div class="info"><b>COLABORADOR:</b><span>' + esc(f.nome) + (f.funcao ? ' (' + esc(f.funcao) + ')' : '') +
+      '<div class="info"><b>COLABORADOR:</b><span>' + nomeEFuncao(f.nome, f.funcao) +
         (f.matricula ? ' &nbsp;·&nbsp; MATRÍCULA ' + esc(f.matricula) : '') + '</span></div>' +
       '<table><thead><tr><th>DATA</th><th>ITEM</th><th>CA</th><th>QTD</th><th>OBRA</th><th>CONFIRMAÇÃO NO APP</th><th>DEVOLUÇÃO</th></tr></thead><tbody>' +
         (f.linhas.length ? f.linhas.map(l => '<tr><td>' + dm(l.entregue_em) + '</td><td class="obra">' + esc(l.item) + '</td><td>' + esc(l.ca || '') + '</td>' +
           '<td>' + l.quantidade + '</td><td class="obra">' + esc(l.obra || '') + '</td>' +
-          '<td>' + (l.confirmada_em ? dm(l.confirmada_em.slice(0, 10)) + ' ' + hora(l.confirmada_em) + ' (rosto)' : 'pendente') + '</td>' +
+          '<td>' + (l.confirmada_em ? dm(l.confirmada_em.slice(0, 10)) + ' ' + hora(l.confirmada_em) + ' (' + textoRegistroFacial(l.prova) + ')' : 'pendente') + '</td>' +
           '<td>' + dm(l.devolvido_em) + '</td></tr>').join('')
           : '<tr><td colspan="7">Nenhuma entrega registrada.</td></tr>') +
       '</tbody></table>' +
-      '<div class="nota">Confirmação eletrônica do recebimento por reconhecimento facial no aplicativo de ponto, conforme NR-6 ' +
-        '(registro do fornecimento em sistema eletrônico). O colaborador declarou ter recebido os itens em perfeito estado e sido orientado sobre o uso.</div>' +
+      '<div class="nota">Confirmação eletrônica do recebimento no aplicativo de ponto, conforme NR-6 ' +
+        '(registro do fornecimento em sistema eletrônico). A coluna de confirmação indica se houve reconhecimento facial e prova de vida. ' +
+        'O colaborador declarou ter recebido os itens em perfeito estado e sido orientado sobre o uso.</div>' +
     '</div></section>';
   return '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Ficha de EPI</title><style>' + CSS + '</style></head><body>' +
     '<div class="barra"><span>' + fichas.length + ' ficha(s)</span><button onclick="print()">Imprimir / Salvar em PDF</button></div>' +
