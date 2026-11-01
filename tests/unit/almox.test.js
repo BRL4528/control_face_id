@@ -19,3 +19,24 @@ test('ferramenta: atraso na devolução; devolvida não alerta', () => {
   assert.deepEqual(alertasDaEntrega(e, furadeira, '2026-10-11').alertas, ['atrasada']);
   assert.deepEqual(alertasDaEntrega({ ...e, estado: 'devolvida' }, furadeira, '2026-10-20').alertas, []);
 });
+
+test('EPI trocado: entrega substituída por outra mais nova do mesmo item não pede troca', async () => {
+  const { entregaSubstituida, caVencidoEm } = await import('../../js/almox.js');
+  const luva = { tipo: 'epi', vida_util_dias: 30 };
+  const velha = { id: 'e1', item_id: 'luva', colaborador_id: 'p1', entregue_em: '2026-09-01', estado: 'confirmada' };
+  const nova = { id: 'e2', item_id: 'luva', colaborador_id: 'p1', entregue_em: '2026-10-01', estado: 'aguardando_ciencia' };
+  const outroItem = { id: 'e3', item_id: 'bota', colaborador_id: 'p1', entregue_em: '2026-10-05', estado: 'confirmada' };
+  const outraPessoa = { id: 'e4', item_id: 'luva', colaborador_id: 'p2', entregue_em: '2026-10-05', estado: 'confirmada' };
+  assert.deepEqual(alertasDaEntrega(velha, luva, '2026-10-20').alertas, ['trocar']);   // sem lista: comportamento antigo
+  const r = alertasDaEntrega(velha, luva, '2026-10-20', [velha, nova, outroItem, outraPessoa]);
+  assert.deepEqual([r.alertas, r.substituida], [[], true]);
+  assert.deepEqual(alertasDaEntrega(nova, luva, '2026-10-20', [velha, nova]).alertas, []);   // a nova ainda vale
+  assert.deepEqual(alertasDaEntrega(velha, luva, '2026-10-20', true).alertas, []);           // flag já calculada
+  // troca cancelada não substitui; outro item e outra pessoa também não
+  assert.equal(entregaSubstituida(velha, [{ ...nova, estado: 'cancelada' }, outroItem, outraPessoa]), false);
+  // CA vencido continua aparecendo mesmo substituída (fato da entrega)
+  assert.deepEqual(alertasDaEntrega(velha, { ...luva, ca_validade: '2026-08-01' }, '2026-10-20', [velha, nova]).alertas, ['ca_vencido']);
+  assert.equal(caVencidoEm({ tipo: 'epi', ca_validade: '2026-10-01' }, '2026-10-02'), true);
+  assert.equal(caVencidoEm({ tipo: 'epi', ca_validade: '2026-10-01' }, '2026-10-01'), false);
+  assert.equal(caVencidoEm({ tipo: 'ferramenta', ca_validade: '2026-10-01' }, '2026-10-02'), false);
+});

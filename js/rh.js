@@ -19,7 +19,7 @@ import { $, esc, mostrar, toast, hora, data, definirFuso, reduzirImagem } from '
 import { janelaDasFolhas, escreverFolhas, htmlFichaEpi, textoRegistroFacial } from './folha.js';
 import { TIPOS_OCORRENCIA, ocorrenciaDoDia } from './ocorrencias.js';
 import { TIPOS_EVENTO, ESTADOS_EVENTO, situacaoCat } from './eventos.js';
-import { TIPOS_ITEM, ESTADOS_ENTREGA, alertasDaEntrega } from './almox.js';
+import { TIPOS_ITEM, ESTADOS_ENTREGA, alertasDaEntrega, caVencidoEm } from './almox.js';
 import { PERFIS, pode, ABA_MODULO, podeEditarJornadas } from './acessos.js';
 
 // Rótulo da aba na trilha do topo (breadcrumb) e no título de página.
@@ -3009,9 +3009,11 @@ export const Rh = {
     const ROT_AL = { ca_vencido: ['CA vencido na entrega', 'bad'], trocar: ['Trocar EPI', 'bad'], trocar_em_breve: ['Trocar em breve', 'mut'], atrasada: ['Devolução atrasada', 'bad'] };
     const inativo = id => { const p = this.pessoaDe(id); return p && !p.ativo; };
     const comAlerta = entregas.map(e => {
-      const a = alertasDaEntrega(e, itemDe(e.item_id), hoje).alertas.slice();
+      // Entrega trocada por uma mais nova do mesmo item não pede mais troca.
+      const r = alertasDaEntrega(e, itemDe(e.item_id), hoje, entregas);
+      const a = r.alertas.slice();
       if (inativo(e.colaborador_id) && e.estado !== 'devolvida' && (itemDe(e.item_id) || {}).tipo === 'ferramenta') a.push('desligado');
-      return Object.assign({}, e, { alertas: a });
+      return Object.assign({}, e, { alertas: a, substituida: !!r.substituida });
     });
     ROT_AL.desligado = ['Desligado com ferramenta', 'bad'];
     const busca = (this.alBusca || '').trim().toLowerCase(), so = this.alSoAlertas;
@@ -3036,10 +3038,12 @@ export const Rh = {
               '<td>' + esc(it.nome) + ' <span class="mt">(' + esc((TIPOS_ITEM[it.tipo] || {}).rotulo || '') + (e.ca ? ', CA ' + esc(e.ca) : '') + ')</span><div class="mt">' + e.quantidade + ' un.</div></td>' +
               '<td class="mono">' + dm(e.entregue_em) + (e.devolver_ate ? '<div class="mt">devolver até ' + dm(e.devolver_ate) + '</div>' : '') + '</td>' +
               '<td>' + pill(e.estado === 'devolvida' ? 'Devolvida em ' + dm(e.devolvido_em) : e.estado === 'confirmada' ? 'Confirmada no app' : ESTADOS_ENTREGA[e.estado] || e.estado,
-                    e.estado === 'aguardando_ciencia' ? 'mut' : 'ok') + '</td>' +
+                    e.estado === 'aguardando_ciencia' ? 'mut' : 'ok') +
+                (e.substituida && e.estado !== 'devolvida' ? ' ' + pill('Substituída por entrega mais nova', 'mut') : '') + '</td>' +
               '<td>' + e.alertas.map(a => pill(ROT_AL[a][0], ROT_AL[a][1])).join(' ') + '</td>' +
               '<td style="text-align:right;white-space:nowrap">' +
-                (it.tipo === 'ferramenta' && e.estado !== 'devolvida' ? '<button class="v2btn ghost mini" data-al-dev="' + esc(e.id) + '">Devolvida</button> ' : '') +
+                // Baixa: ferramenta devolvida; EPI devolvido ou trocado (sai dos alertas e continua na ficha NR-6).
+                (e.estado !== 'devolvida' ? '<button class="v2btn ghost mini" data-al-dev="' + esc(e.id) + '">' + (it.tipo === 'epi' ? 'Devolvido / trocado' : 'Devolvida') + '</button> ' : '') +
                 '<button class="v2btn ghost mini" data-al-cancel="' + esc(e.id) + '">Cancelar</button></td></tr>';
           }).join('') : '<tr><td colspan="6" style="padding:30px;text-align:center;color:#64748b">Nenhuma entrega.</td></tr>') +
         '</tbody></table></div>';
@@ -3070,7 +3074,7 @@ export const Rh = {
       $('alBusca').oninput = () => { this.alBusca = $('alBusca').value; this.pintarAlmox(); $('alBusca').focus(); };
       $('alSo').onchange = () => { this.alSoAlertas = $('alSo').checked; this.pintarAlmox(); };
       $('btnNovaEntrega').onclick = () => this.formEntrega();
-      el.querySelectorAll('[data-al-dev]').forEach(b => { b.onclick = () => acao({ acao: 'devolver', id: b.dataset.alDev, devolvido_em: hoje }, 'Devolução registrada'); });
+      el.querySelectorAll('[data-al-dev]').forEach(b => { b.onclick = () => acao({ acao: 'devolver', id: b.dataset.alDev, devolvido_em: hoje }, 'Baixa registrada'); });
       el.querySelectorAll('[data-al-cancel]').forEach(b => { b.onclick = () => { if (confirm('Cancelar esta entrega?')) acao({ acao: 'cancelar', id: b.dataset.alCancel }, 'Entrega cancelada'); }; });
     } else if (aba === 'itens') {
       $('btnNovoItem').onclick = () => this.formItem(null);
@@ -3126,6 +3130,11 @@ export const Rh = {
     $('btnEnOk').onclick = async () => {
       const colaboradores = [...$('enPessoas').querySelectorAll('input:checked')].map(c => c.value);
       if (!colaboradores.length) { toast('Escolha os colaboradores', 'warn'); return; }
+      // CA vencido na data da entrega: avisa, mas não impede (o RH decide).
+      const itSel = itens.find(i => i.id === $('enItem').value);
+      if (caVencidoEm(itSel, $('enData').value) &&
+          !confirm('O CA ' + (itSel.ca || '') + ' de ' + itSel.nome + ' venceu em ' + itSel.ca_validade.split('-').reverse().join('/') +
+            '. A NR-6 pede EPI com CA válido. Registrar a entrega mesmo assim?')) return;
       const r = await ApiRh.almox(this.token, { acao: 'entregar', item_id: $('enItem').value, colaboradores, quantidade: Number($('enQtd').value) || 1,
         entregue_em: $('enData').value, devolver_ate: $('enDev').value || null, equipe_id: $('enObra').value || null, observacao: $('enObs').value });
       if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
