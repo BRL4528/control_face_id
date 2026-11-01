@@ -8,6 +8,7 @@ import { autenticarDispositivo } from './_lib/auth.js';
 import { comTabelaNova } from './_lib/tabela-nova.js';
 import { cors, ok, erro, corpo, exigeMetodo } from './_lib/http.js';
 import { conferirProva, limiarDaEmpresa } from './_lib/prova-facial.js';
+import { comFotoReal } from './_lib/imagem.js';
 
 const num = v => (v == null || v === '' || !Number.isFinite(Number(v))) ? null : Number(v);
 const TERMO_CIENCIA = 'Declaro que recebi e li este documento. Dar ciência não significa concordar com o conteúdo.';
@@ -34,7 +35,7 @@ export default async function handler(req, res) {
     if (b.acao !== 'ciente') return erro(res, 400, 'CORPO_INVALIDO', 'acao inválida');
     // Exige o 1:1 dentro do limiar e a foto da captura; a prova de vida só fica registrada.
     const p = b.prova || {};
-    const prova = conferirProva(p, await limiarDaEmpresa(sql, vinc.empresa_id));
+    const prova = comFotoReal(conferirProva(p, await limiarDaEmpresa(sql, vinc.empresa_id)));
     if (!prova.ok) return erro(res, prova.status, prova.codigo, prova.mensagem);
     const ciencia = {
       em: new Date().toISOString(), termo: TERMO_CIENCIA, dispositivo_id: vinc.dispositivo_id,

@@ -9,6 +9,7 @@ import { autenticarDispositivo } from './_lib/auth.js';
 import { comTabelaNova } from './_lib/tabela-nova.js';
 import { cors, ok, erro, corpo, exigeMetodo } from './_lib/http.js';
 import { conferirProva, limiarDaEmpresa } from './_lib/prova-facial.js';
+import { comFotoReal } from './_lib/imagem.js';
 
 const num = v => (v == null || v === '' || !Number.isFinite(Number(v))) ? null : Number(v);
 const TERMO = 'Declaro que recebi os itens acima em perfeito estado, fui orientado sobre o uso e me comprometo a usá-los e conservá-los.';
@@ -38,7 +39,7 @@ export default async function handler(req, res) {
     if (!ids.length) return erro(res, 400, 'CORPO_INVALIDO', 'nada para confirmar');
     // Exige o 1:1 dentro do limiar e a foto da captura; a prova de vida só fica registrada.
     const p = b.prova || {};
-    const prova = conferirProva(p, await limiarDaEmpresa(sql, vinc.empresa_id));
+    const prova = comFotoReal(conferirProva(p, await limiarDaEmpresa(sql, vinc.empresa_id)));
     if (!prova.ok) return erro(res, prova.status, prova.codigo, prova.mensagem);
     const ciencia = {
       em: new Date().toISOString(), termo: TERMO, dispositivo_id: vinc.dispositivo_id,

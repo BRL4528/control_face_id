@@ -14,3 +14,16 @@ export async function ocorrenciaVigente(sql, empresaId, colaboradorId, dia) {
 
 /** Foto do documento: data URL de imagem até ~1 MB (o painel e o app reduzem antes de enviar). */
 export const anexoValido = a => typeof a === 'string' && /^data:image\/(jpeg|png|webp);base64,/.test(a) && a.length <= 1500000;
+
+/**
+ * Rótulo da ocorrência no meio de uma frase: só a 1ª letra cai para minúscula e
+ * siglas ficam como estão ('Afastamento INSS' → 'afastamento INSS', 'Férias' →
+ * 'férias'). Palavra inicial que já é sigla (2ª letra maiúscula) não muda. Pura.
+ */
+export function rotuloEmFrase(rotulo) {
+  const s = String(rotulo || '');
+  if (!s) return '';
+  const segunda = s.charAt(1);
+  if (segunda && segunda !== segunda.toLowerCase() && segunda === segunda.toUpperCase()) return s;
+  return s.charAt(0).toLowerCase() + s.slice(1);
+}

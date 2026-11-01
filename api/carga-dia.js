@@ -21,7 +21,7 @@
 // tem dono confirmado pelo RH (inclusive quando informou uma matrícula).
 import { db } from './_lib/db.js';
 import { cercaVigente } from './_lib/escala.js';
-import { ocorrenciaVigente } from './_lib/ocorrencia.js';
+import { ocorrenciaVigente, rotuloEmFrase } from './_lib/ocorrencia.js';
 import { autenticarDispositivo } from './_lib/auth.js';
 import { diaNoFuso, fusoDaEmpresa } from './_lib/dia.js';
 import { cors, ok, erro, corpo, exigeMetodo } from './_lib/http.js';
@@ -79,7 +79,7 @@ export default async function handler(req, res) {
     template: t ? { versao: t.versao, vetores: t.vetores } : null,
     afastado: !!(a && a.afastado) || !!bloqueio,   // equipe de afastamento ou ocorrência que bloqueia: o app não deixa bater
     afastado_msg: bloqueio
-      ? 'Você está em ' + bloqueio.rotulo.toLowerCase() + (bloqueio.fim ? ' até ' + bloqueio.fim.slice(8, 10) + '/' + bloqueio.fim.slice(5, 7) : '') + ' e não precisa registrar ponto.'
+      ? 'Você está em ' + rotuloEmFrase(bloqueio.rotulo) + (bloqueio.fim ? ' até ' + bloqueio.fim.slice(8, 10) + '/' + bloqueio.fim.slice(5, 7) : '') + ' e não precisa registrar ponto.'
       : null,
     alocacao: (a && a.cerca_lat != null) ? {
       equipe_id: a.equipe_id, equipe_nome: a.equipe_nome, cerca_origem: a.cerca_origem,
