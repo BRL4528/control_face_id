@@ -80,6 +80,38 @@ export const Store = (() => {
     confirmar: m => tx('enviadas', 'readwrite', s => s.put(m)),
     enviadas: () => tx('enviadas', 'readonly', s => s.getAll()),
 
+    /**
+     * Batidas do dia que o servidor já tem (carga-dia → marcacoes_hoje), por
+     * exemplo feitas em outro celular. Entram como enviadas para o tipo da vez, o
+     * painel do dia e o intervalo entre batidas contarem com elas. Dedup por
+     * id_cliente: o que já está na fila ou nas enviadas deste aparelho fica como está.
+     */
+    async confirmarDoServidor(lista) {
+      const novas = (lista || []).filter(m => m && m.id_cliente && m.marcado_em && m.marcado_dia);
+      if (!novas.length) return 0;
+      const [fila, enviadas] = await Promise.all([this.fila(), this.enviadas()]);
+      const conhecidas = new Set(fila.concat(enviadas).map(m => m.id_cliente));
+      let n = 0;
+      for (const m of novas) {
+        if (conhecidas.has(m.id_cliente)) continue;
+        await this.confirmar(Object.assign({ origem_servidor: true }, m));
+        conhecidas.add(m.id_cliente); n++;
+      }
+      return n;
+    },
+
+    /**
+     * Aparelho pendente que o RH acabou de identificar: as batidas enviadas sem
+     * dono viraram, no servidor, lançamentos novos no nome da pessoa (que voltam
+     * em marcacoes_hoje). Tira as locais sem dono para o painel não contar duas
+     * vezes. A fila não é tocada: o que não subiu ainda sobe normalmente.
+     */
+    async esquecerEnviadasSemDono() {
+      const sem = (await this.enviadas()).filter(m => !m.pessoa_id);
+      for (const m of sem) await tx('enviadas', 'readwrite', st => st.delete(m.id_cliente));
+      return sem.length;
+    },
+
     async doDia(dia) {
       const todas = await Promise.all([this.fila(), this.enviadas()]);
       return todas.flat().filter(m => m.marcado_dia === dia);

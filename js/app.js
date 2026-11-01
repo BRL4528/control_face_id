@@ -1,9 +1,10 @@
 // Porta de entrada e roteamento — v4 (produto).
 //
-// O celular é do colaborador. No primeiro acesso ele PAREIA (informa a matrícula
-// uma vez + captura a face que o RH já cadastrou) e gera a credencial de 256
-// bits, guardada só no IndexedDB. Depois disso o app abre direto no ponto: olhar
-// para a câmera, piscar, pronto. Zero senha no dia a dia.
+// O celular é do colaborador. No primeiro acesso ele PAREIA (pelo link da empresa
+// ou informando a matrícula) e gera a credencial de 256 bits, guardada só no
+// IndexedDB. O aparelho nasce pendente e já bate ponto; o RH confirma quem é em
+// Pendências. Depois disso o app abre direto no ponto: olhar para a câmera,
+// virar o rosto, pronto. Zero senha no dia a dia.
 //
 // Duas portas continuam separadas: quem bate ponto nunca vê administração, e o
 // RH entra por usuário+senha (independente do pareamento do aparelho).
@@ -80,6 +81,28 @@ function statusPorta(txt, classe) {
   $('portaStatus').className = 'nota ' + (classe || '');
 }
 
+/**
+ * Texto de status da porta, com a mesma prioridade em todo lugar (irParaPorta e
+ * a sincronização de fundo): carregando o reconhecimento, cadastro pendente,
+ * afastado, primeiro acesso, fila esperando envio e, por fim, o "Olá". Devolve
+ * [texto, classe] ou null quando a porta tem aviso fixo (bloqueado, navegador
+ * embutido) que não pode ser trocado.
+ */
+function statusDaPorta(fila) {
+  if (S.bloqueado || S.navegadorEmbutido) return null;
+  const pareado = !!S.dispositivo;
+  const pendente = pareado && !S.dispositivo.colaborador;
+  const pelaEmpresa = !pareado && !!S.empresa;
+  const n = (fila || []).length;
+  if (!Face.pronto) return ['Preparando o reconhecimento… já pode tocar.'];
+  if (pendente) return ['Seu cadastro aguarda confirmação do RH. Pode bater o ponto normalmente.'];
+  if (S.afastado) return [S.afastadoMsg || MSG_AFASTADO, 'warnfg'];
+  if (pelaEmpresa) return ['Primeira vez? Só olhar para a câmera. Sem código, sem senha.'];
+  if (!pareado) return ['Primeira vez? Toque para ativar seu ponto.'];
+  if (n) return [n + ' marcação(ões) esperando envio.', 'warnfg'];
+  return ['Olá, ' + S.dispositivo.colaborador.nome.split(' ')[0] + '.'];
+}
+
 async function irParaPorta() {
   mostrar('porta');
   // Aviso de navegador embutido tem prioridade e persiste — sem câmera, nada
@@ -115,13 +138,8 @@ async function irParaPorta() {
   $('btnPonto').disabled = false;
   let fila = [];
   try { fila = await Store.fila(); } catch (e) { /* storage bloqueado — segue */ }
-  if (!Face.pronto) statusPorta('Preparando o reconhecimento… já pode tocar.');
-  else if (pendente) statusPorta('Seu cadastro aguarda confirmação do RH. Pode bater o ponto normalmente.');
-  else if (S.afastado) statusPorta(S.afastadoMsg || MSG_AFASTADO, 'warnfg');
-  else if (pelaEmpresa) statusPorta('Primeira vez? Só olhar para a câmera. Sem código, sem senha.');
-  else if (!pareado) statusPorta('Primeira vez? Toque para ativar seu ponto.');
-  else if (fila.length) statusPorta(fila.length + ' marcação(ões) esperando envio.', 'warnfg');
-  else statusPorta('Olá, ' + S.dispositivo.colaborador.nome.split(' ')[0] + '.');
+  const st = statusDaPorta(fila);
+  if (st) statusPorta(st[0], st[1]);
   if (pareado && navigator.onLine) sincronizarFundo();
   avisarFolha();
   avisarCiencia();
@@ -203,9 +221,13 @@ async function sincronizarFundo() {
   if (!S.dispositivo || S.bloqueado) return;
   const r = await Api.sincronizar(S.dispositivo.credencial);
   if (r && r.status === 403 && r.codigo === 'BLOQUEADO') { await marcarBloqueado(); await irParaPorta(); return; }
-  const fila = await Store.fila();
+  let fila = [];
+  try { fila = await Store.fila(); } catch (e) { /* storage bloqueado — segue */ }
+  // Mesma regra da porta: não apaga o aviso de afastado, o de cadastro pendente
+  // nem o "Olá" quando a fila esvazia.
   if (!$('porta').classList.contains('hide')) {
-    statusPorta(fila.length ? fila.length + ' marcação(ões) esperando envio.' : '', fila.length ? 'warnfg' : '');
+    const st = statusDaPorta(fila);
+    if (st) statusPorta(st[0], st[1]);
   }
 }
 
@@ -217,7 +239,7 @@ function abrirPareamento() {
   const bloco = $('pareEmpresaBloco');
   if (bloco) bloco.classList.toggle('hide', !!S.empresa);
   const sub = $('pareSub');
-  if (sub) sub.textContent = S.empresa ? 'Já tem cadastro facial? Informe a matrícula e o aparelho ativa na hora.'
+  if (sub) sub.textContent = S.empresa ? 'Já tem cadastro? Informe a matrícula. O RH confirma e você já pode bater o ponto.'
                                        : 'Só na primeira vez. Depois é só olhar para a câmera.';
   setTimeout(() => { const alvo = S.empresa ? $('pareMatricula') : $('pareEmpresa'); alvo && alvo.focus(); }, 100);
   $('btnParear').onclick = executarPareamento;
@@ -242,10 +264,23 @@ async function executarPareamento() {
     await Store.set('dispositivo_id', dispositivo_id);
     await Store.set('credencial', credencial);
     await Store.set('empresa_id', r.empresa ? r.empresa.id : empresa_id);
-    await Store.set('colaborador', r.colaborador);
-    await Store.set('estado_aparelho', 'ativo');
-    S.dispositivo = { dispositivo_id, credencial, colaborador: r.colaborador, estado: 'ativo' };
-    toast('Ponto ativado. Bem-vindo, ' + r.colaborador.nome.split(' ')[0] + '!', 'ok');
+    if (r.estado === 'ativo' && r.colaborador) {
+      // Este mesmo aparelho já estava confirmado pelo RH: segue como antes.
+      await Store.set('colaborador', r.colaborador);
+      await Store.set('estado_aparelho', 'ativo');
+      S.dispositivo = { dispositivo_id, credencial, colaborador: r.colaborador, estado: 'ativo' };
+      toast('Ponto ativado. Bem-vindo, ' + r.colaborador.nome.split(' ')[0] + '!', 'ok');
+    } else {
+      // Matrícula informada vira só um palpite: o aparelho fica pendente até o RH
+      // confirmar em Pendências. Nada de template de ninguém neste celular.
+      const mat = r.matricula_informada || matricula;
+      await Store.set('colaborador', null);
+      await Store.set('estado_aparelho', 'pendente');
+      await Store.set('matricula_informada', mat);
+      await Store.set('template', null);
+      S.dispositivo = { dispositivo_id, credencial, colaborador: null, estado: 'pendente', matricula_informada: mat };
+      toast('Seu cadastro aguarda confirmação do RH. Pode bater o ponto normalmente.', 'ok');
+    }
     await irParaPorta();
   } finally {
     $('btnParear').disabled = false; $('btnParear').textContent = 'Ativar';
@@ -318,9 +353,13 @@ async function abrirPonto() {
         if (r.estado === 'ativo' && r.colaborador && !S.dispositivo.colaborador) {
           await Store.set('colaborador', r.colaborador); await Store.set('estado_aparelho', 'ativo');
           S.dispositivo.colaborador = r.colaborador; S.dispositivo.estado = 'ativo';
+          try { await Store.esquecerEnviadasSemDono(); } catch (e) { /* segue */ }
           toast('Cadastro confirmado. Bem-vindo, ' + r.colaborador.nome.split(' ')[0] + '!', 'ok');
         }
         if (r.estado === 'pendente') S.dispositivo.matricula_informada = r.matricula_informada || S.dispositivo.matricula_informada;
+        // Batidas do dia feitas em outro celular: contam para o tipo da vez, o
+        // painel e o intervalo entre batidas.
+        if (r.estado === 'ativo') { try { await Store.confirmarDoServidor(r.marcacoes_hoje); } catch (e) { /* segue */ } }
         await Store.set('template', template);
         await Store.set('alocacao', alocacao);
         await Store.set('deriva', deriva);
@@ -458,7 +497,9 @@ async function carregarFaceComRetry() {
     try { await Face.carregar('./models'); }
     catch (e) { Face.falhou = false; await new Promise(r => setTimeout(r, 1500 * (tentativa + 1))); }
   }
-  await irParaPorta();
+  // Só atualiza a porta se ela estiver na tela: o modelo pode terminar de baixar
+  // com o login do RH, o painel ou a câmera abertos, e não pode trocá-los.
+  if (!$('porta').classList.contains('hide')) await irParaPorta();
 }
 
 // Superfície de teste.
