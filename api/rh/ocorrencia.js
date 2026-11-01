@@ -2,6 +2,7 @@
 //
 //   { acao: 'salvar', id?, colaborador_id, tipo, inicio, fim?, observacao?, anexo? }
 //        cria (sem id) ou edita. anexo: data URL de imagem; null apaga; ausente mantém.
+//        Só a ocorrência 'ativa' é editável (409 OCORRENCIA_NAO_EDITAVEL nas outras).
 //   { acao: 'cancelar', id }               → estado 'cancelada' (o histórico fica)
 //   { acao: 'aprovar' | 'recusar', id }    → decide a enviada pelo app (pendente)
 //   { acao: 'anexo', id }                  → devolve a foto do documento
@@ -11,8 +12,7 @@ import { TIPOS_OCORRENCIA } from '../../js/ocorrencias.js';
 import { anexoValido } from '../_lib/ocorrencia.js';
 import { exigeAcesso } from '../_lib/acesso.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
-
-const DIA = /^\d{4}-\d{2}-\d{2}$/;
+import { diaValido } from '../_lib/validar.js';
 
 export default async function handler(req, res) {
   if (cors(req, res)) return;
@@ -42,9 +42,11 @@ export default async function handler(req, res) {
 
   if (b.acao !== 'salvar') return erro(res, 400, 'CORPO_INVALIDO', 'acao inválida');
   if (!TIPOS_OCORRENCIA[b.tipo]) return erro(res, 400, 'CORPO_INVALIDO', 'tipo inválido');
-  if (!DIA.test(b.inicio || '')) return erro(res, 400, 'CORPO_INVALIDO', 'data de início obrigatória');
+  if (!b.inicio) return erro(res, 400, 'CORPO_INVALIDO', 'data de início obrigatória');
+  if (!diaValido(b.inicio)) return erro(res, 400, 'CORPO_INVALIDO', 'data de início inválida');
   const fim = b.fim ? String(b.fim) : null;
-  if (fim && (!DIA.test(fim) || fim < b.inicio)) return erro(res, 400, 'CORPO_INVALIDO', 'a data final vem antes da inicial');
+  if (fim && !diaValido(fim)) return erro(res, 400, 'CORPO_INVALIDO', 'data final inválida');
+  if (fim && fim < b.inicio) return erro(res, 400, 'CORPO_INVALIDO', 'a data final vem antes da inicial');
   const obs = b.observacao ? String(b.observacao).trim().slice(0, 1000) : null;
   if (b.anexo != null && !anexoValido(b.anexo)) return erro(res, 400, 'ANEXO_INVALIDO', 'foto inválida ou acima de 1 MB');
   const [c] = await sql`SELECT id FROM colaborador WHERE id=${String(b.colaborador_id || '')} AND empresa_id=${emp} LIMIT 1`;
@@ -54,8 +56,13 @@ export default async function handler(req, res) {
     const mexeAnexo = b.anexo !== undefined;
     const r = await sql`UPDATE ocorrencia SET colaborador_id=${c.id}, tipo=${b.tipo}, inicio=${b.inicio}, fim=${fim}, observacao=${obs},
                           anexo = CASE WHEN ${mexeAnexo} THEN ${b.anexo || null} ELSE anexo END
-                        WHERE id=${String(b.id)} AND empresa_id=${emp} RETURNING id`;
-    if (!r[0]) return erro(res, 404, 'OCORRENCIA_NAO_ENCONTRADA', 'ocorrência não encontrada');
+                        WHERE id=${String(b.id)} AND empresa_id=${emp} AND estado='ativa' RETURNING id`;
+    if (!r[0]) {
+      // Cancelada, recusada ou pendente (decide-se em aprovar/recusar) não se edita.
+      const [o] = await sql`SELECT estado FROM ocorrencia WHERE id=${String(b.id)} AND empresa_id=${emp} LIMIT 1`;
+      if (o) return erro(res, 409, 'OCORRENCIA_NAO_EDITAVEL', 'só a ocorrência ativa pode ser editada (esta está ' + o.estado + ')');
+      return erro(res, 404, 'OCORRENCIA_NAO_ENCONTRADA', 'ocorrência não encontrada');
+    }
     return ok(res, { id: r[0].id, atualizada: true });
   }
   const id = novoId();

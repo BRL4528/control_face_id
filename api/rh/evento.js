@@ -17,8 +17,11 @@ import { TIPOS_EVENTO } from '../../js/eventos.js';
 import { exigeAcesso, noEscopo } from '../_lib/acesso.js';
 import { obrasDe } from '../../js/acessos.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
+import { diaValido, horaValida, daEmpresa, pessoasDistintas } from '../_lib/validar.js';
 
-const DIA = /^\d{4}-\d{2}-\d{2}$/;
+// Estados em que o registro ainda pode ser editado: depois da ciência (ou da
+// recusa com testemunhas) o texto fica congelado; para mudar, cancela e emite outro.
+const EDITAVEIS = ['aguardando_ciencia', 'aguardando_cat'];
 const txt = (v, n) => v == null ? '' : String(v).trim().slice(0, n);
 const pessoasTexto = lista => (Array.isArray(lista) ? lista : []).map(t => ({ nome: txt(t && t.nome, 120), documento: txt(t && t.documento, 40) })).filter(t => t.nome).slice(0, 5);
 
@@ -63,19 +66,28 @@ export default async function handler(req, res) {
     }
 
     if (b.acao === 'cat') {
-      if (!txt(b.numero, 40) || !DIA.test(b.data || '')) return erro(res, 400, 'CORPO_INVALIDO', 'número e data da CAT obrigatórios');
+      if (!txt(b.numero, 40) || !b.data) return erro(res, 400, 'CORPO_INVALIDO', 'número e data da CAT obrigatórios');
+      if (!diaValido(b.data)) return erro(res, 400, 'CORPO_INVALIDO', 'data da CAT inválida');
       if (b.anexo != null && !anexoValido(b.anexo)) return erro(res, 400, 'ANEXO_INVALIDO', 'foto inválida ou acima de 1 MB');
       const cat = { numero: txt(b.numero, 40), data: b.data, registrada_em: new Date().toISOString(), por: rh.nome || rh.usuario };
       const r = await sql`UPDATE evento SET estado='concluido', dados = dados || ${JSON.stringify({ cat })}::jsonb,
                             cat_anexo = COALESCE(${b.anexo || null}, cat_anexo)
-                          WHERE id=${id} AND empresa_id=${emp} AND tipo='acidente' RETURNING id`;
-      if (!r[0]) return erro(res, 404, 'EVENTO_NAO_ENCONTRADO', 'acidente não encontrado');
+                          WHERE id=${id} AND empresa_id=${emp} AND tipo='acidente'
+                            AND estado IN ('aguardando_cat','concluido') RETURNING id`;
+      if (!r[0]) {
+        // Cancelado não reabre como concluído; registro inexistente continua 404.
+        const [e] = await sql`SELECT estado FROM evento WHERE id=${id} AND empresa_id=${emp} AND tipo='acidente' LIMIT 1`;
+        if (e) return erro(res, 409, 'EVENTO_JA_RESOLVIDO', 'registro cancelado: a CAT não pode ser registrada');
+        return erro(res, 404, 'EVENTO_NAO_ENCONTRADO', 'acidente não encontrado');
+      }
       return ok(res, { id, estado: 'concluido' });
     }
 
     if (b.acao === 'recusa') {
       const testemunhas = pessoasTexto(b.testemunhas);
       if (testemunhas.length < 2) return erro(res, 400, 'CORPO_INVALIDO', 'informe duas testemunhas');
+      // Mesma pessoa duas vezes (documento ou nome iguais, sem acento/pontuação) não conta.
+      if (pessoasDistintas(testemunhas).length < 2) return erro(res, 400, 'CORPO_INVALIDO', 'informe duas testemunhas diferentes');
       const recusa = { testemunhas, observacao: txt(b.observacao, 500), em: new Date().toISOString(), por: rh.nome || rh.usuario };
       const r = await sql`UPDATE evento SET estado='recusou', dados = dados || ${JSON.stringify({ recusa })}::jsonb
                           WHERE id=${id} AND empresa_id=${emp} AND estado='aguardando_ciencia' RETURNING id`;
@@ -86,7 +98,8 @@ export default async function handler(req, res) {
     if (b.acao !== 'salvar') return erro(res, 400, 'CORPO_INVALIDO', 'acao inválida');
     const tipo = TIPOS_EVENTO[b.tipo];
     if (!tipo) return erro(res, 400, 'CORPO_INVALIDO', 'tipo inválido');
-    if (!DIA.test(b.data || '')) return erro(res, 400, 'CORPO_INVALIDO', 'data obrigatória');
+    if (!b.data) return erro(res, 400, 'CORPO_INVALIDO', 'data obrigatória');
+    if (!diaValido(b.data)) return erro(res, 400, 'CORPO_INVALIDO', 'data inválida');
     const descricao = txt(b.descricao, 4000);
     if (!descricao) return erro(res, 400, 'CORPO_INVALIDO', 'descreva o que aconteceu');
     if (b.anexo != null && !anexoValido(b.anexo)) return erro(res, 400, 'ANEXO_INVALIDO', 'foto inválida ou acima de 1 MB');
@@ -94,17 +107,24 @@ export default async function handler(req, res) {
     if (!c) return erro(res, 404, 'COLABORADOR_NAO_ENCONTRADO', 'colaborador não encontrado');
     if (obras && (!obras.includes(b.equipe_id) || !(await noEscopo(sql, acesso, emp, c.id)))) return erro(res, 403, 'SEM_PERMISSAO', 'fora das suas obras');
     const equipeId = b.equipe_id ? String(b.equipe_id) : null;
+    // A obra tem de ser desta empresa (a FK aceita equipe de outra).
+    if (equipeId && !(await daEmpresa(sql, 'equipe', equipeId, emp))) return erro(res, 404, 'EQUIPE_NAO_ENCONTRADA', 'equipe não encontrada');
     const d = b.dados || {};
     const dados = { testemunhas: pessoasTexto(d.testemunhas), afastamento: d.afastamento === true, obito: d.obito === true };
-    const hora = /^\d{2}:\d{2}$/.test(b.hora || '') ? b.hora : null;
+    if (b.hora && !horaValida(b.hora)) return erro(res, 400, 'CORPO_INVALIDO', 'hora inválida');
+    const hora = b.hora || null;
 
     if (id) {
       const mexeAnexo = b.anexo !== undefined;
       const r = await sql`UPDATE evento SET colaborador_id=${c.id}, equipe_id=${equipeId}, data=${b.data}, hora=${hora}, descricao=${descricao},
                             dados = dados || ${JSON.stringify(dados)}::jsonb,
                             anexo = CASE WHEN ${mexeAnexo} THEN ${b.anexo || null} ELSE anexo END
-                          WHERE id=${id} AND empresa_id=${emp} AND estado <> 'cancelado' RETURNING id`;
-      if (!r[0]) return erro(res, 404, 'EVENTO_NAO_ENCONTRADO', 'registro não encontrado');
+                          WHERE id=${id} AND empresa_id=${emp} AND estado = ANY(${EDITAVEIS}::text[]) RETURNING id`;
+      if (!r[0]) {
+        const [e] = await sql`SELECT estado FROM evento WHERE id=${id} AND empresa_id=${emp} LIMIT 1`;
+        if (e) return erro(res, 409, 'EVENTO_JA_RESOLVIDO', 'registro com ciência, recusa ou cancelado não pode ser alterado; cancele e emita outro');
+        return erro(res, 404, 'EVENTO_NAO_ENCONTRADO', 'registro não encontrado');
+      }
       return ok(res, { id, atualizado: true });
     }
     const novo = novoId();
