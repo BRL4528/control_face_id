@@ -76,8 +76,9 @@ export default async function handler(req, res) {
       if (!(await daEmpresa(sql, 'colaborador', supervisorId, rh.empresa_id, { ativos: true }))) return erro(res, 404, 'COLABORADOR_NAO_ENCONTRADO', 'supervisor não encontrado');
       if (!(await noEscopo(sql, acesso, rh.empresa_id, supervisorId))) return erro(res, 403, 'SEM_PERMISSAO', 'supervisor fora das suas obras');
     }
-    await sql`UPDATE equipe SET jornada_id=${jornadaId}, supervisor_id=${supervisorId}
-              WHERE id=${equipeId} AND empresa_id=${rh.empresa_id}`;
+    const r = await sql`UPDATE equipe SET jornada_id=${jornadaId}, supervisor_id=${supervisorId}
+                        WHERE id=${equipeId} AND empresa_id=${rh.empresa_id} RETURNING id`;
+    if (!r[0]) return erro(res, 404, 'EQUIPE_NAO_ENCONTRADA', 'equipe não encontrada');
     return ok(res, { equipe_id: equipeId, associado: true });
   }
 

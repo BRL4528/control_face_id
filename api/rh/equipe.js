@@ -70,8 +70,9 @@ export default async function handler(req, res) {
   if (!nome) return erro(res, 400, 'CORPO_INVALIDO', 'nome obrigatório');
 
   if (b.equipe_id) {
-    await sql`UPDATE equipe SET nome=${nome}, ativo=${b.ativo === false ? false : true}
-              WHERE id=${b.equipe_id} AND empresa_id=${rh.empresa_id}`;
+    const r = await sql`UPDATE equipe SET nome=${nome}, ativo=${b.ativo === false ? false : true}
+                        WHERE id=${b.equipe_id} AND empresa_id=${rh.empresa_id} RETURNING id`;
+    if (!r[0]) return erro(res, 404, 'EQUIPE_NAO_ENCONTRADA', 'equipe não encontrada');
     return ok(res, { equipe_id: b.equipe_id, atualizado: true });
   }
   const id = novoId();
