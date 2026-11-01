@@ -156,3 +156,15 @@ test('horasEntradaPorEquipe: hora de entrada do dia; feriado = null (ninguém é
   assert.deepEqual(horasEntradaPorEquipe(eqs, [EFRAT], '2026-10-06', fer), { e1: '07:00' });
   assert.deepEqual(horasEntradaPorEquipe(eqs, [EFRAT], '2026-10-12', fer), { e1: null });
 });
+
+test('problemasDaJornada: tolerância 0 vale; sem dia marcado ou saída antes da entrada bloqueia', async () => {
+  const { problemasDaJornada } = await import('../../js/regras.js');
+  const base = { entrada: '07:00', saida: '17:00', tolerancia_min: 0, dias: { '1': { entrada: '07:00', saida: '17:00' } } };
+  assert.deepEqual(problemasDaJornada(base), []);
+  assert.deepEqual(problemasDaJornada({ ...base, dias: {} }), ['Marque ao menos um dia de trabalho']);
+  assert.match(problemasDaJornada({ ...base, dias: { '2': { entrada: '22:00', saida: '06:00' } } })[0], /Saída antes da entrada em terça/);
+  assert.match(problemasDaJornada({ ...base, dias: { '3': { entrada: '08:00', saida: '08:00' } } })[0], /quarta/);
+  assert.deepEqual(problemasDaJornada({ ...base, saida: '06:00' }), ['A saída precisa ser depois da entrada']);
+  assert.deepEqual(problemasDaJornada({ ...base, tolerancia_min: -1 }), ['Tolerância entre 0 e 120 minutos']);
+  assert.deepEqual(problemasDaJornada({ ...base, tolerancia_min: NaN }), ['Tolerância entre 0 e 120 minutos']);
+});

@@ -13,14 +13,14 @@ import {
   exceptionsDoDia,
   jornadaDaEquipe, horasEntradaPorEquipe, csvDe,
   alertasDePlanejamento, horasPorColaborador, fmtMinutos, dia as diaDe, motivosDaRevisao, rotuloAuditoria,
-  tiposPelaOrdem, classificarPendente, diasDeFeriado, feriadosNacionais, horarioDoDia, folhaDoMes
+  tiposPelaOrdem, classificarPendente, diasDeFeriado, feriadosNacionais, horarioDoDia, folhaDoMes, problemasDaJornada
 } from './regras.js';
 import { $, esc, mostrar, toast, hora, data, definirFuso, reduzirImagem } from './ui.js';
 import { janelaDasFolhas, escreverFolhas, htmlFichaEpi, textoRegistroFacial } from './folha.js';
 import { TIPOS_OCORRENCIA, ocorrenciaDoDia } from './ocorrencias.js';
 import { TIPOS_EVENTO, ESTADOS_EVENTO, situacaoCat } from './eventos.js';
 import { TIPOS_ITEM, ESTADOS_ENTREGA, alertasDaEntrega } from './almox.js';
-import { PERFIS, pode, ABA_MODULO } from './acessos.js';
+import { PERFIS, pode, ABA_MODULO, podeEditarJornadas } from './acessos.js';
 
 // Rótulo da aba na trilha do topo (breadcrumb) e no título de página.
 const TITULOS = {
@@ -2166,6 +2166,8 @@ export const Rh = {
     const js = (this.dados.jornadas || []).slice().sort((a, b) => a.nome.localeCompare(b.nome));
     const eqs = (this.dados.equipes || []).slice().sort((a, b) => a.nome.localeCompare(b.nome));
     const pessoas = (this.dados.pessoas || []).filter(p => p.ativo);
+    // Gestor de obra não cria nem edita jornada (vale para a empresa toda); só associa às equipes dele.
+    const editaJornada = podeEditarJornadas(this.dados.acesso);
 
     const linhaJornada = j =>
       '<tr><td><b>' + esc(j.nome) + '</b></td>' +
@@ -2173,12 +2175,12 @@ export const Rh = {
       '<td>' + j.tolerancia_min + ' min</td>' +
       '<td>' + (j.intervalo_min != null ? j.intervalo_min : 60) + ' min</td>' +
       '<td><span class="pill ' + (j.ativa ? 'ok' : 'mut') + '"><span class="dot"></span>' + (j.ativa ? 'Ativa' : 'Inativa') + '</span></td>' +
-      '<td style="text-align:right"><button class="v2btn ghost mini" data-jed="' + esc(j.jornada_id) + '">Editar</button></td></tr>';
+      '<td style="text-align:right">' + (editaJornada ? '<button class="v2btn ghost mini" data-jed="' + esc(j.jornada_id) + '">Editar</button>' : '') + '</td></tr>';
 
     const linhaEquipe = e => {
-      const opts = '<option value="">— sem jornada (usa padrão) —</option>' +
+      const opts = '<option value="">Sem jornada (usa a padrão)</option>' +
         js.map(j => '<option value="' + j.jornada_id + '"' + (e.jornada_id === j.jornada_id ? ' selected' : '') + '>' + esc(j.nome) + '</option>').join('');
-      const sopts = '<option value="">— sem supervisor —</option>' +
+      const sopts = '<option value="">Sem supervisor</option>' +
         pessoas.map(p => '<option value="' + p.pessoa_id + '"' + (e.supervisor_id === p.pessoa_id ? ' selected' : '') + '>' + esc(p.nome) + '</option>').join('');
       return '<tr><td><b>' + esc(e.nome) + '</b></td>' +
         '<td><select class="inp" data-assoc-eq="' + esc(e.equipe_id) + '" data-assoc="jornada">' + opts + '</select></td>' +
@@ -2187,8 +2189,9 @@ export const Rh = {
 
     $('rh-jornadas').innerHTML =
       '<div class="pg-head"><div><h1 class="tit">Jornadas</h1>' +
-        '<p class="sub">Turnos de trabalho. A hora de entrada define quando a ausência vira pendência.</p></div>' +
-        '<div class="acoes"><button class="v2btn" id="btnNovaJornada">+ Nova jornada</button></div></div>' +
+        '<p class="sub">Turnos de trabalho. A hora de entrada define quando a ausência vira pendência.' +
+          (editaJornada ? '' : ' Só o RH cria e altera jornadas; aqui você escolhe a jornada e o supervisor das suas equipes.') + '</p></div>' +
+        (editaJornada ? '<div class="acoes"><button class="v2btn" id="btnNovaJornada">+ Nova jornada</button></div>' : '') + '</div>' +
       '<div id="areaJornada"></div>' +
       '<div class="tbl-wrap" style="margin-bottom:16px"><table class="adtable"><thead><tr>' +
         '<th>Jornada</th><th>Horário</th><th>Tolerância</th><th>Intervalo</th><th>Status</th><th></th></tr></thead><tbody>' +
@@ -2200,7 +2203,7 @@ export const Rh = {
         (eqs.length ? eqs.map(linhaEquipe).join('') : '<tr><td colspan="3" style="padding:30px;text-align:center;color:#64748b">Nenhuma equipe.</td></tr>') +
       '</tbody></table></div>';
 
-    $('btnNovaJornada').onclick = () => this.formJornada(null);
+    if (editaJornada) $('btnNovaJornada').onclick = () => this.formJornada(null);
     $('rh-jornadas').querySelectorAll('[data-jed]').forEach(b => {
       b.onclick = () => this.formJornada(js.find(j => j.jornada_id === b.dataset.jed));
     });
@@ -2251,12 +2254,17 @@ export const Rh = {
     $('btnSalvarJornada').onclick = async () => {
       const nome = $('jNome').value.trim();
       if (!nome) { toast('Informe o nome', 'warn'); return; }
-      const r = await ApiRh.jornada(this.token, {
+      // Tolerância 0 é válida (sem margem); só o campo vazio cai no padrão de 10 min.
+      const tv = String($('jTol').value).trim();
+      const corpo = {
         jornada_id: j.jornada_id, nome, entrada: $('jEntrada').value, saida: $('jSaida').value,
-        tolerancia_min: Number($('jTol').value) || 10,
+        tolerancia_min: tv === '' ? 10 : Math.round(Number(tv)),
         intervalo_min: Math.max(0, Number($('jInt').value) || 0),
         dias: this.lerDiasJornada()
-      });
+      };
+      const probs = problemasDaJornada(corpo);
+      if (probs.length) { toast(probs[0], 'warn'); return; }
+      const r = await ApiRh.jornada(this.token, corpo);
       if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
       toast('Jornada salva', 'ok');
       $('areaJornada').innerHTML = '';

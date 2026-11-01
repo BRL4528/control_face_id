@@ -51,3 +51,12 @@ test('servidor: exigeAcesso barra perfil sem permissão e usuário desativado; n
   assert.equal(await noEscopo(sql, g, 'x', 'c1'), true);
   assert.equal(await noEscopo(sql, g, 'x', 'c2'), false);
 });
+
+test('podeEditarJornadas: gestor de obra e leitura não criam nem editam jornada', async () => {
+  const { podeEditarJornadas } = await import('../../js/acessos.js');
+  assert.equal(podeEditarJornadas({ perfil: 'gestor_obra', obras: ['o1'] }), false);
+  assert.equal(podeEditarJornadas({ perfil: 'leitura' }), false);
+  assert.equal(podeEditarJornadas({ perfil: 'rh' }), true);
+  assert.equal(podeEditarJornadas({ perfil: 'admin' }), true);
+  assert.equal(podeEditarJornadas(null), true);   // legado sem perfil = administrador
+});

@@ -535,6 +535,29 @@ export function horarioDoDia(j, dia, feriados, alocado) {
   return h || (alocado ? base : null);
 }
 
+/**
+ * Confere o formulário de jornada antes de salvar. `dias`: { "1": { entrada, saida }, ... }
+ * só com os dias marcados (0 = domingo). Devolve a lista de problemas em texto de
+ * tela (vazia = pode salvar). Turno que vira a noite ainda não é suportado. Pura.
+ */
+export function problemasDaJornada({ entrada, saida, tolerancia_min, dias }) {
+  const NOMES = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+  const r = [];
+  const hhmm = v => /^\d{2}:\d{2}$/.test(String(v || ''));
+  if (!hhmm(entrada) || !hhmm(saida)) r.push('Informe a entrada e a saída');
+  else if (saida <= entrada) r.push('A saída precisa ser depois da entrada');
+  const t = Number(tolerancia_min);
+  if (!Number.isFinite(t) || t < 0 || t > 120) r.push('Tolerância entre 0 e 120 minutos');
+  const ds = dias && typeof dias === 'object' ? Object.keys(dias) : [];
+  if (!ds.length) r.push('Marque ao menos um dia de trabalho');
+  for (const w of ds.sort((a, b) => ((Number(a) + 6) % 7) - ((Number(b) + 6) % 7))) {
+    const d = dias[w] || {};
+    if (!hhmm(d.entrada) || !hhmm(d.saida)) r.push('Informe entrada e saída de ' + NOMES[Number(w)]);
+    else if (d.saida <= d.entrada) r.push('Saída antes da entrada em ' + NOMES[Number(w)] + ': turno que vira a noite ainda não é suportado');
+  }
+  return r;
+}
+
 /** Minutos previstos de um horário (saída − entrada − intervalo). */
 export function minutosPrevistos(h) {
   if (!h) return 0;
