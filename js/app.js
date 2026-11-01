@@ -124,7 +124,8 @@ async function irParaPorta() {
   const pelaEmpresa = !pareado && !!S.empresa;
   $('btnPonto').textContent = (pareado && !pendente) ? 'REGISTRAR PONTO' : (pendente || pelaEmpresa) ? 'BATER PONTO' : 'ATIVAR MEU PONTO';
   if (sub) sub.textContent = S.empresa ? S.empresa.nome : 'Seu ponto, no seu celular';
-  // "Já tenho cadastro": quem trocou de celular e sabe a matrícula pareia direto (1:1 no ato).
+  // "Já tenho cadastro": quem trocou de celular informa a matrícula; o aparelho
+  // fica pendente e o RH confirma em Pendências (já pré-seleciona pela matrícula).
   if (linkMat) linkMat.classList.toggle('hide', !(pelaEmpresa || pendente));
   // Atestado pelo app: só para quem já é colaborador identificado.
   const linkAt = $('linkAtestado');

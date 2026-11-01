@@ -72,3 +72,15 @@ test('diaValido: só data de calendário real', () => {
   for (const d of ['2026-02-30', '2027-02-29', '2026-13-01', '2026-00-10', '2026-04-31', '2026-1-01', '', null, undefined, 20260101, '2026-01-01T00:00'])
     assert.equal(diaValido(d), false, String(d));
 });
+
+test('marcacoesDoServidorParaGravar: dedup por id_cliente; cópia local sem dono é trocada pela do servidor', async () => {
+  const { marcacoesDoServidorParaGravar } = await import('../../js/store.js');
+  const srv = (id, extra) => Object.assign({ id_cliente: id, tipo: 'entrada', marcado_em: '2026-11-01T11:00:00.000Z', marcado_dia: '2026-11-01', pessoa_id: 'c1' }, extra);
+  const fila = [{ id_cliente: 'f1', pessoa_id: null }];
+  const enviadas = [{ id_cliente: 'e1', pessoa_id: 'c1' }, { id_cliente: 'e2', pessoa_id: null }];
+  const r = marcacoesDoServidorParaGravar([srv('f1'), srv('e1'), srv('e2'), srv('n1'), srv('n1'), srv('x', { pessoa_id: null }), srv('y', { marcado_dia: '' }), null], fila, enviadas);
+  assert.deepEqual(r.map(m => m.id_cliente), ['e2', 'n1']);
+  assert.equal(r[0].pessoa_id, 'c1');
+  assert.equal(r[0].origem_servidor, true);
+  assert.deepEqual(marcacoesDoServidorParaGravar(undefined, [], []), []);
+});

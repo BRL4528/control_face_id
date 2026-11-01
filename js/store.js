@@ -6,6 +6,27 @@
 //   fila     marcações ainda não confirmadas pelo servidor  (o dado crítico)
 //   enviadas marcações já confirmadas, para deduzir entrada/saída do dia
 //   eventos  diário de bordo, para diagnóstico em campo
+/**
+ * Quais batidas do servidor (carga-dia → marcacoes_hoje) entram nas enviadas
+ * locais. Dedup por id_cliente: o que está na fila ou nas enviadas COM dono fica
+ * como está. Cópia local SEM dono (batida feita enquanto o aparelho era pendente
+ * e que só subiu depois do RH identificar) é trocada pela do servidor, que já
+ * vem com pessoa_id; senão ela não conta para o tipo da vez nem para o
+ * intervalo entre batidas. Pura.
+ */
+export function marcacoesDoServidorParaGravar(lista, fila, enviadas) {
+  const conhecidas = new Set((fila || []).concat((enviadas || []).filter(m => m && m.pessoa_id))
+    .map(m => m && m.id_cliente));
+  const out = [];
+  for (const m of lista || []) {
+    if (!m || !m.id_cliente || !m.marcado_em || !m.marcado_dia || !m.pessoa_id) continue;
+    if (conhecidas.has(m.id_cliente)) continue;
+    conhecidas.add(m.id_cliente);
+    out.push(Object.assign({ origem_servidor: true }, m));
+  }
+  return out;
+}
+
 export const Store = (() => {
   const NOME = 'efrat-ponto';
   const VERSAO = 1;
@@ -87,17 +108,11 @@ export const Store = (() => {
      * id_cliente: o que já está na fila ou nas enviadas deste aparelho fica como está.
      */
     async confirmarDoServidor(lista) {
-      const novas = (lista || []).filter(m => m && m.id_cliente && m.marcado_em && m.marcado_dia);
-      if (!novas.length) return 0;
+      if (!(lista || []).length) return 0;
       const [fila, enviadas] = await Promise.all([this.fila(), this.enviadas()]);
-      const conhecidas = new Set(fila.concat(enviadas).map(m => m.id_cliente));
-      let n = 0;
-      for (const m of novas) {
-        if (conhecidas.has(m.id_cliente)) continue;
-        await this.confirmar(Object.assign({ origem_servidor: true }, m));
-        conhecidas.add(m.id_cliente); n++;
-      }
-      return n;
+      const gravar = marcacoesDoServidorParaGravar(lista, fila, enviadas);
+      for (const m of gravar) await this.confirmar(m);
+      return gravar.length;
     },
 
     /**
