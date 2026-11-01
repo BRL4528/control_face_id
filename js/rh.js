@@ -2842,6 +2842,7 @@ export const Rh = {
       if (e.estado === 'concluido') return pill('CAT ' + ((e.dados.cat || {}).numero || ''), 'ok');
       if (e.estado === 'aguardando_cat') {
         const s = situacaoCat(e, hoje, cfg.feriados);
+        if (s.obito) return pill(s.situacao === 'atrasada' ? 'Óbito: CAT atrasada (óbito em ' + dm(s.prazo) + ')' : 'Óbito: comunicar imediatamente', 'bad');
         return pill(s.situacao === 'atrasada' ? 'CAT atrasada (prazo ' + dm(s.prazo) + ')' : s.situacao === 'vence_hoje' ? 'CAT vence hoje' : 'Aguardando CAT até ' + dm(s.prazo),
           s.situacao === 'no_prazo' ? 'mut' : 'bad');
       }
