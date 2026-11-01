@@ -7,7 +7,9 @@
 
 const PREFIXO = /^data:image\/(jpeg|png|webp);base64,/;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
-export const IMAGEM_MIN_BYTES = 1000;   // miniatura 128 px da captura passa folgado de 2 KB
+// Piso só contra lixo: um JPEG 128 px quase uniforme (rosto no escuro) fica perto de
+// 900 bytes, e só as tabelas do cabeçalho já passam de 300.
+export const IMAGEM_MIN_BYTES = 300;
 export const IMAGEM_MAX_CHARS = 300000; // mesmo teto da prova facial
 
 const comeca = (buf, bytes, desde = 0) => bytes.every((b, i) => buf[desde + i] === b);

@@ -4,6 +4,7 @@ import { noFuturo } from './lancamento.js';
 
 const TIPOS = ['entrada', 'saida'];
 const INT_MAX = 2147483647;   // deriva_ms é integer no banco
+const REAL_MAX = 1e6;         // score e precisao_m são real: fora disso é lixo (e estouraria a coluna)
 
 /** Número finito, null para vazio/ausente, NaN para lixo. */
 const numOuNulo = v => (v == null || v === '') ? null : (typeof v === 'number' || typeof v === 'string') && Number.isFinite(Number(v)) ? Number(v) : NaN;
@@ -17,7 +18,8 @@ const numOuNulo = v => (v == null || v === '') ? null : (typeof v === 'number' |
  */
 export function normalizarBatida(m) {
   if (!m || typeof m !== 'object') return { erro: 'campos obrigatórios ausentes' };
-  const id = typeof m.id_cliente === 'string' ? m.id_cliente.trim() : '';
+  // id_cliente vai como veio: é a chave que o app usa para tirar o item da fila.
+  const id = typeof m.id_cliente === 'string' && m.id_cliente.trim() ? m.id_cliente : '';
   if (!id || !m.tipo || m.marcado_em == null || m.marcado_em === '') return { erro: 'campos obrigatórios ausentes' };
   if (id.length > 100) return { erro: 'id_cliente inválido' };
   if (!TIPOS.includes(m.tipo)) return { erro: 'tipo inválido' };
@@ -38,14 +40,14 @@ export function normalizarBatida(m) {
       tipo: m.tipo,
       origem: m.origem === 'manual' ? 'manual' : 'biometria',
       veredito: m.veredito,
-      score: Number.isFinite(score) ? score : null,
+      score: Number.isFinite(score) && Math.abs(score) <= REAL_MAX ? score : null,
       liveness_ok: typeof m.liveness_ok === 'boolean' ? m.liveness_ok : null,
       marcado_em: marcadoEm,
       futuro: noFuturo(marcadoEm),
       deriva_ms: Number.isFinite(deriva) ? Math.max(-INT_MAX, Math.min(INT_MAX, Math.round(deriva))) : 0,
       lat: semGps ? null : lat,
       lng: semGps ? null : lng,
-      precisao_m: Number.isFinite(prec) && prec >= 0 ? prec : null,
+      precisao_m: Number.isFinite(prec) && prec >= 0 && prec <= REAL_MAX ? prec : null,
       equipe_id: typeof m.equipe_id === 'string' && m.equipe_id.trim() ? m.equipe_id.trim() : null,
       motivo: typeof m.motivo === 'string' && m.motivo.trim() ? m.motivo.trim().slice(0, 500) : null,
       foto_url: typeof m.foto_url === 'string' && m.foto_url ? m.foto_url : null

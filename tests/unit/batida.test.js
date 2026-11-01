@@ -59,6 +59,14 @@ test('normalizarBatida: sem GPS vira null; lixo nos opcionais vira null, não 50
   assert.equal(normalizarBatida(base({ lat: '-20.5', lng: '-54.7' })).item.lng, -54.7);
   assert.equal(normalizarBatida(base({ deriva_ms: 1e12 })).item.deriva_ms, 2147483647);
   assert.equal(normalizarBatida(base({ origem: 'manual' })).item.origem, 'manual');
+  // real no banco: valor absurdo vira null em vez de estourar a coluna no INSERT
+  assert.equal(normalizarBatida(base({ precisao_m: 1e300 })).item.precisao_m, null);
+  assert.equal(normalizarBatida(base({ score: -1e300 })).item.score, null);
+});
+
+test('normalizarBatida: id_cliente volta igual ao enviado (o app tira da fila por ele)', () => {
+  assert.equal(normalizarBatida(base({ id_cliente: ' abc ' })).item.id_cliente, ' abc ');
+  assert.equal(normalizarBatida(base({ id_cliente: '   ' })).erro, 'campos obrigatórios ausentes');
 });
 
 test('motivoDaBatida: viagem não apaga a prova de vida reprovada', () => {
@@ -97,6 +105,11 @@ const url = (tipo, buf) => 'data:image/' + tipo + ';base64,' + buf.toString('bas
 
 test('imagemReal: aceita JPEG/PNG/WEBP de verdade', () => {
   for (const [t, b] of [['jpeg', JPEG], ['png', PNG], ['webp', WEBP]]) assert.equal(imagemReal(url(t, b)), url(t, b));
+});
+
+test('imagemReal: miniatura pequena de verdade (rosto no escuro, ~900 bytes) passa', () => {
+  const pequena = comBytes([0xff, 0xd8, 0xff, 0xe0], [0xff, 0xd9], 880);
+  assert.equal(imagemReal(url('jpeg', pequena)), url('jpeg', pequena));
 });
 
 test('imagemReal: só o prefixo, base64 com lixo, tipo trocado ou pequeno demais não passa', () => {
