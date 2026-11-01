@@ -36,9 +36,11 @@ test('nome e função em maiúsculas na folha e na ficha de EPI', () => {
   assert.match(htmlFolhas([folha], ctx), /JOÃO ARRUDA \(AJUDANTE\)/);
   const ficha = { nome: 'João Arruda', funcao: 'Líder de equipe', matricula: '7',
     linhas: [{ entregue_em: '2026-10-01', item: 'Bota', ca: '123', quantidade: 1, confirmada_em: '2026-10-01T12:00:00Z', prova: { score: 0.3, liveness_ok: false } },
-             { entregue_em: '2026-10-02', item: 'Luva', ca: '', quantidade: 1, confirmada_em: '2026-10-02T12:00:00Z', prova: { liveness_ok: false } }] };
+             { entregue_em: '2026-10-02', item: 'Luva', ca: '', quantidade: 1, confirmada_em: '2026-10-02T12:00:00Z', prova: { liveness_ok: false } },
+             { entregue_em: '2026-10-03', item: 'Furadeira', codigo: 'PAT-1', ca: '', quantidade: 1, confirmada_em: null }] };
   const html = htmlFichaEpi([ficha], ctx);
   assert.match(html, /JOÃO ARRUDA \(LÍDER DE EQUIPE\)/);
   assert.match(html, /\(rosto, sem prova de vida\)/);
   assert.match(html, /\(sem registro facial nem prova de vida\)/);
+  assert.match(html, /Furadeira \(PAT-1\)/);   // código ou patrimônio da ferramenta na ficha (cautela)
 });

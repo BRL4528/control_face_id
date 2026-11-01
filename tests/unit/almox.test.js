@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { alertasDaEntrega } from '../../js/almox.js';
+import { alertasDaEntrega, nomeComCodigo, podeCancelarEntrega } from '../../js/almox.js';
 
 test('EPI: CA vencido na entrega e troca pela vida útil', () => {
   const luva = { tipo: 'epi', ca_validade: '2026-12-31', vida_util_dias: 30 };
@@ -45,4 +45,19 @@ test('EPI trocado: entrega substituída por outra mais nova do mesmo item não p
   assert.equal(caVencidoEm({ tipo: 'epi', ca_validade: '2026-10-01' }, '2026-10-02'), true);
   assert.equal(caVencidoEm({ tipo: 'epi', ca_validade: '2026-10-01' }, '2026-10-01'), false);
   assert.equal(caVencidoEm({ tipo: 'ferramenta', ca_validade: '2026-10-01' }, '2026-10-02'), false);
+});
+
+test('nomeComCodigo junta o código ou patrimônio ao nome', () => {
+  assert.equal(nomeComCodigo({ nome: 'Furadeira', codigo: 'PAT-1' }), 'Furadeira (PAT-1)');
+  assert.equal(nomeComCodigo({ nome: 'Luva', codigo: '  ' }), 'Luva');
+  assert.equal(nomeComCodigo({ nome: 'Bota' }), 'Bota');
+  assert.equal(nomeComCodigo(null), '?');
+});
+
+test('só entrega aguardando confirmação pode ser cancelada', () => {
+  assert.equal(podeCancelarEntrega({ estado: 'aguardando_ciencia' }), true);
+  assert.equal(podeCancelarEntrega({ estado: 'confirmada' }), false);
+  assert.equal(podeCancelarEntrega({ estado: 'devolvida' }), false);
+  assert.equal(podeCancelarEntrega({ estado: 'cancelada' }), false);
+  assert.equal(podeCancelarEntrega(null), false);
 });

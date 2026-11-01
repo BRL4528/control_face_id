@@ -56,3 +56,19 @@ export function alertasDaEntrega(entrega, item, hoje, outras) {
   if (item.tipo === 'ferramenta' && entrega.devolver_ate && entrega.devolver_ate < hoje) a.push('atrasada');
   return { alertas: a, troca_em: trocaEm, devolver_ate: entrega.devolver_ate || null, substituida };
 }
+
+/** Nome do item com o código ou patrimônio, quando houver: "Furadeira (PAT-1)". Pura. */
+export function nomeComCodigo(item) {
+  if (!item) return '?';
+  const cod = String(item.codigo || '').trim();
+  return (item.nome || '?') + (cod ? ' (' + cod + ')' : '');
+}
+
+/**
+ * Entrega ainda pode ser cancelada? Só a que aguarda a confirmação no app: a
+ * confirmada pelo rosto ou devolvida é registro da Ficha de EPI (NR-6) e sai
+ * pela baixa (devolvido / trocado), não some. Pura.
+ */
+export function podeCancelarEntrega(entrega) {
+  return !!entrega && entrega.estado === 'aguardando_ciencia';
+}
