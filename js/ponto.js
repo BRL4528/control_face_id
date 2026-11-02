@@ -82,7 +82,7 @@ export const Ponto = {
       ? 'Seu cadastro ainda será confirmado pelo RH. Pode bater o ponto normalmente: ele vale depois da confirmação.'
       : this.alocacao
         ? 'Local de hoje: ' + esc(this.alocacao.equipe_nome || 'sua equipe')
-        : '⚠ Sem alocação hoje — o ponto irá para conferência do RH';
+        : '⚠ Sem alocação hoje: o ponto irá para conferência do RH';
 
     $('painelDia').innerHTML =
       '<div class="card diacard">' +
@@ -127,7 +127,7 @@ export const Ponto = {
     const { slots, proximo } = pontosDoDia(this.doDia);
     const rot = proximo != null ? slots[proximo].rotulo : 'ponto';
     $('dica').textContent = 'Registrando ' + rot + '. Olhe para a câmera';
-    if (!this.alocacao && !this.modoCadastro) toast('Sem alocação hoje — irá para conferência do RH', 'warn');
+    if (!this.alocacao && !this.modoCadastro) toast('Sem alocação hoje: irá para conferência do RH', 'warn');
   },
 
   /** O que acontece com a foto do rosto, conforme o uso da câmera. */

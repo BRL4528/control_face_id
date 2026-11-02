@@ -271,3 +271,19 @@ test('guarda 7: o conjunto de arquivos em vendor/fontes/ e exatamente o referenc
 
 
 
+
+test('texto de tela sem travessão', () => {
+  // Comentários podem ter; o que o usuário lê (strings do front e do Bitrix) não.
+  const arquivos = fs.readdirSync(path.join(RAIZ, 'js')).filter(f => f.endsWith('.js')).map(f => 'js/' + f)
+    .concat(['index.html', 'api/_lib/bitrix-saida.js']);
+  const achados = [];
+  for (const f of arquivos) {
+    ler(f).split('\n').forEach((l, i) => {
+      const codigo = l.replace(/\/\*.*?\*\//g, '').replace(/(^|[^:'"])\/\/.*$/, '$1').replace(/<!--.*?-->/g, '');
+      const t = codigo.trim();
+      if (t.startsWith('*') || t.startsWith('/*')) return;
+      if (codigo.includes('—')) achados.push(f + ':' + (i + 1));
+    });
+  }
+  assert.deepEqual(achados, []);
+});

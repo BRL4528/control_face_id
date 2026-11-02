@@ -389,7 +389,7 @@ export const Rh = {
 
   nomeEquipe(id) {
     const e = (this.dados.equipes || []).find(x => x.equipe_id === id);
-    return e ? e.nome : '—';
+    return e ? e.nome : '-';
   },
 
   /* ----------------------------------------------------- alocação (cards) */
@@ -432,7 +432,7 @@ export const Rh = {
     const supervisorDe = eqId => {
       const eq = (this.dados.equipes || []).find(e => e.equipe_id === eqId);
       const sup = eq && eq.supervisor_id ? this.pessoaDe(eq.supervisor_id) : null;
-      return sup ? sup.nome : '—';
+      return sup ? sup.nome : '-';
     };
     const enderecoDe = g => {
       // Se a cerca coincide com um local salvo, mostra o nome.
@@ -543,7 +543,7 @@ export const Rh = {
   },
 
   abrirEditorAlocacao(opts) {
-    $('alocModalTit').textContent = (opts.equipeId ? ('Ajustar ' + this.nomeEquipe(opts.equipeId)) : 'Ajustar este dia') + ' — ' + this.dataLonga(opts.dia);
+    $('alocModalTit').textContent = (opts.equipeId ? ('Ajustar ' + this.nomeEquipe(opts.equipeId)) : 'Ajustar este dia') + ' · ' + this.dataLonga(opts.dia);
     $('alocModal').classList.remove('hide');
     Alocacao.abrir(this, Object.assign({
       alvo: 'alocEditor',
@@ -584,7 +584,7 @@ export const Rh = {
           '<span class="cerca-tag">Cerca ' + pl.cerca_raio_m + ' m</span></div>' +
         '<div class="aloc-card-grid">' +
           '<div><div class="k">Local</div><div class="v">' + esc(enderecoDe(pl)) + '</div></div>' +
-          '<div><div class="k">Dias</div><div class="v">' + esc(dias || '—') + '</div></div>' +
+          '<div><div class="k">Dias</div><div class="v">' + esc(dias || '-') + '</div></div>' +
           '<div style="grid-column:1/-1"><div class="k">Vigência</div><div class="v">' + esc(vig) + '</div></div>' +
         '</div>' +
         '<div class="aloc-card-acoes">' +
@@ -596,7 +596,7 @@ export const Rh = {
 
     $('rh-planos').innerHTML =
       '<div class="pg-head"><div><h1 class="tit">Escala das equipes</h1>' +
-        '<p class="sub">Só para a exceção: turma que trabalha noutro ponto, em dias e por um período. No dia a dia a cerca já vem do local da equipe (Equipes) — quem está na equipe bate ponto lá sem escala nenhuma. Quando existe, a escala ganha do local nos dias dela.</p></div>' +
+        '<p class="sub">Só para a exceção: turma que trabalha noutro ponto, em dias e por um período. No dia a dia a cerca já vem do local da equipe (Equipes): quem está na equipe bate ponto lá sem escala nenhuma. Quando existe, a escala ganha do local nos dias dela.</p></div>' +
         '<div class="acoes"><button class="v2btn" id="btnNovoPlano">+ Nova escala</button></div></div>' +
       '<div class="aloc-grid">' +
         planos.map(card).join('') +
@@ -630,7 +630,7 @@ export const Rh = {
   },
 
   abrirEditorPlano(pl) {
-    $('planoModalTit').textContent = pl ? ('Editar escala — ' + (pl.nome || this.nomeEquipe(pl.equipe_id))) : 'Nova escala';
+    $('planoModalTit').textContent = pl ? ('Editar escala: ' + (pl.nome || this.nomeEquipe(pl.equipe_id))) : 'Nova escala';
     $('planoModal').classList.remove('hide');
     PlanoEditor.abrir(this, Object.assign({
       alvo: 'planoEditor',
@@ -649,7 +649,7 @@ export const Rh = {
   },
   mensagemLink() {
     const emp = (this.dados.empresa && this.dados.empresa.nome) || 'a empresa';
-    return 'Ponto facial da ' + emp + ': abra o link no seu celular e toque em BATER PONTO. Só olhar para a câmera — sem código, sem senha.\n\n' + this.linkEmpresa();
+    return 'Ponto facial da ' + emp + ': abra o link no seu celular e toque em BATER PONTO. Só olhar para a câmera, sem código e sem senha.\n\n' + this.linkEmpresa();
   },
 
   hojeServidor() {
@@ -843,7 +843,7 @@ export const Rh = {
     // Bloco "Planejamento": alertas de gestão da escala (conflitos, lacunas, vencendo).
     const planHtml = alerts.slice(0, 5).map(x => {
       const p = x.pessoa_id ? this.pessoaDe(x.pessoa_id) : null;
-      const contexto = p ? p.nome : (x.equipe_id ? this.nomeEquipe(x.equipe_id) : '—');
+      const contexto = p ? p.nome : (x.equipe_id ? this.nomeEquipe(x.equipe_id) : '-');
       return '<div class="aten"><div class="aten-top">' + sevPill(x.severidade) +
         '<span class="aten-tit">' + esc(x.rotulo) + '</span></div>' +
         '<div class="aten-sub">' + esc(contexto) + '</div>' +
@@ -870,7 +870,7 @@ export const Rh = {
       '<div class="kpis">' +
         kpi('Previstos hoje', esp, cards.length ? cards.length + ' equipe(s) em operação' : (feriadoHoje ? 'Hoje é feriado: ninguém previsto' : 'Ninguém previsto hoje pela jornada')) +
         kpi('Presentes', pre, ind.taxaManual + '% por registro manual') +
-        kpi('Presença', presencaHoje == null ? '—' : presencaHoje + '%', 'Meta operacional 95%') +
+        kpi('Presença', presencaHoje == null ? '-' : presencaHoje + '%', 'Meta operacional 95%') +
         kpi('Requerem atenção', exc.length, 'Exceções aguardando o RH', exc.length > 0) +
       '</div>' +
 
@@ -1326,7 +1326,7 @@ export const Rh = {
       '<td>' + (m.tipo === 'entrada' ? 'Entrada' : 'Saída') + '</td>' +
       '<td>' + (m.lat != null ? '<a href="https://www.openstreetmap.org/?mlat=' + m.lat + '&mlon=' + m.lng + '#map=17/' + m.lat + '/' + m.lng + '" target="_blank" rel="noopener">' +
         Number(m.lat).toFixed(4) + ', ' + Number(m.lng).toFixed(4) + '</a>' + (m.precisao_m ? ' <span class="nota">±' + Math.round(m.precisao_m) + ' m</span>' : '') : '<span class="nota">sem GPS</span>') + '</td>' +
-      '<td>' + (m.liveness_ok === false ? '<span class="badfg">sem prova de vida</span>' : m.liveness_ok ? 'ok' : '—') + '</td></tr>';
+      '<td>' + (m.liveness_ok === false ? '<span class="badfg">sem prova de vida</span>' : m.liveness_ok ? 'ok' : '-') + '</td></tr>';
     return '<div class="pend-det-head">' +
         '<span class="av" style="width:56px;height:56px;border-radius:14px;overflow:hidden">' + (foto ? '<img src="' + esc(foto) + '" style="width:100%;height:100%;object-fit:cover">' : '📱') + '</span>' +
         '<div style="flex:1"><div class="nome">Aparelho não identificado <span class="sev warn">ATENÇÃO</span></div>' +
@@ -1346,7 +1346,7 @@ export const Rh = {
         '<h3>Quem é esta pessoa?</h3>' +
         '<div class="form-grid" style="margin-top:8px">' +
           '<div style="grid-column:1/-1"><label class="lb2">Colaborador já cadastrado</label>' +
-            '<select class="inp" id="apColab"><option value="">— escolha —</option>' +
+            '<select class="inp" id="apColab"><option value="">Escolha</option>' +
               pessoas.map(p => '<option value="' + p.pessoa_id + '"' + (sugerida && sugerida.pessoa_id === p.pessoa_id ? ' selected' : '') + '>' +
                 esc(p.nome) + ' · ' + esc(p.matricula) + (p.tem_biometria ? '' : ' · sem cadastro facial') + '</option>').join('') + '</select>' +
             (sugerida ? '<p class="nota" style="margin:4px 0 0">Sugerido pela matrícula informada.</p>' : '') + '</div>' +
@@ -1355,14 +1355,14 @@ export const Rh = {
           '<div class="form-grid" style="margin-top:8px">' +
             '<div><label class="lb2">Nome</label><input class="inp" id="apNovoNome"></div>' +
             '<div><label class="lb2">Matrícula</label><input class="inp" id="apNovoMat" value="' + esc(mat) + '"></div>' +
-            '<div><label class="lb2">Equipe</label><select class="inp" id="apNovoEq"><option value="">— sem equipe —</option>' +
+            '<div><label class="lb2">Equipe</label><select class="inp" id="apNovoEq"><option value="">Sem equipe</option>' +
               (this.dados.equipes || []).map(e => '<option value="' + e.equipe_id + '">' + esc(e.nome) + '</option>').join('') + '</select></div>' +
           '</div></details>' +
         '<div style="margin-top:12px"><label class="lb2">Decisão (obrigatória para bloquear)</label>' +
           '<input class="inp" id="pendJust" placeholder="Ex.: não é funcionário, aparelho de terceiro"></div>' +
         '<div class="row2" style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">' +
           '<button class="v2btn" data-identificar="' + esc(a.dispositivo_id) + '">Identificar e liberar</button>' +
-          '<button class="v2btn danger" data-bloquear="' + esc(a.dispositivo_id) + '" style="margin-left:auto">Não é da empresa — bloquear</button>' +
+          '<button class="v2btn danger" data-bloquear="' + esc(a.dispositivo_id) + '" style="margin-left:auto">Não é da empresa: bloquear</button>' +
         '</div>' +
         '<p class="nota" style="margin:8px 0 0">Bloquear faz o aparelho parar de enviar (a API recusa) e tira as batidas dele da fila. Só o RH desbloqueia, reativando o colaborador.</p>' +
       '</div>';
@@ -1456,7 +1456,7 @@ export const Rh = {
     const ultimo = ultima
       ? (ultima.marcado_dia === hoje ? '' : (data(ultima.marcado_dia) + ' ')) +
         (ultima.tipo === 'entrada' ? 'E ' : 'S ') + hora(ultima.marcado_em)
-      : '— sem registro';
+      : 'sem registro';
     return { status, ultimo };
   },
 
@@ -1599,7 +1599,7 @@ export const Rh = {
               rs.ignoradas.slice(0, 8).map(x => 'linha ' + x.linha + ' (' + esc(x.nome || x.matricula || '?') + ': ' + esc(x.motivo) + ')').join('; ') +
               (rs.ignoradas.length > 8 ? '…' : '') + '</p>' : '') +
           '<div style="overflow:auto;max-height:260px"><table class="tabdados"><thead><tr><th>Matrícula</th><th>Nome</th><th>Equipe</th><th>Status</th><th></th></tr></thead><tbody>' +
-            amostra.map(l => '<tr><td class="mono">' + esc(l.matricula) + '</td><td>' + esc(l.nome) + '</td><td>' + esc(l.equipe || '—') + '</td>' +
+            amostra.map(l => '<tr><td class="mono">' + esc(l.matricula) + '</td><td>' + esc(l.nome) + '</td><td>' + esc(l.equipe || '-') + '</td>' +
               '<td>' + (l.ativo ? 'ativo' : '<span class="badfg">inativo</span>') + '</td><td class="nota">' + (l.existe ? 'atualiza' : 'novo') + '</td></tr>').join('') +
           '</tbody></table></div>' +
           (linhas.length > amostra.length ? '<p class="nota" style="margin:6px 0 0">… e mais ' + (linhas.length - amostra.length) + ' linha(s).</p>' : '') +
@@ -1710,7 +1710,7 @@ export const Rh = {
       '</div>';
     const copiar = async (valor, ok) => {
       try { await navigator.clipboard.writeText(valor); toast(ok, 'ok'); }
-      catch (e) { toast('Não consegui copiar — selecione manualmente', 'warn'); }
+      catch (e) { toast('Não consegui copiar. Selecione manualmente', 'warn'); }
     };
     $('areaBio').querySelectorAll('button[data-copiar]').forEach(b => {
       b.onclick = () => copiar(b.dataset.copiar, 'Copiado');
@@ -2027,9 +2027,9 @@ export const Rh = {
           podeEditarJornadas(d.acesso) ? '<button class="v2btn ghost mini" id="eqIrJornadas">Alterar</button>' : '') +
         fato('Escala', escalas.length
           ? escalas.map(pl => esc(pl.nome || e.nome)).join(', ')
-          : '<span style="color:var(--v2-mut2)">nenhuma — usa o local</span>',
+          : '<span style="color:var(--v2-mut2)">nenhuma, usa o local</span>',
           pode(d.acesso, 'operacao') ? '<button class="v2btn ghost mini" id="eqIrEscala">' + (escalas.length || !pode(d.acesso, 'operacao', true) ? 'Ver' : 'Criar') + '</button>' : '') +
-        fato('Supervisor', sup ? esc(sup.nome) : '<span style="color:var(--v2-mut2)">—</span>') +
+        fato('Supervisor', sup ? esc(sup.nome) : '<span style="color:var(--v2-mut2)">-</span>') +
         fato('Afastamento', e.afastamento ? 'Sim: não bate ponto' : 'Não',
           edita ? '<button class="v2btn ghost mini" id="eqAfastamento">' + (e.afastamento ? 'Voltar a ser equipe de trabalho' : 'Marcar como afastamento') + '</button>' : '') +
       '</div></div>' +
@@ -2041,7 +2041,7 @@ export const Rh = {
                    : '<p class="nota" style="margin:0">Nenhum colaborador nesta equipe.</p>') +
         (candidatos.length && edita ?
           '<div class="eq-vincular" style="margin-top:12px">' +
-            '<select class="inp" id="eqVincSel"><option value="">— vincular um colaborador de fora do Bitrix —</option>' +
+            '<select class="inp" id="eqVincSel"><option value="">Vincular um colaborador de fora do Bitrix</option>' +
               candidatos.map(p => '<option value="' + esc(p.pessoa_id) + '">' + esc(p.nome) +
                 (p.equipe_id ? ' · ' + esc(this.nomeEquipe(p.equipe_id)) : ' · sem equipe') + '</option>').join('') +
             '</select><button class="v2btn" id="eqVincBtn">Vincular</button></div>' : '') +
@@ -2108,7 +2108,7 @@ export const Rh = {
   abrirLocalDaEquipe(eq) {
     if (!eq) return;
     this.equipeAberta = eq.equipe_id;
-    $('eqLocalTit').textContent = 'Local da equipe — ' + eq.nome;
+    $('eqLocalTit').textContent = 'Local da equipe: ' + eq.nome;
     $('eqLocalModal').classList.remove('hide');
     LocalEquipe.abrir(this, eq, {
       alvo: 'equipeLocalEditor',
@@ -2429,6 +2429,10 @@ export const Rh = {
     const salvar = async dados => {
       const r = await ApiRh.config(this.token, { dados });
       if (!r.ok) { toast(r.erro || 'Falha ao salvar', 'bad'); return; }
+      // A prévia muda na hora: a recarga completa do painel leva alguns segundos.
+      this.dados.config = Object.assign(this.dados.config || {}, dados);
+      Object.assign(window.EFRAT_CFG, dados);
+      this.pintar();
       toast('Folha de ponto salva', 'ok');
       await this.recarregar();
     };
@@ -2682,8 +2686,8 @@ export const Rh = {
       '<table class="adtable"><thead><tr><th>Dia</th><th>Equipe</th><th>Previstas</th><th>Trabalhadas</th><th>Saldo</th><th>Atraso</th><th>Situação</th></tr></thead><tbody>' +
       l.dias.map(x => '<tr><td>' + esc(this.dataCurta(x.dia)) + '</td><td>' + esc(this.nomeEquipe(x.equipe_id)) + '</td>' +
         '<td class="mono">' + fmtMinutos(x.previsto) + '</td><td class="mono">' + fmtMinutos(x.trabalhado) + '</td>' +
-        '<td class="mono"' + (x.saldo != null ? saldoCls(x.saldo) : '') + '>' + (x.saldo != null ? fmtMinutos(x.saldo, true) : '—') + '</td>' +
-        '<td class="mono">' + (x.atraso ? fmtMinutos(x.atraso) : '—') + '</td>' +
+        '<td class="mono"' + (x.saldo != null ? saldoCls(x.saldo) : '') + '>' + (x.saldo != null ? fmtMinutos(x.saldo, true) : '-') + '</td>' +
+        '<td class="mono">' + (x.atraso ? fmtMinutos(x.atraso) : '-') + '</td>' +
         '<td>' + esc(this.rotuloSituacaoDia(x, ST)) + (x.a_confirmar ? ' · ' + fmtMinutos(x.a_confirmar) + ' pendentes' : '') +
           (x.intervalo_descontado ? ' · <span class="nota" title="Só 2 batidas: o intervalo da jornada foi descontado">intervalo ' + fmtMinutos(x.intervalo_descontado) + ' descontado</span>' : '') +
           (x.na_tolerancia ? ' · <span class="nota">dentro da tolerância</span>' : '') + '</td></tr>').join('') +
@@ -2694,9 +2698,9 @@ export const Rh = {
         return '<tr><td><b>' + esc(l.nome) + '</b><div class="nota">Matrícula ' + esc(l.matricula) + '</div></td>' +
           '<td class="mono">' + fmtMinutos(t.previsto) + '</td><td class="mono">' + fmtMinutos(t.trabalhado) + '</td>' +
           '<td class="mono"' + saldoCls(t.saldo) + '><b>' + fmtMinutos(t.saldo, true) + '</b></td>' +
-          '<td>' + (t.atrasos ? t.atrasos + ' · ' + fmtMinutos(t.atraso_min) : '—') + '</td>' +
-          '<td>' + (t.faltas || '—') + '</td><td>' + (t.incompletos || '—') + '</td>' +
-          '<td>' + (t.dias_a_confirmar ? t.dias_a_confirmar + ' dia(s) · ' + fmtMinutos(t.a_confirmar) : '—') + '</td>' +
+          '<td>' + (t.atrasos ? t.atrasos + ' · ' + fmtMinutos(t.atraso_min) : '-') + '</td>' +
+          '<td>' + (t.faltas || '-') + '</td><td>' + (t.incompletos || '-') + '</td>' +
+          '<td>' + (t.dias_a_confirmar ? t.dias_a_confirmar + ' dia(s) · ' + fmtMinutos(t.a_confirmar) : '-') + '</td>' +
           '<td style="text-align:right"><button class="v2btn ghost mini" data-hr-det="' + esc(l.pessoa_id) + '">Dias</button></td></tr>' + diasHtml(l); }).join('') +
       '</tbody></table></div>';
     $('hrSaida').querySelectorAll('[data-hr-det]').forEach(b => {
@@ -3250,8 +3254,8 @@ export const Rh = {
       '<tr><td class="mono" style="white-space:nowrap">' + esc(String(c.criada_em).slice(0, 16).replace('T', ' ')) + '</td>' +
       '<td>' + esc(c.usuario_rh_nome || c.usuario_rh_login || 'RH') + '</td>' +
       '<td><span class="pill ' + pillAcao(c) + '"><span class="dot"></span>' + esc(rotAcao(c)) + '</span></td>' +
-      '<td>' + esc(c.pessoa_nome || (c.alvo_tipo === 'template' ? 'recadastro' : '—')) + '</td>' +
-      '<td style="color:#64748b">' + esc(c.motivo || '—') + '</td></tr>';
+      '<td>' + esc(c.pessoa_nome || (c.alvo_tipo === 'template' ? 'recadastro' : '-')) + '</td>' +
+      '<td style="color:#64748b">' + esc(c.motivo || '-') + '</td></tr>';
 
     $('rh-auditoria').innerHTML =
       '<div class="pg-head"><div><h1 class="tit">Auditoria</h1>' +
@@ -3304,13 +3308,13 @@ export const Rh = {
         '<p class="sub">Parâmetros da operação, dados da empresa e acesso do RH.</p></div></div>' +
 
       '<div class="cfg-sec"><h2>Anti-fraude e operação</h2>' +
-        '<p class="cap">Estes valores são o PADRÃO da empresa: valem para toda equipe, local e escala que não definir o seu próprio. Equipe nova (inclusive a que chega do Bitrix) já nasce com eles — só o local dela precisa ser apontado.</p>' +
+        '<p class="cap">Estes valores são o PADRÃO da empresa: valem para toda equipe, local e escala que não definir o seu próprio. Equipe nova (inclusive a que chega do Bitrix) já nasce com eles; só o local dela precisa ser apontado.</p>' +
         '<div class="form-grid">' +
           '<div><label class="lb2">Limiar facial (aceite)</label><input class="inp" id="cfLimiar" type="number" step="0.01" min="0.2" max="0.9" value="' + (cfg.limiarAceite ?? 0.45) + '"></div>' +
           '<div><label class="lb2">Raio de cerca padrão (m)</label><input class="inp" id="cfRaio" type="number" min="30" max="5000" value="' + (cfg.raioPadraoM ?? 200) + '"></div>' +
           '<div><label class="lb2">Tolerância GPS (m)</label><input class="inp" id="cfGps" type="number" min="0" max="500" value="' + (cfg.toleranciaGpsM ?? 100) + '"></div>' +
           '<div><label class="lb2">Jornada padrão</label><select class="inp" id="cfJornada">' +
-            '<option value="">— sem jornada padrão —</option>' +
+            '<option value="">Sem jornada padrão</option>' +
             (this.dados.jornadas || []).map(j => '<option value="' + esc(j.jornada_id) + '"' + (cfg.jornadaPadraoId === j.jornada_id ? ' selected' : '') + '>' +
               esc(j.nome) + ' · ' + esc(j.entrada) + '–' + esc(j.saida) + '</option>').join('') + '</select></div>' +
           '<div><label class="lb2">Hora-limite de entrada</label><input class="inp" id="cfHora" type="time" value="' + (cfg.horaEntrada || '08:00') + '"' +
@@ -3428,7 +3432,7 @@ export const Rh = {
         const z = await ApiRh.config(this.token, { acao: 'zerar_empresa', confirmacao: inp.value.trim() });
         if (!z.ok) { ex.disabled = false; ex.textContent = 'Zerar dados da empresa'; toast(z.erro || 'Falha ao zerar', 'bad'); return; }
         const a = z.dados.apagado || {};
-        toast('Empresa zerada: ' + (a.colaborador || 0) + ' colaboradores, ' + (a.equipe || 0) + ' equipes, ' + (a.marcacao || 0) + ' marcações apagadas' + (z.dados.trigger_imutabilidade_ok ? '' : ' — ATENÇÃO: trigger de imutabilidade não religou'), z.dados.trigger_imutabilidade_ok ? 'ok' : 'bad');
+        toast('Empresa zerada: ' + (a.colaborador || 0) + ' colaboradores, ' + (a.equipe || 0) + ' equipes, ' + (a.marcacao || 0) + ' marcações apagadas' + (z.dados.trigger_imutabilidade_ok ? '' : '. ATENÇÃO: trigger de imutabilidade não religou'), z.dados.trigger_imutabilidade_ok ? 'ok' : 'bad');
         this.equipeAberta = null;
         await this.recarregar();
       };
@@ -3465,7 +3469,7 @@ export const Rh = {
       const r = await ApiRh.config(this.token, { acao: 'novo_token_integracao' });
       if (!r.ok) { toast(r.erro || 'Falha', 'bad'); return; }
       this._tokenInteg = r.dados.token;
-      toast('Token gerado — copie agora, ele não aparece de novo', 'ok');
+      toast('Token gerado. Copie agora, ele não aparece de novo', 'ok');
       await this.recarregar();
     };
     const rv = $('btnRevogarInteg');
@@ -3524,8 +3528,8 @@ export const Rh = {
     const quando = isNaN(q) ? esc(ib.ultima_sync) : data(this.diaFuso(q.toISOString())) + ' ' + hora(q.toISOString());
     const avisos = (ib.avisos || []);
     const descAviso = a => {
-      if (a.tipo === 'contato_em_mais_de_um_card') return 'Contato ' + esc(a.contato) + ' está em ' + (a.cards || []).length + ' cards (' + (a.cards || []).map(esc).join(', ') + ') — vale o aberto mais recente';
-      if (a.tipo === 'card_sem_contato') return 'Card ' + esc(a.card) + (a.titulo ? ' "' + esc(a.titulo) + '"' : '') + ' sem contato vinculado — ignorado';
+      if (a.tipo === 'contato_em_mais_de_um_card') return 'Contato ' + esc(a.contato) + ' está em ' + (a.cards || []).length + ' cards (' + (a.cards || []).map(esc).join(', ') + '): vale o aberto mais recente';
+      if (a.tipo === 'card_sem_contato') return 'Card ' + esc(a.card) + (a.titulo ? ' "' + esc(a.titulo) + '"' : '') + ' sem contato vinculado, ignorado';
       if (a.tipo === 'matricula_em_uso_por_outro_contato') return esc(a.nome) + ' (contato ' + esc(a.contato) + ') não entrou: a matrícula já pertence a outra pessoa';
       return esc(a.tipo) + (a.card ? ' · card ' + esc(a.card) : '') + (a.etapa ? ' · etapa ' + esc(a.etapa) : '');
     };
@@ -3536,7 +3540,7 @@ export const Rh = {
         avisos.slice(0, 10).map(a => '<li>' + descAviso(a) + '</li>').join('') + (avisos.length > 10 ? '<li>…</li>' : '') + '</ul></div>' : '');
   },
   htmlTokenNovo(token) {
-    return '<div class="cod-linha" style="margin-top:10px"><div class="cod-info"><span class="lb">Token de integração (copie agora — não aparece de novo)</span>' +
+    return '<div class="cod-linha" style="margin-top:10px"><div class="cod-info"><span class="lb">Token de integração (copie agora, não aparece de novo)</span>' +
       '<div class="mono cod">' + esc(token) + '</div></div>' +
       '<button class="act ghost mini" id="cpTokenInteg" data-copiar="' + esc(token) + '">Copiar</button></div>';
   },

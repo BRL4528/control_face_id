@@ -107,7 +107,7 @@ export const Alocacao = {
               '>' + esc(e.nome) + '</option>').join('') + '</select></div>' +
         '</div>' +
         '<label class="lb">Local (cerca)</label>' +
-        '<select id="alLocal"><option value="">— escolha um local salvo ou defina abaixo —</option>' +
+        '<select id="alLocal"><option value="">Escolha um local salvo ou defina abaixo</option>' +
           locais.map(l => '<option value="' + l.local_id + '">' + esc(l.nome) + ' · ' + l.raio_m + 'm</option>').join('') +
         '</select>' +
         // Barra de localização: buscar endereço, colar coord/link do Maps, ou usar o GPS.
@@ -295,7 +295,7 @@ export const Alocacao = {
     const sel = $('alLocal');
     if (sel) {
       const locais = (this.rh.dados.locais || []);
-      sel.innerHTML = '<option value="">— escolha um local salvo ou defina abaixo —</option>' +
+      sel.innerHTML = '<option value="">Escolha um local salvo ou defina abaixo</option>' +
         locais.map(l => '<option value="' + l.local_id + '">' + esc(l.nome) + ' · ' + l.raio_m + 'm</option>').join('');
     }
   },

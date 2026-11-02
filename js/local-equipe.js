@@ -37,7 +37,7 @@ export const LocalEquipe = {
           'O raio já vem do padrão da empresa; mexa só se esta obra precisar de outro.</p>' +
         (locais.length ?
           '<label class="lb2" style="margin-top:10px">Usar um local já salvo</label>' +
-          '<select class="inp" id="lqSalvo"><option value="">— novo ponto no mapa —</option>' +
+          '<select class="inp" id="lqSalvo"><option value="">Novo ponto no mapa</option>' +
             locais.map(l => '<option value="' + esc(l.local_id) + '"' + (this.localId === l.local_id ? ' selected' : '') + '>' +
               esc(l.nome) + ' · ' + l.raio_m + 'm</option>').join('') + '</select>' : '') +
         '<label class="lb2" style="margin-top:10px">Nome do local</label>' +

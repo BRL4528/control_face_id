@@ -374,7 +374,7 @@ async function abrirPonto() {
       } else if (!template && S.dispositivo.colaborador) {
         toast(r.erro || 'Não consegui carregar seus dados', 'bad'); return;
       } else {
-        toast('Sem rede — usando os dados salvos', 'warn');
+        toast('Sem rede: usando os dados salvos', 'warn');
       }
     }
     // Afastado (INSS, licença): o RH tirou a batida; a câmera nem abre. Ao voltar,

@@ -33,7 +33,7 @@ export function criarCercaMapa(opts) {
       const locais = (this.rh.dados.locais || []);
       return (this.comLocais
         ? '<label class="lb2">Local (cerca)</label>' +
-          '<select class="inp" id="' + id('Local') + '"><option value="">— escolha um local salvo ou defina no mapa —</option>' +
+          '<select class="inp" id="' + id('Local') + '"><option value="">Escolha um local salvo ou defina no mapa</option>' +
             locais.map(l => '<option value="' + esc(l.local_id) + '">' + esc(l.nome) + ' · ' + l.raio_m + 'm</option>').join('') +
           '</select>'
         : '') +

@@ -51,7 +51,7 @@ function yaw(landmarks) {
   return (nariz.x - meio) / vao;
 }
 
-export const DICA_ADORNO = 'Nenhum rosto — tire óculos escuros, máscara ou touca';
+export const DICA_ADORNO = 'Nenhum rosto. Tire óculos escuros, máscara ou touca';
 
 function avaliar(det, canvas, boxCheia) {
   const c = cfg();
