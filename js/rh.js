@@ -836,7 +836,7 @@ export const Rh = {
       return '<div class="aten"><div class="aten-top">' + sevPill(x.severidade) +
         '<span class="aten-tit">' + esc(x.rotulo) + '</span>' +
         '<span class="aten-hora">' + esc(x.hora) + '</span></div>' +
-        '<div class="aten-sub">' + (x.tipo === 'aparelho' ? esc((x.aparelho.matricula_informada ? 'Matrícula informada ' + x.aparelho.matricula_informada : 'Quem é?') + ' · ' + (x.aparelho.marcacoes || []).length + ' batida(s)') : esc(p ? p.nome : x.pessoa_id) + ' · ' + esc(this.nomeEquipe(x.equipe_id))) + '</div>' +
+        '<div class="aten-sub">' + (x.tipo === 'aparelho' ? esc((x.aparelho.matricula_informada ? 'Matrícula informada ' + x.aparelho.matricula_informada : this.pareceSer(x.aparelho)) + ' · ' + (x.aparelho.marcacoes || []).length + ' batida(s)') : esc(p ? p.nome : x.pessoa_id) + ' · ' + esc(this.nomeEquipe(x.equipe_id))) + '</div>' +
         '<button class="v2btn ghost mini" data-exc="' + esc(x.id) + '" style="margin-top:9px">Analisar</button></div>';
     }).join('') || '<div class="aten"><div class="aten-sub">Nada requer atenção agora. 🎉</div></div>';
 
@@ -1151,7 +1151,7 @@ export const Rh = {
           '<span class="hora">' + esc(x.hora) + '</span></div>' +
         '<div class="tit">' + esc(x.rotulo) + '</div>' +
         '<div class="who">' + (x.tipo === 'aparelho'
-            ? esc((x.aparelho.matricula_informada ? 'Matrícula informada: ' + x.aparelho.matricula_informada : 'Quem é?') +
+            ? esc((x.aparelho.matricula_informada ? 'Matrícula informada: ' + x.aparelho.matricula_informada : this.pareceSer(x.aparelho)) +
                   ' · ' + (x.aparelho.marcacoes || []).length + ' batida(s)')
             : esc(p ? p.nome : x.pessoa_id) + ' · ' + esc(this.nomeEquipe(x.equipe_id))) + '</div>' +
         '<div class="est">' + (x.tipo === 'aparelho' ? 'Identificar ou bloquear' : est) + '</div></button>';
@@ -1316,10 +1316,21 @@ export const Rh = {
    * "é esta pessoa" (lista de colaboradores, pré-selecionada pela matrícula
    * informada; ou cadastrar novo) ou "bloquear" (não é da empresa).
    */
+  /** Rótulo curto do aparelho pendente sem matrícula: "Parece ser Fulano" ou "Quem é?". */
+  pareceSer(a) {
+    const s = (a.sugestoes || [])[0];
+    const p = s && (this.dados.pessoas || []).find(x => x.pessoa_id === s.colaborador_id);
+    return p ? 'Parece ser ' + p.nome : 'Quem é?';
+  },
+
   htmlDetalheAparelho(a) {
     const pessoas = (this.dados.pessoas || []).filter(p => p.ativo).slice().sort((x, y) => x.nome.localeCompare(y.nome));
     const mat = (a.matricula_informada || '').trim();
-    const sugerida = mat ? pessoas.find(p => String(p.matricula).trim() === mat) : null;
+    const porMatricula = mat ? pessoas.find(p => String(p.matricula).trim() === mat) : null;
+    // Sugestões pelo rosto (calculadas no servidor contra os cadastros faciais ativos).
+    const aceite = Number((window.EFRAT_CFG || {}).limiarAceite) || 0.45;
+    const porRosto = (a.sugestoes || []).map(s => Object.assign({ p: pessoas.find(p => p.pessoa_id === s.colaborador_id) }, s)).filter(s => s.p);
+    const sugerida = porMatricula || (porRosto[0] && porRosto[0].p) || null;
     const foto = a.miniatura || ((a.marcacoes || []).find(m => m.foto_url) || {}).foto_url;
     const marcs = (a.marcacoes || []);
     const linha = m => '<tr><td>' + esc(this.dataCurta(m.marcado_dia)) + ' · <span class="mono">' + esc(hora(m.marcado_em)) + '</span></td>' +
@@ -1349,7 +1360,15 @@ export const Rh = {
             '<select class="inp" id="apColab"><option value="">Escolha</option>' +
               pessoas.map(p => '<option value="' + p.pessoa_id + '"' + (sugerida && sugerida.pessoa_id === p.pessoa_id ? ' selected' : '') + '>' +
                 esc(p.nome) + ' · ' + esc(p.matricula) + (p.tem_biometria ? '' : ' · sem cadastro facial') + '</option>').join('') + '</select>' +
-            (sugerida ? '<p class="nota" style="margin:4px 0 0">Sugerido pela matrícula informada.</p>' : '') + '</div>' +
+            (porMatricula ? '<p class="nota" style="margin:4px 0 0">Sugerido pela matrícula informada.</p>'
+              : sugerida ? '<p class="nota" style="margin:4px 0 0">Sugerido pelo rosto. Confira a foto antes de identificar.</p>' : '') + '</div>' +
+          (porRosto.length ? '<div style="grid-column:1/-1"><label class="lb2">Pelo rosto, parece ser</label>' +
+            '<div style="display:flex;gap:10px;flex-wrap:wrap">' + porRosto.map(s =>
+              '<button type="button" class="v2btn ghost" data-sugerir="' + esc(s.p.pessoa_id) + '" style="display:flex;gap:8px;align-items:center;text-align:left">' +
+                (s.p.miniatura ? '<img src="' + esc(s.p.miniatura) + '" alt="" style="width:36px;height:36px;border-radius:8px;object-fit:cover">' : '') +
+                '<span><b>' + esc(s.p.nome) + '</b><br><span class="nota">distância ' + s.distancia.toFixed(2).replace('.', ',') +
+                (s.distancia <= aceite ? ' · confere' : ' · parecido, confira') + '</span></span></button>').join('') + '</div></div>'
+            : a.tem_rosto ? '<div style="grid-column:1/-1"><p class="nota" style="margin:0">O rosto deste aparelho não se parece com nenhum cadastro facial da empresa.</p></div>' : '') +
         '</div>' +
         '<details style="margin-top:10px"><summary class="nota" style="cursor:pointer">Não está na lista? Cadastrar novo colaborador</summary>' +
           '<div class="form-grid" style="margin-top:8px">' +
@@ -1373,6 +1392,9 @@ export const Rh = {
     if (!cont) return;
     const just = () => (($('pendJust') && $('pendJust').value) || '').trim();
 
+    cont.querySelectorAll('button[data-sugerir]').forEach(b => {
+      b.onclick = () => { $('apColab').value = b.dataset.sugerir; };
+    });
     cont.querySelectorAll('button[data-identificar]').forEach(b => {
       b.onclick = async () => {
         const colab = $('apColab').value;

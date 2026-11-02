@@ -84,3 +84,20 @@ test('marcacoesDoServidorParaGravar: dedup por id_cliente; cópia local sem dono
   assert.equal(r[0].origem_servidor, true);
   assert.deepEqual(marcacoesDoServidorParaGravar(undefined, [], []), []);
 });
+
+test('sugerirPessoas: rosto do aparelho novo aponta quem ele parece ser', async () => {
+  const { sugerirPessoas } = await import('../../js/regras.js');
+  const v = (x, n = 4) => Array.from({ length: n }, (_, i) => x + i * 0.01);
+  const templates = [
+    { colaborador_id: 'ana', vetores: [v(0.5), v(0.1)] },     // o 2º vetor dela é o mais perto
+    { colaborador_id: 'bia', vetores: [v(0.3)] },
+    { colaborador_id: 'caio', vetores: [v(0.9)] },             // longe demais: fora
+    { colaborador_id: 'dani', vetores: [[1, 2]] }              // tamanho diferente: ignorado
+  ];
+  const s = sugerirPessoas([v(0.12)], templates, { ate: 0.6 });
+  assert.deepEqual(s.map(x => x.colaborador_id), ['ana', 'bia']);
+  assert.equal(s[0].distancia, 0.04);
+  assert.deepEqual(sugerirPessoas([], templates), []);
+  assert.deepEqual(sugerirPessoas(null, templates), []);
+  assert.equal(sugerirPessoas([v(0.12)], templates, { ate: 0.6, max: 1 }).length, 1);
+});

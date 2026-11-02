@@ -11,6 +11,7 @@ import { db } from '../_lib/db.js';
 import { autenticarRh } from '../_lib/auth.js';
 import { acessoDe, visaoDados, ocorrenciasVisiveis } from '../_lib/acesso.js';
 import { pode, obrasDe, perfilDe, PERFIS } from '../../js/acessos.js';
+import { sugerirPessoas } from '../../js/regras.js';
 import { cors, ok, erro, exigeMetodo } from '../_lib/http.js';
 
 function diaNoFuso(d, fuso) {
@@ -39,6 +40,23 @@ export function respostaSenhaTemporaria({ rh, empresa, acesso, dias, hoje, perfi
     equipes: [], pessoas: [], marcacoes: [], locais: [], jornadas: [], planos: [], papeis: [], ocorrencias: [],
     usuarios_rh: [], correcoes: [], alocacoes: [], alocacoes_hoje: [], recadastros: []
   };
+}
+
+/**
+ * Aparelho novo pelo link: compara o rosto da 1ª captura com os cadastros faciais
+ * ativos da empresa e sugere quem parece ser (até a zona cinzenta). Os vetores
+ * ficam no servidor; o painel recebe só nome e distância.
+ */
+async function comSugestoes(sql, empresa, aparelhos, cfg) {
+  const comRosto = aparelhos.filter(a => Array.isArray(a.vetores) && a.vetores.length);
+  const templates = comRosto.length ? await sql`
+    SELECT t.colaborador_id, t.vetores FROM template_facial t JOIN colaborador c ON c.id = t.colaborador_id
+    WHERE c.empresa_id = ${empresa} AND c.ativo = true AND t.estado = 'ativo'` : [];
+  const cinza = Number((cfg || {}).limiarCinza) || 0.58;
+  return aparelhos.map(({ vetores, ...a }) => Object.assign(a, {
+    tem_rosto: Array.isArray(vetores) && vetores.length > 0,
+    sugestoes: sugerirPessoas(vetores, templates, { ate: cinza })
+  }));
 }
 
 async function dadosSenhaTemporaria(sql, rh, acesso, dias) {
@@ -115,7 +133,7 @@ export default async function handler(req, res) {
     // Aparelhos que bateram ponto pelo link da empresa e o RH ainda não identificou,
     // com as marcações deles (sem colaborador) para o RH ver hora, GPS e foto.
     sql`SELECT d.id AS dispositivo_id, d.matricula_informada, d.ua, d.pareado_em, d.visto_em,
-               d.cadastro->>'miniatura_url' AS miniatura,
+               d.cadastro->>'miniatura_url' AS miniatura, d.cadastro->'vetores' AS vetores,
                COALESCE((SELECT json_agg(json_build_object(
                    'id_cliente', m.id_cliente, 'tipo', m.tipo, 'marcado_em', m.marcado_em,
                    'marcado_dia', to_char(m.marcado_dia,'YYYY-MM-DD'), 'lat', m.lat, 'lng', m.lng,
@@ -158,13 +176,14 @@ export default async function handler(req, res) {
     pla = planos.filter(p => ok_.has(p.equipe_id));
   }
   const alocacoesHoje = alo.filter(a => a.dia === hoje);
+  const pendentes = obras || !pode(acesso, 'ponto', true) ? [] : await comSugestoes(sql, empresa, aparelhosPendentes, configRow[0] && configRow[0].dados);
   const verConfig = pode(acesso, 'config');
 
   return ok(res, {
     usuario: { id: rh.sub, nome: rh.nome, usuario: rh.usuario },
     empresa_id: empresa,   // o app do colaborador usa como "código da empresa" no pareamento
     empresa: empresaRow[0] || { nome: '', fuso: 'America/Campo_Grande', link_token: null },
-    aparelhos_pendentes: obras || !pode(acesso, 'ponto', true) ? [] : aparelhosPendentes,
+    aparelhos_pendentes: pendentes,
     acesso: { perfil: perfilDe(acesso), rotulo: PERFIS[perfilDe(acesso)].rotulo, obras },
     config: (configRow[0] && configRow[0].dados) || {},
     periodo_dias: dias,

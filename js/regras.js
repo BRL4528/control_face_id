@@ -139,6 +139,28 @@ export function euclidiana(a, b) {
   return Math.sqrt(s);
 }
 
+/**
+ * Quem o rosto de um aparelho novo parece ser: compara os descritores da captura
+ * com os cadastros faciais ativos da empresa (menor distância entre os pares) e
+ * devolve até `max` pessoas com distância até `ate`, da mais parecida à menos.
+ * `templates`: [{ colaborador_id, vetores: [[...128]] }]. Só sugere: quem decide é o RH.
+ */
+export function sugerirPessoas(vetores, templates, { ate = 0.6, max = 3 } = {}) {
+  if (!Array.isArray(vetores) || !vetores.length) return [];
+  const melhor = new Map();
+  for (const t of templates || []) {
+    for (const v of t.vetores || []) {
+      for (const c of vetores) {
+        if (!Array.isArray(v) || !Array.isArray(c) || v.length !== c.length) continue;
+        const d = euclidiana(c, v);
+        if (d <= ate && !(melhor.get(t.colaborador_id) <= d)) melhor.set(t.colaborador_id, d);
+      }
+    }
+  }
+  return [...melhor].map(([colaborador_id, d]) => ({ colaborador_id, distancia: Math.round(d * 1000) / 1000 }))
+    .sort((a, b) => a.distancia - b.distancia).slice(0, max);
+}
+
 /** Dia (YYYY-MM-DD) de um instante. Com `fuso`, no relógio dele; sem, em UTC (legado). */
 export function dia(iso, fuso) {
   if (fuso) {
