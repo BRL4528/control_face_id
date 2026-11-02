@@ -49,40 +49,43 @@ export function inconsistencias({ marcacoes = [], linhas = [], pessoas = [], equ
   };
   const item = (m, detalhe) => ({ pessoa: pessoa(m.pessoa_id).nome || '', equipe: nomeEq(m.equipe_id), dia: m.marcado_dia, detalhe });
 
-  /* ---- 1. Cerca provavelmente no lugar errado: a equipe bate sempre no mesmo ponto, longe dela. */
+  /* ---- 1. Lugar fora das cercas usado com frequência: a cerca da obra está no lugar
+     errado ou a turma está trabalhando noutro lugar. Agrupa por região (até 10 km da
+     1ª batida do aglomerado), juntando pessoas de equipes diferentes que estão lá. */
   const fora = validas.filter(m => m.dentro_cerca === false && m.lat != null && m.lng != null);
   const usadas = new Set();
-  const porEquipe = new Map();
-  for (const m of fora) { if (!porEquipe.has(m.equipe_id)) porEquipe.set(m.equipe_id, []); porEquipe.get(m.equipe_id).push(m); }
-  for (const [eqId, ms] of porEquipe) {
-    // Agrupa por vizinhança (~2 km) em torno da 1ª batida de cada aglomerado.
-    const aglos = [];
-    for (const m of ms) {
-      const a = aglos.find(x => metros(x.lat, x.lng, m.lat, m.lng) <= 2000);
-      if (a) a.ms.push(m); else aglos.push({ lat: m.lat, lng: m.lng, ms: [m] });
-    }
+  const aglos = [];
+  for (const m of fora) {
+    const a = aglos.find(x => metros(x.lat, x.lng, m.lat, m.lng) <= 10000);
+    if (a) a.ms.push(m); else aglos.push({ lat: m.lat, lng: m.lng, ms: [m] });
+  }
+  for (const a of aglos) {
+    const quem = new Set(a.ms.map(m => m.pessoa_id));
+    const dias = new Set(a.ms.map(m => m.marcado_dia));
+    if (quem.size < 2 || dias.size < 2 || a.ms.length < 6) continue;
+    // Equipe dominante: a de mais batidas no lugar.
+    const cont = new Map();
+    a.ms.forEach(m => cont.set(m.equipe_id, (cont.get(m.equipe_id) || 0) + 1));
+    const eqId = [...cont].sort((x, y) => y[1] - x[1])[0][0];
     const loc = localDaEquipe(eqId);
-    for (const a of aglos) {
-      const quem = new Set(a.ms.map(m => m.pessoa_id));
-      const dias = new Set(a.ms.map(m => m.marcado_dia));
-      const longe = loc ? metros(loc.lat, loc.lng, a.lat, a.lng) : null;
-      if (quem.size < 2 || dias.size < 2 || a.ms.length < 6 || (longe != null && longe < 1000)) continue;
-      a.ms.forEach(m => usadas.add(m));
-      grupos.push({
-        chave: 'cerca_errada', severidade: 'alta',
-        titulo: 'Cerca de ' + nomeEq(eqId) + ' provavelmente no lugar errado',
-        explicacao: plural(quem.size, 'pessoa', 'pessoas') + ' da equipe bateram ' + plural(a.ms.length, 'vez', 'vezes') + ' em ' +
-          plural(dias.size, 'dia', 'dias') + ' no mesmo lugar (' + a.lat.toFixed(4) + ', ' + a.lng.toFixed(4) + ')' +
-          (longe != null ? ', a ' + km(longe) + ' do local cadastrado' : '') + '. Todas caíram em Pendências como "fora da área".',
-        acao: 'Confirme onde fica a obra e ajuste o local da equipe. Depois aprove as batidas em Pendências.',
-        equipe_id: eqId, lat: a.lat, lng: a.lng,
-        itens: [...quem].map(pid => {
-          const dele = a.ms.filter(m => m.pessoa_id === pid);
-          const ds = [...new Set(dele.map(m => m.marcado_dia))].sort();
-          return { pessoa: pessoa(pid).nome || '', equipe: nomeEq(eqId), dia: ds[0], detalhe: plural(dele.length, 'batida', 'batidas') + ' de ' + dm(ds[0]) + ' a ' + dm(ds[ds.length - 1]) };
-        }).sort((x, y) => x.pessoa.localeCompare(y.pessoa))
-      });
-    }
+    const longe = loc ? metros(loc.lat, loc.lng, a.lat, a.lng) : null;
+    a.ms.forEach(m => usadas.add(m));
+    const outras = [...cont.keys()].filter(id => id !== eqId).map(nomeEq);
+    grupos.push({
+      chave: 'cerca_errada', severidade: 'alta',
+      titulo: nomeEq(eqId) + ': batidas sempre no mesmo lugar, longe da cerca',
+      explicacao: plural(quem.size, 'pessoa', 'pessoas') + ' bateram ' + plural(a.ms.length, 'vez', 'vezes') + ' em ' + plural(dias.size, 'dia', 'dias') +
+        ' perto de ' + a.lat.toFixed(4) + ', ' + a.lng.toFixed(4) + (longe != null ? ', a ' + km(longe) + ' do local cadastrado da equipe' : '') +
+        (outras.length ? '. Junto, gente de ' + outras.join(', ') : '') + '. Ou a cerca da obra está no lugar errado, ou a turma está trabalhando em outro lugar.',
+      acao: 'Confirme onde a turma está trabalhando: ajuste o local da equipe ou crie uma escala para o outro lugar. Depois decida as batidas em Pendências.',
+      equipe_id: eqId, lat: a.lat, lng: a.lng,
+      itens: [...quem].map(pid => {
+        const dele = a.ms.filter(m => m.pessoa_id === pid);
+        const ds = [...new Set(dele.map(m => m.marcado_dia))].sort();
+        return { pessoa: pessoa(pid).nome || '', equipe: nomeEq(dele[0].equipe_id), dia: ds[0],
+          detalhe: plural(dele.length, 'batida', 'batidas') + ' de ' + dm(ds[0]) + ' a ' + dm(ds[ds.length - 1]) + (dele.some(m => m.estado === 'pendente') ? ' · há pendentes' : '') };
+      }).sort((x, y) => x.pessoa.localeCompare(y.pessoa))
+    });
   }
 
   /* ---- 2. Fora da cerca, isolado (o que não entrou num aglomerado acima). */

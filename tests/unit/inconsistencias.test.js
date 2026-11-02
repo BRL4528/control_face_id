@@ -20,17 +20,21 @@ const marc = (pessoa_id, dia, hm, tipo, extra) => Object.assign({
 const chaves = gs => gs.map(g => g.chave);
 const base = { pessoas, equipes, locais, hoje: '2026-10-31', fuso: FUSO, cfg: { limiarAceite: 0.45 } };
 
-test('equipe batendo sempre no mesmo lugar longe da cerca vira "cerca no lugar errado", não batida a batida', () => {
+test('turma batendo sempre no mesmo lugar longe da cerca vira um grupo só, com quem é de outra equipe', () => {
   const longe = { dentro_cerca: false, lat: -23.869, lng: -54.327, distancia_cerca_m: 553000, estado: 'pendente' };
   const ms = [];
   for (const d of ['2026-10-29', '2026-10-30', '2026-10-31']) for (const p of ['p1', 'p2']) ms.push(marc(p, d, '07:00', 'entrada', longe));
+  // outro canteiro a ~7 km e alguém da 471 trabalhando junto: mesmo grupo
+  ms.push(marc('p4', '2026-10-30', '07:00', 'entrada', Object.assign({}, longe, { lat: -23.921, lng: -54.286 })));
   ms.push(marc('p3', '2026-10-30', '07:00', 'entrada', { dentro_cerca: false, lat: -20.40, lng: -54.56, distancia_cerca_m: 2138, estado: 'pendente' }));
   const gs = inconsistencias({ ...base, marcacoes: ms });
   const c = gs.find(g => g.chave === 'cerca_errada');
   assert.ok(c, 'agrupa a obra 574');
   assert.equal(c.equipe_id, 'e574');
-  assert.deepEqual(c.itens.map(i => i.pessoa), ['ANA', 'BRUNO']);
-  assert.match(c.explicacao, /6 vezes em 3 dias/);
+  assert.equal(gs.filter(g => g.chave === 'cerca_errada').length, 1);
+  assert.deepEqual(c.itens.map(i => i.pessoa), ['ANA', 'BRUNO', 'DIANA']);
+  assert.match(c.explicacao, /7 vezes em 3 dias/);
+  assert.match(c.explicacao, /Junto, gente de Obra 471/);
   const isolada = gs.find(g => g.chave === 'fora_cerca');
   assert.equal(isolada.itens.length, 1, 'só a batida do CAIO fica avulsa');
   assert.equal(isolada.itens[0].pessoa, 'CAIO');
