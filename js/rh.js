@@ -17,6 +17,7 @@ import {
 } from './regras.js';
 import { $, esc, mostrar, toast, hora, data, definirFuso, reduzirImagem } from './ui.js';
 import { janelaDasFolhas, escreverFolhas, htmlFichaEpi, textoRegistroFacial } from './folha.js';
+import { inconsistencias, htmlRelatorio, linhasCsv, SEVERIDADE } from './inconsistencias.js';
 import { TIPOS_OCORRENCIA, ocorrenciaDoDia } from './ocorrencias.js';
 import { TIPOS_EVENTO, ESTADOS_EVENTO, situacaoCat } from './eventos.js';
 import { TIPOS_ITEM, ESTADOS_ENTREGA, alertasDaEntrega, caVencidoEm, nomeComCodigo, podeCancelarEntrega } from './almox.js';
@@ -223,14 +224,19 @@ export const Rh = {
     this._charts = [];
   },
 
+  /** O perfil de acesso vê esta aba? (o menu esconde e o servidor barra o resto) */
+  podeVerAba(a) {
+    const ac = (this.dados && this.dados.acesso) || null;
+    return !ABA_MODULO[a] || pode(ac, ABA_MODULO[a]);
+  },
+
   pintar() {
     this.destruirGraficos();   // troca de aba mata os gráficos da anterior
     $('rhPeriodo').textContent = 'últimos ' + (this.dados.periodo_dias || this.dias) + ' dias';
 
     // marca o item ativo na sidebar
     // Perfil de acesso: o menu só mostra o que o perfil vê (o servidor barra o resto).
-    const ac = (this.dados && this.dados.acesso) || null;
-    const ve = a => !ABA_MODULO[a] || pode(ac, ABA_MODULO[a]);
+    const ve = a => this.podeVerAba(a);
     document.querySelectorAll('.side-nav [data-aba]').forEach(b => { b.classList.toggle('hide', !ve(b.dataset.aba)); });
     document.querySelectorAll('.side-nav .nav-grupo').forEach(g => { g.classList.toggle('hide', ![...g.querySelectorAll('[data-aba]')].some(b => !b.classList.contains('hide'))); });
     if (this.aba !== 'stub' && !ve(this.aba)) this.aba = Object.keys(ABA_MODULO).find(ve) || 'painel';
@@ -2562,6 +2568,22 @@ export const Rh = {
         '</div>' +
         '<div id="flSaida"></div>' +
       '</div>' +
+      '<div class="v2card" style="padding:15px;margin-top:16px" id="incCard">' +
+        '<h2 style="margin:0 0 4px;font-size:14px;font-weight:600">Relatório de inconsistências</h2>' +
+        '<p style="font-size:12px;color:#64748b;margin:0 0 12px">Tudo o que precisa de atenção no período, agrupado pela causa: cerca no lugar errado, ' +
+          'cadastro facial fraco, pessoa sem batida, faltas, dia incompleto, regras da CLT (extra, intervalo, descanso), aparelho novo e cadastro no Bitrix. ' +
+          'Cada grupo diz o que fazer. Exporta em PDF (timbrado) e CSV.</p>' +
+        '<div class="form-grid" style="margin-bottom:4px">' +
+          '<div><label class="lb2">De</label><input class="inp" type="date" id="incDe" value="' + hoje.slice(0, 8) + '01"></div>' +
+          '<div><label class="lb2">Até</label><input class="inp" type="date" id="incAte" value="' + hoje + '"></div>' +
+          '<div><label class="lb2">Obra</label><select class="inp" id="incObra"><option value="">Todas</option>' +
+            (d.equipes || []).filter(e => e.ativo && !e.afastamento).slice().sort((a, b) => a.nome.localeCompare(b.nome))
+              .map(e => '<option value="' + esc(e.equipe_id) + '">' + esc(e.nome) + '</option>').join('') + '</select></div>' +
+          '<div style="display:flex;align-items:flex-end;gap:8px"><button class="v2btn" id="btnInc">Gerar</button>' +
+            '<button class="v2btn ghost" id="btnIncPdf" disabled>PDF</button><button class="v2btn ghost" id="btnIncCsv" disabled>CSV</button></div>' +
+        '</div>' +
+        '<div id="incSaida"></div>' +
+      '</div>' +
       '<div class="v2card" style="padding:15px;margin-top:16px" id="hrCard">' +
         '<h2 style="margin:0 0 4px;font-size:14px;font-weight:600">Horas por colaborador</h2>' +
         '<p style="font-size:12px;color:#64748b;margin:0 0 12px">Trabalhadas × previstas pela jornada da equipe (descontado o intervalo). ' +
@@ -2580,6 +2602,10 @@ export const Rh = {
 
     this.ligarFiltroFuncao('rFuncao', () => this.pintarRelatorios());
     $('btnHoras').onclick = () => this.gerarHoras();
+    $('btnInc').onclick = () => this.gerarInconsistencias();
+    $('btnIncPdf').onclick = () => this.pdfInconsistencias();
+    $('btnIncCsv').onclick = () => this.csvInconsistencias();
+    if (this.incGerado) this.pintarInconsistencias();
     $('btnFolhas').onclick = () => this.gerarFolhas();
     $('btnCsvMarc').onclick = () => {
       const linhas = marcacoesF.map(m => [
@@ -2684,6 +2710,83 @@ export const Rh = {
   },
 
   /** Relatório de horas: busca o período na API e calcula no cliente (regras.js). */
+  /** Relatório de inconsistências do período (js/inconsistencias.js), agrupado pela causa. */
+  async gerarInconsistencias() {
+    const de = $('incDe').value, ate = $('incAte').value, obra = $('incObra').value;
+    if (!de || !ate || de > ate) { toast('Informe o período', 'warn'); return; }
+    const btn = $('btnInc'); btn.disabled = true;
+    $('incSaida').innerHTML = '<p class="nota">Analisando o período…</p>';
+    const r = await ApiRh.horas(this.token, { de, ate });
+    btn.disabled = false;
+    if (!r.ok) { $('incSaida').innerHTML = '<p class="nota">' + esc(r.erro || 'Falha ao buscar') + '</p>'; return; }
+    const d = this.dados, cfg = window.EFRAT_CFG || {}, fuso = (d.empresa || {}).fuso;
+    const naObra = p => !obra || p.equipe_id === obra;
+    const pessoas = (d.pessoas || []).filter(p => this.passaFuncao(p));
+    const ids = new Set(pessoas.filter(naObra).map(p => p.pessoa_id));
+    const marcacoes = (r.dados.marcacoes || []).filter(m => ids.has(m.pessoa_id) || (obra && m.equipe_id === obra));
+    const linhas = horasPorColaborador({
+      marcacoes: r.dados.marcacoes, alocacoes: r.dados.alocacoes, pessoas: d.pessoas, equipes: d.equipes, jornadas: d.jornadas,
+      jornadaPadrao: this.jornadaPadrao(), de, ate, hoje: this.hojeServidor(), fuso, feriados: cfg.feriados, ocorrencias: r.dados.ocorrencias
+    }).filter(l => ids.has(l.pessoa_id) || (obra && l.dias.some(x => x.equipe_id === obra)));
+    const grupos = inconsistencias({
+      marcacoes, linhas, pessoas: d.pessoas, equipes: d.equipes, locais: d.locais,
+      aparelhos: obra ? [] : (d.aparelhos_pendentes || []),
+      avisosBitrix: obra ? [] : (((d.config || {}).integracao_bitrix || {}).avisos || []),
+      cfg, hoje: this.hojeServidor(), fuso
+    });
+    this.incGerado = { grupos, de, ate, obra: obra ? this.nomeEquipe(obra) : '' };
+    this.pintarInconsistencias();
+  },
+
+  pintarInconsistencias() {
+    const g = this.incGerado, el = $('incSaida');
+    if (!g || !el) return;
+    $('btnIncPdf').disabled = $('btnIncCsv').disabled = !g.grupos.length;
+    if (!g.grupos.length) { el.innerHTML = '<p class="nota" style="color:#12805c">Nenhuma inconsistência no período.</p>'; return; }
+    const ABA = { cerca_errada: 'equipes', fora_cerca: 'pendencias', sem_gps: 'pendencias', pendencia_antiga: 'pendencias', aparelho: 'pendencias',
+      incompleto: 'registros', faltas: 'ocorrencias', sem_batida: 'pessoas', conflito_ocorrencia: 'ocorrencias', cadastro_fraco: 'pessoas' };
+    const ROT = { equipes: 'Abrir Equipes', pendencias: 'Abrir Pendências', registros: 'Abrir Espelho de ponto', ocorrencias: 'Abrir Ocorrências', pessoas: 'Abrir Colaboradores' };
+    const COR = { alta: 'bad', media: 'warn', baixa: 'mut' };
+    const total = g.grupos.reduce((s, x) => s + x.itens.length, 0);
+    const MAX = 200;
+    el.innerHTML = '<p class="nota" style="margin:12px 0 8px">' + total + ' inconsistência(s) em ' + g.grupos.length + ' grupo(s)' +
+        (g.obra ? ' · ' + esc(g.obra) : '') + '</p>' +
+      g.grupos.map((x, i) => '<details class="v2card" style="padding:10px 12px;margin-top:8px"' + (i < 3 ? ' open' : '') + '>' +
+        '<summary style="cursor:pointer;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+          '<span class="pill ' + COR[x.severidade] + '" style="padding:0 7px">' + SEVERIDADE[x.severidade] + '</span>' +
+          '<b>' + esc(x.titulo) + '</b><span class="nota" style="margin:0">' + x.itens.length + '</span></summary>' +
+        '<p class="nota" style="margin:8px 0 4px">' + esc(x.explicacao) + '</p>' +
+        '<p style="font-size:12.5px;margin:0 0 8px"><b>O que fazer:</b> ' + esc(x.acao) +
+          (ABA[x.chave] && this.podeVerAba(ABA[x.chave]) ? ' <button class="v2btn ghost mini" data-inc-aba="' + ABA[x.chave] + '">' + ROT[ABA[x.chave]] + '</button>' : '') + '</p>' +
+        '<div class="tbl-wrap"><table class="adtable"><thead><tr><th>Colaborador</th><th>Equipe</th><th>Dia</th><th>Detalhe</th></tr></thead><tbody>' +
+          x.itens.slice(0, MAX).map(it => '<tr><td>' + esc(it.pessoa) + '</td><td>' + esc(it.equipe) + '</td><td>' + esc(it.dia ? this.dataCurta(it.dia) : '') + '</td><td>' + esc(it.detalhe) + '</td></tr>').join('') +
+          (x.itens.length > MAX ? '<tr><td colspan="4" class="nota">… e mais ' + (x.itens.length - MAX) + ' (veja no CSV)</td></tr>' : '') +
+        '</tbody></table></div></details>').join('');
+    el.querySelectorAll('[data-inc-aba]').forEach(b => {
+      b.onclick = () => { this.aba = b.dataset.incAba; this.stub = null; this.pintar(); };
+    });
+  },
+
+  pdfInconsistencias() {
+    const g = this.incGerado;
+    if (!g) return;
+    const w = janelaDasFolhas();
+    if (!w) { toast('O navegador bloqueou a janela. Libere pop-ups para este site e gere de novo.', 'warn'); return; }
+    const d = this.dados, cfg = window.EFRAT_CFG || {};
+    escreverFolhas(w, null, null, htmlRelatorio(g.grupos, {
+      empresa: { nome: (d.empresa || {}).nome, razao: cfg.razaoSocial, cnpj: cfg.cnpj },
+      de: g.de, ate: g.ate, obra: g.obra, timbrado: cfg.timbrado || null, logo: cfg.logo || null,
+      geradoEm: data(this.hojeServidor()) + ' ' + hora(new Date().toISOString())
+    }));
+  },
+
+  csvInconsistencias() {
+    const g = this.incGerado;
+    if (!g) return;
+    const { cabecalho, linhas } = linhasCsv(g.grupos);
+    this.baixarCsv('inconsistencias-' + g.de + '_' + g.ate + '.csv', cabecalho, linhas);
+  },
+
   async gerarHoras() {
     const de = $('hrDe').value, ate = $('hrAte').value, pessoaId = $('hrPessoa').value;
     if (!de || !ate) { toast('Informe o período', 'warn'); return; }

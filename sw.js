@@ -37,6 +37,7 @@ const ASSETS = [
   './js/local-equipe.js',
   './js/cripto.js',
   './js/folha.js',
+  './js/inconsistencias.js',
   './js/ocorrencias.js',
   './js/eventos.js',
   './js/almox.js',

@@ -31,6 +31,7 @@ export default async function handler(req, res) {
   const [marcacoes, alocacoes, ocorrencias] = await Promise.all([
     sql`SELECT m.colaborador_id AS pessoa_id, m.equipe_id, m.tipo, m.marcado_em,
                to_char(m.marcado_dia,'YYYY-MM-DD') AS marcado_dia,
+               m.id_cliente, m.origem, m.lat, m.lng, m.dentro_cerca, m.distancia_cerca_m, m.score, m.liveness_ok,
                CASE
                  WHEN ult.acao = 'rejeitar' THEN 'rejeitada'
                  WHEN m.requer_revisao AND ult.acao IS NULL THEN 'pendente'
