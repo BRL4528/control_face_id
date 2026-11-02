@@ -70,6 +70,10 @@ export function inconsistencias({ marcacoes = [], linhas = [], pessoas = [], equ
     const cont = new Map();
     a.ms.forEach(m => cont.set(eqDe(m), (cont.get(eqDe(m)) || 0) + 1));
     const eqId = [...cont].sort((x, y) => y[1] - x[1])[0][0];
+    // Perto da cerca (menos de 1 km) não é outro lugar: é GPS impreciso ou cerca
+    // de outro dia (escala); essas batidas seguem como fora da cerca avulsa.
+    const loc = localDaEquipe(eqId);
+    if (loc && metros(loc.lat, loc.lng, a.lat, a.lng) < 1000) continue;
     if (!porEquipeDom.has(eqId)) porEquipeDom.set(eqId, []);
     porEquipeDom.get(eqId).push(a);
     a.ms.forEach(m => usadas.add(m));

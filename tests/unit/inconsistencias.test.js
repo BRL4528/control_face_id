@@ -125,3 +125,9 @@ test('prova de vida só acusa quem falha bem mais que a média; intervalo tem 5 
   const gs = inconsistencias({ ...base, marcacoes: [...dia('2026-10-29', '11:58'), ...dia('2026-10-30', '11:50')], linhas });
   assert.deepEqual(gs.find(g => g.chave === 'clt_intervalo').itens.map(i => i.dia), ['2026-10-30']);
 });
+
+test('aglomerado a menos de 1 km da cerca não vira "lugar longe"', () => {
+  const perto = { dentro_cerca: false, lat: -20.3863, lng: -54.5790, distancia_cerca_m: 250, estado: 'aceita' };
+  const ms = ['2026-10-29', '2026-10-30', '2026-10-31'].flatMap(d => ['p3', 'p4'].map(p => marc(p, d, '07:00', 'entrada', perto)));
+  assert.ok(!inconsistencias({ ...base, marcacoes: ms }).some(g => g.chave === 'cerca_errada'));
+});
