@@ -47,7 +47,8 @@ export function inconsistencias({ marcacoes = [], linhas = [], pessoas = [], equ
   const grupo = (chave, titulo, severidade, explicacao, acao, itens, extra) => {
     if (itens.length) grupos.push(Object.assign({ chave, titulo, severidade, explicacao, acao, itens }, extra || {}));
   };
-  const item = (m, detalhe) => ({ pessoa: pessoa(m.pessoa_id).nome || '', equipe: nomeEq(m.equipe_id), dia: m.marcado_dia, detalhe });
+  const eqDe = m => m.equipe_id || pessoa(m.pessoa_id).equipe_id;
+  const item = (m, detalhe) => ({ pessoa: pessoa(m.pessoa_id).nome || '', equipe: nomeEq(eqDe(m)), dia: m.marcado_dia, detalhe });
 
   /* ---- 1. Lugar fora das cercas usado com frequência: a cerca da obra está no lugar
      errado ou a turma está trabalhando noutro lugar. Agrupa por região (até 10 km da
@@ -59,30 +60,41 @@ export function inconsistencias({ marcacoes = [], linhas = [], pessoas = [], equ
     const a = aglos.find(x => metros(x.lat, x.lng, m.lat, m.lng) <= 10000);
     if (a) a.ms.push(m); else aglos.push({ lat: m.lat, lng: m.lng, ms: [m] });
   }
+  // Lugar que conta: 6+ batidas em 2+ dias, de 2+ pessoas com 2+ batidas cada.
+  const porEquipeDom = new Map();
   for (const a of aglos) {
-    const quem = new Set(a.ms.map(m => m.pessoa_id));
+    const n = new Map();
+    a.ms.forEach(m => n.set(m.pessoa_id, (n.get(m.pessoa_id) || 0) + 1));
     const dias = new Set(a.ms.map(m => m.marcado_dia));
-    if (quem.size < 2 || dias.size < 2 || a.ms.length < 6) continue;
-    // Equipe dominante: a de mais batidas no lugar.
+    if ([...n.values()].filter(x => x >= 2).length < 2 || dias.size < 2 || a.ms.length < 6) continue;
     const cont = new Map();
-    a.ms.forEach(m => cont.set(m.equipe_id, (cont.get(m.equipe_id) || 0) + 1));
+    a.ms.forEach(m => cont.set(eqDe(m), (cont.get(eqDe(m)) || 0) + 1));
     const eqId = [...cont].sort((x, y) => y[1] - x[1])[0][0];
-    const loc = localDaEquipe(eqId);
-    const longe = loc ? metros(loc.lat, loc.lng, a.lat, a.lng) : null;
+    if (!porEquipeDom.has(eqId)) porEquipeDom.set(eqId, []);
+    porEquipeDom.get(eqId).push(a);
     a.ms.forEach(m => usadas.add(m));
-    const outras = [...cont.keys()].filter(id => id !== eqId).map(nomeEq);
+  }
+  for (const [eqId, lugares] of porEquipeDom) {
+    const loc = localDaEquipe(eqId);
+    const ms = lugares.flatMap(a => a.ms);
+    const quem = new Set(ms.map(m => m.pessoa_id));
+    const dias = new Set(ms.map(m => m.marcado_dia));
+    const outras = [...new Set(ms.map(eqDe))].filter(id => id !== eqId).map(nomeEq);
+    lugares.sort((x, y) => y.ms.length - x.ms.length);
+    const descLugar = a => a.lat.toFixed(4) + ', ' + a.lng.toFixed(4) + ' (' + plural(a.ms.length, 'batida', 'batidas') +
+      (loc ? ', a ' + km(metros(loc.lat, loc.lng, a.lat, a.lng)) + ' da cerca' : '') + ')';
     grupos.push({
       chave: 'cerca_errada', severidade: 'alta',
-      titulo: nomeEq(eqId) + ': batidas sempre no mesmo lugar, longe da cerca',
-      explicacao: plural(quem.size, 'pessoa', 'pessoas') + ' bateram ' + plural(a.ms.length, 'vez', 'vezes') + ' em ' + plural(dias.size, 'dia', 'dias') +
-        ' perto de ' + a.lat.toFixed(4) + ', ' + a.lng.toFixed(4) + (longe != null ? ', a ' + km(longe) + ' do local cadastrado da equipe' : '') +
+      titulo: nomeEq(eqId) + ': batidas repetidas longe da cerca',
+      explicacao: plural(quem.size, 'pessoa', 'pessoas') + ' bateram ' + plural(ms.length, 'vez', 'vezes') + ' em ' + plural(dias.size, 'dia', 'dias') + ' ' +
+        (lugares.length === 1 ? 'no mesmo lugar: ' : 'em ' + lugares.length + ' lugares: ') + lugares.slice(0, 4).map(descLugar).join('; ') +
         (outras.length ? '. Junto, gente de ' + outras.join(', ') : '') + '. Ou a cerca da obra está no lugar errado, ou a turma está trabalhando em outro lugar.',
       acao: 'Confirme onde a turma está trabalhando: ajuste o local da equipe ou crie uma escala para o outro lugar. Depois decida as batidas em Pendências.',
-      equipe_id: eqId, lat: a.lat, lng: a.lng,
+      equipe_id: eqId, lat: lugares[0].lat, lng: lugares[0].lng,
       itens: [...quem].map(pid => {
-        const dele = a.ms.filter(m => m.pessoa_id === pid);
+        const dele = ms.filter(m => m.pessoa_id === pid);
         const ds = [...new Set(dele.map(m => m.marcado_dia))].sort();
-        return { pessoa: pessoa(pid).nome || '', equipe: nomeEq(dele[0].equipe_id), dia: ds[0],
+        return { pessoa: pessoa(pid).nome || '', equipe: nomeEq(eqDe(dele[0])), dia: ds[0],
           detalhe: plural(dele.length, 'batida', 'batidas') + ' de ' + dm(ds[0]) + ' a ' + dm(ds[ds.length - 1]) + (dele.some(m => m.estado === 'pendente') ? ' · há pendentes' : '') };
       }).sort((x, y) => x.pessoa.localeCompare(y.pessoa))
     });
@@ -112,17 +124,23 @@ export function inconsistencias({ marcacoes = [], linhas = [], pessoas = [], equ
     'O rosto da pessoa fica repetidamente acima do limite de aceite: o cadastro facial provavelmente foi feito com luz ruim ou de lado.',
     'Refaça o cadastro facial da pessoa (Colaboradores, ficha da pessoa) com boa luz e de frente.',
     [...cinza].filter(([, ms]) => ms.length >= 3).map(([pid, ms]) => ({
-      pessoa: pessoa(pid).nome || '', equipe: nomeEq(ms[0].equipe_id), dia: ms[0].marcado_dia,
+      pessoa: pessoa(pid).nome || '', equipe: nomeEq(eqDe(ms[0])), dia: ms[0].marcado_dia,
       detalhe: plural(ms.length, 'batida', 'batidas') + ' na zona cinzenta · pior distância ' + Math.max(...ms.map(m => Number(m.score))).toFixed(2).replace('.', ',')
     })));
 
   /* ---- 5. Prova de vida falhando sempre com a mesma pessoa. */
+  // Só quem falha bem mais que a média: se quase todos falham, o problema é do
+  // sistema (ou do detector), não da pessoa, e não vira inconsistência de ninguém.
+  const bio = porPessoa(m => m.origem !== 'manual' && m.liveness_ok != null);
   const semVida = porPessoa(m => m.origem !== 'manual' && m.liveness_ok === false);
+  const nBio = [...bio.values()].reduce((s, x) => s + x.length, 0);
+  const taxaGeral = nBio ? [...semVida.values()].reduce((s, x) => s + x.length, 0) / nBio : 0;
+  const corte = Math.max(0.3, taxaGeral * 1.5);
   grupo('prova_vida', 'Prova de vida falhando', 'baixa',
-    'A pessoa não passa na prova de vida (girar o rosto) com frequência.',
+    'A pessoa não passa na prova de vida (girar o rosto) bem mais vezes que os colegas.',
     'Mostre para a pessoa como girar o rosto devagar para um lado e voltar. Se continuar, avise o suporte.',
-    [...semVida].filter(([, ms]) => ms.length >= 3).map(([pid, ms]) => ({
-      pessoa: pessoa(pid).nome || '', equipe: nomeEq(ms[0].equipe_id), dia: ms[0].marcado_dia, detalhe: plural(ms.length, 'batida', 'batidas') + ' sem prova de vida'
+    [...semVida].filter(([pid, ms]) => ms.length >= 3 && ms.length / bio.get(pid).length > corte).map(([pid, ms]) => ({
+      pessoa: pessoa(pid).nome || '', equipe: nomeEq(eqDe(ms[0])), dia: ms[0].marcado_dia, detalhe: ms.length + ' de ' + bio.get(pid).length + ' batidas sem prova de vida'
     })));
 
   /* ---- 6. Pendência parada. */
@@ -132,7 +150,7 @@ export function inconsistencias({ marcacoes = [], linhas = [], pessoas = [], equ
     'Decida em Pendências.',
     [...pend].map(([pid, ms]) => {
       const ds = ms.map(m => m.marcado_dia).sort();
-      return { pessoa: pessoa(pid).nome || '', equipe: nomeEq(ms[0].equipe_id), dia: ds[0], detalhe: plural(ms.length, 'batida', 'batidas') + ' · mais antiga de ' + dm(ds[0]) };
+      return { pessoa: pessoa(pid).nome || '', equipe: nomeEq(eqDe(ms[0])), dia: ds[0], detalhe: plural(ms.length, 'batida', 'batidas') + ' · mais antiga de ' + dm(ds[0]) };
     }));
 
   /* ---- 7 a 9. Pelo relatório de horas: sem batida, faltas, dia incompleto. */
@@ -178,12 +196,13 @@ export function inconsistencias({ marcacoes = [], linhas = [], pessoas = [], equ
   for (const ms of ordenadas) {
     const m0 = ms[0];
     // Intervalo: da 1ª saída à entrada seguinte, em dia com mais de 6 h trabalhadas.
+    // 5 min de tolerância, como a variação de marcação aceita pela CLT (art. 58, § 1º).
     const iS = ms.findIndex(m => m.tipo === 'saida');
     const linha = linhas.find(l => l.pessoa_id === m0.pessoa_id);
     const d = linha && (linha.dias || []).find(x => x.dia === m0.marcado_dia);
     if (iS > 0 && ms[iS + 1] && ms[iS + 1].tipo === 'entrada' && d && d.trabalhado > 360) {
       const gap = Math.round((Date.parse(ms[iS + 1].marcado_em) - Date.parse(ms[iS].marcado_em)) / 60000);
-      if (gap < 60) intervalo.push(item(m0, 'intervalo de ' + gap + ' min (' + horaNoFuso(ms[iS].marcado_em, fuso) + ' às ' + horaNoFuso(ms[iS + 1].marcado_em, fuso) + ')'));
+      if (gap < 55) intervalo.push(item(m0, 'intervalo de ' + gap + ' min (' + horaNoFuso(ms[iS].marcado_em, fuso) + ' às ' + horaNoFuso(ms[iS + 1].marcado_em, fuso) + ')'));
     }
   }
   // Interjornada: última saída de um dia até a 1ª entrada do dia seguinte.

@@ -107,3 +107,21 @@ test('exportação: CSV com uma linha por item e HTML escapado, sem travessão',
   assert.ok(!html.includes('—'));
   assert.match(htmlRelatorio([], {}), /Nenhuma inconsistência/);
 });
+
+test('prova de vida só acusa quem falha bem mais que a média; intervalo tem 5 min de tolerância', () => {
+  const dias = ['2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29'];
+  // todos falham (detector ruim): ninguém aparece
+  const todos = ['p1', 'p2', 'p3'].flatMap(p => dias.map(d => marc(p, d, '07:00', 'entrada', { liveness_ok: false })));
+  assert.ok(!inconsistencias({ ...base, marcacoes: todos }).some(g => g.chave === 'prova_vida'));
+  // só a DIANA falha: aparece
+  const uma = ['p1', 'p2', 'p3'].flatMap(p => dias.map(d => marc(p, d, '07:00', 'entrada')))
+    .concat(dias.map(d => marc('p4', d, '07:00', 'entrada', { liveness_ok: false })));
+  const pv = inconsistencias({ ...base, marcacoes: uma }).find(g => g.chave === 'prova_vida');
+  assert.deepEqual(pv.itens.map(i => i.pessoa), ['DIANA']);
+  assert.equal(pv.itens[0].detalhe, '4 de 4 batidas sem prova de vida');
+  // intervalo de 58 min não acusa; 50 min acusa
+  const dia = (d, volta) => [marc('p3', d, '07:00', 'entrada'), marc('p3', d, '11:00', 'saida'), marc('p3', d, volta, 'entrada'), marc('p3', d, '17:00', 'saida')];
+  const linhas = [{ pessoa_id: 'p3', nome: 'CAIO', totais: { dias: 2 }, dias: ['2026-10-29', '2026-10-30'].map(d => ({ dia: d, equipe_id: 'e471', status: 'ok', saldo: 0, trabalhado: 540, marcacoes: 4 })) }];
+  const gs = inconsistencias({ ...base, marcacoes: [...dia('2026-10-29', '11:58'), ...dia('2026-10-30', '11:50')], linhas });
+  assert.deepEqual(gs.find(g => g.chave === 'clt_intervalo').itens.map(i => i.dia), ['2026-10-30']);
+});
