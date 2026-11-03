@@ -656,6 +656,14 @@ test('classificarPendente: só faltou piscar, com rosto confirmado, ganha rótul
   assert.equal(classificarPendente({ ...raissa, origem: 'manual' }).tipo, 'registro_manual');
 });
 
+test('classificarPendente: rosto confirmado sem GPS ou sem cerca não vira "zona cinzenta"', () => {
+  const ok = { dentro_cerca: true, origem: 'biometria', score: 0.3, liveness_ok: true, lat: -20.4, lng: -54.6 };
+  assert.equal(classificarPendente({ ...ok, dentro_cerca: null, lat: null, lng: null }).rotulo, 'Rosto confere, sem localização');
+  assert.equal(classificarPendente({ ...ok, dentro_cerca: null }).rotulo, 'Rosto confere, equipe sem cerca');
+  assert.equal(classificarPendente(ok).tipo, 'conferir');
+  assert.equal(classificarPendente({ ...ok, lat: null, score: 0.5 }).tipo, 'zona_cinzenta', 'rosto duvidoso pesa mais');
+});
+
 test('presencaPorEquipe: equipe de afastamento não entra em operação', () => {
   const pessoas = [{ pessoa_id: 'a', equipe_id: 'inss', ativo: true }, { pessoa_id: 'b', equipe_id: 'obra', ativo: true }];
   const equipes = [{ equipe_id: 'inss', nome: 'Afastado INSS', afastamento: true }, { equipe_id: 'obra', nome: 'Obra 574' }];

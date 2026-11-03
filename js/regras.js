@@ -395,6 +395,9 @@ export const TIPOS_EXCECAO = {
   registro_manual: { rotulo: 'Registro manual sem biometria', severidade: 'atencao' },
   zona_cinzenta:   { rotulo: 'Similaridade na zona cinzenta', severidade: 'atencao' },
   sem_prova_de_vida: { rotulo: 'Rosto confere, sem prova de vida', severidade: 'atencao' },
+  sem_gps:         { rotulo: 'Rosto confere, sem localização', severidade: 'atencao' },
+  sem_cerca:       { rotulo: 'Rosto confere, equipe sem cerca', severidade: 'atencao' },
+  conferir:        { rotulo: 'Registro para conferir', severidade: 'atencao' },
   // Alertas de PLANEJAMENTO (não são do dia; são de gestão da escala).
   pessoa_em_2_equipes: { rotulo: 'Alocada em duas equipes no mesmo dia', severidade: 'critico' },
   cerca_sem_gente:     { rotulo: 'Equipe com cerca e sem colaboradores', severidade: 'atencao' },
@@ -486,15 +489,20 @@ export function agoraNoRelogio(agoraISO, fuso) {
  * Por que uma batida pendente está na fila, em uma linha: tipo, rótulo e severidade.
  * Fora da cerca só é crítico quando o rosto não está confirmado; com o rosto
  * confirmado (distância até `limiarAceite`) é a pessoa certa em outro lugar, como
- * um líder em viagem, e vira atenção. Batida que só falhou na prova de vida, com o
- * rosto confirmado, ganha rótulo próprio em vez de "zona cinzenta". Pura.
+ * um líder em viagem, e vira atenção. Com o rosto confirmado, o motivo que sobra
+ * dá o rótulo (sem prova de vida, sem GPS, equipe sem cerca); só rosto acima do
+ * aceite é "zona cinzenta". Pura.
  */
 export function classificarPendente(m, limiarAceite = 0.45) {
   const rostoConfere = m.origem !== 'manual' && m.score != null && Number(m.score) <= limiarAceite;
   let tipo = 'zona_cinzenta';
   if (m.dentro_cerca === false) tipo = 'fora_da_cerca';
   else if (m.origem === 'manual') tipo = 'registro_manual';
-  else if (m.liveness_ok === false && rostoConfere) tipo = 'sem_prova_de_vida';
+  else if (!rostoConfere) tipo = 'zona_cinzenta';
+  else if (m.liveness_ok === false) tipo = 'sem_prova_de_vida';
+  else if (m.lat == null && 'lat' in m) tipo = 'sem_gps';
+  else if (m.dentro_cerca == null && 'dentro_cerca' in m) tipo = 'sem_cerca';
+  else tipo = 'conferir';
   const t = TIPOS_EXCECAO[tipo];
   return { tipo, rotulo: t.rotulo, severidade: tipo === 'fora_da_cerca' && rostoConfere ? 'atencao' : t.severidade };
 }
