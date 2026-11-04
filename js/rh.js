@@ -1174,8 +1174,8 @@ export const Rh = {
             '<p>Batidas que precisam da sua decisão: fora da cerca, registro manual ou rosto em dúvida.</p>' +
             '<div class="segtabs">' + seg('abertas', 'Abertas', abertas.length) + seg('resolvidas', 'Resolvidas', resolvidas.length) + '</div>' +
             (this.pendTab === 'abertas' && semVida.length
-              ? '<button class="v2btn ghost mini" id="pendAprovarSemVida" style="margin-top:10px;width:100%">Aprovar as ' + semVida.length +
-                ' com rosto confere e sem prova de vida</button>' : '') +
+              ? '<button class="v2btn ghost mini" id="pendAprovarSemVida" style="margin-top:10px;width:100%" title="Rosto confere e dentro da cerca, só sem prova de vida">Aprovar as ' +
+                semVida.length + ' sem prova de vida</button>' : '') +
           '</div>' +
           '<div class="pend-list">' +
             (fila.length ? fila.map(item).join('')
