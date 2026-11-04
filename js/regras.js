@@ -294,7 +294,8 @@ export function presencaPorEquipe(pessoas, marcacoes, equipes, hoje, agenda) {
   // Equipe de afastamento (INSS, licença) não está em operação: ninguém ali é esperado.
   return (equipes || []).filter(e => !e.afastamento).map(e => {
     const j = ag ? jornadaDoTime(e) : null;
-    const devidoHoje = p => !ag || bateuHoje.has(p.pessoa_id) || !!horarioDoDia(j, hoje, feriados, alocados.has(p.pessoa_id));
+    // Obra de ponto opcional: só conta quem bateu (ninguém ali é cobrado).
+    const devidoHoje = p => bateuHoje.has(p.pessoa_id) || (!e.ponto_opcional && (!ag || !!horarioDoDia(j, hoje, feriados, alocados.has(p.pessoa_id))));
     const doTime = ativosTodos.filter(p => p.equipe_id === e.equipe_id && devidoHoje(p));
     // Horário do card: o da jornada; em dia de folga com gente escalada, o horário base da escala.
     const horario = ag ? horarioDoDia(j, hoje, feriados, doTime.some(p => alocados.has(p.pessoa_id))) : null;
@@ -813,6 +814,8 @@ export function minutosTrabalhados(marcacoes) {
 export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jornadas, jornadaPadrao, de, ate, hoje, fuso, pessoaId, feriados, ocorrencias }) {
   const ehFeriado = feriados instanceof Set ? feriados : diasDeFeriado(de, ate, feriados);
   const afastamento = equipeId => !!((equipes || []).find(e => e.equipe_id === equipeId) || {}).afastamento;
+  // Obra sem obrigatoriedade de ponto: o dia batido conta normal; o dia sem batida não existe.
+  const opcional = equipeId => !!((equipes || []).find(e => e.equipe_id === equipeId) || {}).ponto_opcional;
   const jornadaDe = equipeId => {
     const eq = (equipes || []).find(e => e.equipe_id === equipeId);
     const j = (eq && eq.jornada_id && (jornadas || []).find(x => x.jornada_id === eq.jornada_id)) || jornadaPadrao || null;
@@ -844,7 +847,7 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
   // dia de trabalho do período, desde que entrou na empresa (`desde`) e até hoje: é
   // o que faz a falta aparecer. Sem histórico de equipe, vale a equipe atual.
   for (const p of (pessoas || [])) {
-    if (!p.ativo || !p.equipe_id || afastamento(p.equipe_id)) continue;
+    if (!p.ativo || !p.equipe_id || afastamento(p.equipe_id) || opcional(p.equipe_id)) continue;
     if (pessoaId && p.pessoa_id !== pessoaId) continue;
     const jor = jornadaDe(p.equipe_id);
     const fim = ate < hoje ? ate : hoje;
@@ -864,6 +867,7 @@ export function horasPorColaborador({ marcacoes, alocacoes, pessoas, equipes, jo
     for (const dia of [...todos].sort()) {
       const marcas = b.marcas.get(dia) || [];
       const equipeId = b.aloc.get(dia) || ((marcas.find(m => m.equipe_id) || {}).equipe_id) || b.equipe.get(dia) || null;
+      if (!marcas.length && opcional(equipeId)) continue;   // escala em obra de ponto opcional não cobra o dia
       const jor = jornadaDe(equipeId);
       // Sem escala, o dia em que a pessoa bateu ponto tem o horário da jornada da equipe
       // dela naquele dia da semana (a equipe é a obra; a escala virou exceção). Folga e

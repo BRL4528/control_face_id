@@ -69,11 +69,12 @@ test('atribuir batida de aparelho pendente: dentro da cerca da equipe sai aceita
   assert.equal(r.motivo, 'identificado pelo RH');
 });
 
-test('atribuir batida: sem cerca, fora dela ou sem prova de vida continua em revisão, com todos os motivos', () => {
+test('atribuir batida: sem cerca ou fora dela continua em revisão; prova de vida sozinha não segura', () => {
   assert.deepEqual(revisaoDaAtribuicao({ temCerca: false, cerca: { dentro: null, distancia_m: null }, liveness_ok: true }).motivo, 'sem cerca no dia');
   const r = revisaoDaAtribuicao({ temCerca: true, cerca: { dentro: false, distancia_m: 900 }, liveness_ok: false });
   assert.equal(r.revisar, true);
-  assert.equal(r.motivo, 'fora da cerca · sem prova de vida');
+  assert.equal(r.motivo, 'fora da cerca');
+  assert.equal(revisaoDaAtribuicao({ temCerca: true, cerca: { dentro: true, distancia_m: 8 }, liveness_ok: false }).revisar, false);
 });
 
 test('atribuir batida: viagem dispensa a cerca; férias e afastamento vão para o RH', () => {

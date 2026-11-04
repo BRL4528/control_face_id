@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizarBatida, motivoDaBatida } from '../../api/_lib/batida.js';
+import { normalizarBatida, motivoDaBatida, precisaRevisao } from '../../api/_lib/batida.js';
 import { rotuloEmFrase } from '../../api/_lib/ocorrencia.js';
 import { imagemReal, assinaturaConfere, comFotoReal } from '../../api/_lib/imagem.js';
 import { TIPOS_OCORRENCIA } from '../../js/ocorrencias.js';
@@ -135,4 +135,19 @@ test('comFotoReal: prova ok com foto falsa vira PROVA_FACIAL_AUSENTE; o resto pa
   assert.equal(comFotoReal(boa), boa);
   const negada = { ok: false, status: 403, codigo: 'ROSTO_NAO_CONFERE', mensagem: 'x' };
   assert.equal(comFotoReal(negada), negada);
+});
+
+test('precisaRevisao: rosto aceito dentro da cerca não vai ao RH, mesmo sem prova de vida', () => {
+  const ok = { veredito: 'aceito', origem: 'biometria', temCerca: true, dentro: true, deriva_ms: 0, futuro: false, bloqueado: false };
+  assert.equal(precisaRevisao(ok), false);
+  assert.equal(precisaRevisao(Object.assign({}, ok, { liveness_ok: false })), false);
+});
+
+test('precisaRevisao: cada risco sozinho manda para o RH', () => {
+  const ok = { veredito: 'aceito', origem: 'biometria', temCerca: true, dentro: true, deriva_ms: 0 };
+  for (const [campo, valor] of [['veredito', 'revisar'], ['origem', 'manual'], ['temCerca', false], ['dentro', false],
+    ['deriva_ms', 180000], ['deriva_ms', -180000], ['futuro', true], ['bloqueado', true]]) {
+    assert.equal(precisaRevisao(Object.assign({}, ok, { [campo]: valor })), true, campo + '=' + valor);
+  }
+  assert.equal(precisaRevisao(Object.assign({}, ok, { dentro: null })), false);   // GPS sem medida, com cerca: não pesa sozinho
 });

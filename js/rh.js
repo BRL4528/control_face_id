@@ -287,8 +287,8 @@ export const Rh = {
   exceptions() {
     const d = this.dados || {};
     const cfg = window.EFRAT_CFG || {};
-    // Quem está em equipe de afastamento (INSS, licença) não é cobrado de entrada.
-    const afastadas = new Set((d.equipes || []).filter(e => e.afastamento).map(e => e.equipe_id));
+    // Quem está em equipe de afastamento (INSS, licença) ou em obra de ponto opcional não é cobrado de entrada.
+    const afastadas = new Set((d.equipes || []).filter(e => e.afastamento || e.ponto_opcional).map(e => e.equipe_id));
     // Nem quem está de férias, atestado, licença ou abono hoje.
     const fora = a => afastadas.has(a.equipe_id) || this.abonadoHoje(a.colaborador_id);
     return exceptionsDoDia(
@@ -1139,6 +1139,9 @@ export const Rh = {
       m.marcado_dia === hoje && !m.pendente && (m.origem === 'manual' || m.veredito === 'revisar'));
 
     const fila = this.pendTab === 'abertas' ? abertas : resolvidas.map(m => this.excDeMarcacao(m));
+    // Rosto confirmado, dentro da cerca, só sem prova de vida: desde 04/11 isso não vira
+    // mais pendência; as que já estavam na fila saem de uma vez.
+    const semVida = abertas.filter(x => x.tipo === 'sem_prova_de_vida' && x.alvo && x.alvo.tipo === 'marcacao');
     // seleção default: primeiro da fila
     if (!this.pendSel || !fila.some(x => x.id === this.pendSel)) this.pendSel = fila[0] ? fila[0].id : null;
     const sel = fila.find(x => x.id === this.pendSel) || null;
@@ -1170,6 +1173,9 @@ export const Rh = {
             '<h1>Pendências</h1>' +
             '<p>Batidas que precisam da sua decisão: fora da cerca, registro manual ou rosto em dúvida.</p>' +
             '<div class="segtabs">' + seg('abertas', 'Abertas', abertas.length) + seg('resolvidas', 'Resolvidas', resolvidas.length) + '</div>' +
+            (this.pendTab === 'abertas' && semVida.length
+              ? '<button class="v2btn ghost mini" id="pendAprovarSemVida" style="margin-top:10px;width:100%">Aprovar as ' + semVida.length +
+                ' com rosto confere e sem prova de vida</button>' : '') +
           '</div>' +
           '<div class="pend-list">' +
             (fila.length ? fila.map(item).join('')
@@ -1187,6 +1193,8 @@ export const Rh = {
     el.querySelectorAll('.pend-item').forEach(b => {
       b.onclick = () => { this.pendSel = b.dataset.sel; this.pintarPendencias(); };
     });
+    const emLote = $('pendAprovarSemVida');
+    if (emLote) emLote.onclick = () => this.aprovarEmLote(semVida);
     this.ligarAcoesDetalhe();
   },
 
@@ -1252,8 +1260,26 @@ export const Rh = {
       acoes = '<button class="v2btn" data-lancar="' + esc(x.pessoa_id) + '">Lançar entrada manual</button>';
     } else {
       acoes = '<button class="v2btn danger" data-decidir="rejeitar" data-alvo-id="' + esc(x.alvo.id) + '">Rejeitar</button>' +
+              (m && m.origem !== 'manual' ? '<button class="v2btn ghost" data-corrigir-pend="' + esc(x.alvo.id) + '">Corrigir horário</button>' : '') +
               '<button class="v2btn" data-decidir="aprovar" data-alvo-id="' + esc(x.alvo.id) + '">Aprovar registro</button>';
     }
+    // Rosto em dúvida com o vetor guardado: aprovar pode ensinar o cadastro (api/_lib/reforco.js).
+    const reforco = !x.resolvida && m && m.tem_vetor
+      ? '<label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:13px;color:#334155">' +
+          '<input type="checkbox" id="pendReforco" checked style="width:16px;height:16px"> ' +
+          'É a pessoa: usar esta foto no cadastro para reconhecer melhor da próxima vez</label>' : '';
+    // Correção do horário ou do tipo (entrada/saída) direto da pendência.
+    const corrigir = !x.resolvida && m ? '<div id="pendCorrigir" class="hide" style="margin-top:12px">' +
+        '<div class="form-grid">' +
+          '<div><label class="lb2">Dia</label><input class="inp" type="date" id="pcDia" max="' + esc(this.hojeServidor()) + '" value="' + esc(this.diaFuso(m.marcado_em)) + '"></div>' +
+          '<div><label class="lb2">Hora</label><input class="inp" type="time" id="pcHora" value="' + esc(hora(m.marcado_em)) + '"></div>' +
+          '<div><label class="lb2">Tipo</label><select class="inp" id="pcTipo"><option value="entrada"' + (m.tipo !== 'saida' ? ' selected' : '') + '>Entrada</option>' +
+            '<option value="saida"' + (m.tipo === 'saida' ? ' selected' : '') + '>Saída</option></select></div>' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:10px"><button class="v2btn" id="pcSalvar" data-alvo-id="' + esc(x.alvo.id) + '">Salvar correção</button>' +
+          '<button class="v2btn ghost" id="pcCancelar">Cancelar</button></div>' +
+        '<p class="nota" style="margin:8px 0 0">A batida original é anulada e entra uma nova, manual e já aprovada, com o horário certo. As duas ficam no espelho e na auditoria com a justificativa acima.</p>' +
+      '</div>' : '';
 
     return '<div class="cab">' +
         '<span class="av">' + esc(this.iniciais(p ? p.nome : '?')) + '</span>' +
@@ -1286,6 +1312,7 @@ export const Rh = {
       (x.resolvida ? '' :
         '<div class="decisao"><h2>Decisão</h2>' +
           '<input id="pendJust" required placeholder="Decisão (obrigatória). Fica na auditoria, no espelho de ponto e no card do Bitrix">' +
+          reforco + corrigir +
           '<div class="linha"><span style="font-size:12.5px;color:#94a3b8">Registrado como ' + esc(this.dados.usuario.nome || 'RH') + ' · RH</span></div>' +
         '</div>');
   },
@@ -1393,6 +1420,24 @@ export const Rh = {
       '</div>';
   },
 
+  /** Aprova de uma vez as batidas "rosto confere, sem prova de vida" (dentro da cerca). */
+  async aprovarEmLote(itens) {
+    const motivo = prompt('Aprovar ' + itens.length + ' batida(s) com o rosto confirmado e dentro da cerca, só sem prova de vida. Decisão (obrigatória, fica na auditoria):',
+      'Rosto confere e dentro da cerca; prova de vida dispensada');
+    if (motivo == null) return;
+    if (!motivo.trim()) { toast('A decisão é obrigatória', 'warn'); return; }
+    const btn = $('pendAprovarSemVida'); if (btn) btn.disabled = true;
+    let feitas = 0, falhas = 0;
+    for (const x of itens) {
+      if (btn) btn.textContent = 'Aprovando ' + (feitas + falhas + 1) + ' de ' + itens.length + '…';
+      const r = await ApiRh.decidir(this.token, { tipo: 'marcacao', id: x.alvo.id, acao: 'aprovar', motivo: motivo.trim() });
+      if (r.ok) feitas++; else falhas++;
+    }
+    toast(feitas + ' aprovada(s)' + (falhas ? ', ' + falhas + ' com falha' : ''), falhas ? 'warn' : 'ok');
+    this.pendSel = null;
+    await this.recarregar();
+  },
+
   ligarAcoesDetalhe() {
     const cont = $('pendAcoes');
     if (!cont) return;
@@ -1436,15 +1481,45 @@ export const Rh = {
       b.onclick = async () => {
         if (!just()) { toast('Preencha a decisão antes de aprovar ou rejeitar', 'warn'); $('pendJust') && $('pendJust').focus(); return; }
         b.disabled = true;
+        const aprovar = b.dataset.decidir === 'aprovar';
+        const reforcar = aprovar && !!($('pendReforco') && $('pendReforco').checked);
         const r = await ApiRh.decidir(this.token, {
-          tipo: 'marcacao', id: b.dataset.alvoId, acao: b.dataset.decidir, motivo: just()
+          tipo: 'marcacao', id: b.dataset.alvoId, acao: b.dataset.decidir, motivo: just(), reforcar_cadastro: reforcar
         });
         if (!r.ok) { toast(r.erro || 'Falha', 'bad'); b.disabled = false; return; }
-        toast(b.dataset.decidir === 'aprovar' ? 'Registro aprovado' : 'Registro rejeitado', 'ok');
+        const ref = r.dados && r.dados.reforco;
+        toast(!aprovar ? 'Registro rejeitado'
+          : ref === 'reforcado' ? 'Registro aprovado e cadastro facial reforçado'
+          : reforcar && ref === 'longe' ? 'Registro aprovado. A foto ficou diferente demais do cadastro e não foi usada: refaça a biometria se for o caso'
+          : 'Registro aprovado', 'ok');
         this.pendSel = null;
         await this.recarregar();
       };
     });
+
+    cont.querySelectorAll('button[data-corrigir-pend]').forEach(b => {
+      b.onclick = () => {
+        const f = $('pendCorrigir'); if (!f) return;
+        f.classList.remove('hide'); $('pcHora').focus();
+        const ref = $('pendReforco'); if (ref) ref.closest('label').classList.add('hide');   // batida corrigida não vira cadastro
+      };
+    });
+    const pcCancelar = $('pcCancelar'), pcSalvar = $('pcSalvar');
+    if (pcCancelar) pcCancelar.onclick = () => {
+      $('pendCorrigir').classList.add('hide');
+      const ref = $('pendReforco'); if (ref) ref.closest('label').classList.remove('hide');
+    };
+    if (pcSalvar) pcSalvar.onclick = async () => {
+      const d = $('pcDia').value, h = $('pcHora').value, t = $('pcTipo').value;
+      if (!d || !h) { toast('Informe o dia e a hora', 'warn'); return; }
+      if (!just()) { toast('Preencha a decisão: ela é a justificativa da correção', 'warn'); $('pendJust').focus(); return; }
+      pcSalvar.disabled = true;
+      const r = await ApiRh.corrigirPonto(this.token, { id: pcSalvar.dataset.alvoId, acao: 'corrigir', tipo: t, dia: d, hora: h, motivo: just() });
+      if (!r.ok) { toast(r.erro || 'Falha', 'bad'); pcSalvar.disabled = false; return; }
+      toast('Batida corrigida', 'ok');
+      this.pendSel = null;
+      await this.recarregar();
+    };
 
     cont.querySelectorAll('button[data-lancar]').forEach(b => {
       b.onclick = async () => {
@@ -1478,8 +1553,14 @@ export const Rh = {
     const ultima = minhas[0] || null;
     const marcouHoje = minhas.some(m => m.marcado_dia === hoje);
     const alocadoHoje = (this.dados.alocacoes_hoje || []).some(a => a.colaborador_id === pessoaId);
+    // Férias, atestado etc. e obra de ponto opcional não aparecem como "Sem entrada".
+    const oc = ocorrenciaDoDia(this.dados.ocorrencias, pessoaId, hoje);
+    const p = this.pessoaDe(pessoaId);
+    const eq = p && (this.dados.equipes || []).find(e => e.equipe_id === p.equipe_id);
     let status = { cls: 'mut', txt: 'Fora de escala' };
     if (marcouHoje) status = { cls: 'ok', txt: 'Trabalhando' };
+    else if (oc) status = { cls: 'mut', txt: TIPOS_OCORRENCIA[oc.tipo].rotulo };
+    else if (eq && eq.ponto_opcional) status = { cls: 'mut', txt: 'Ponto opcional' };
     else if (alocadoHoje) status = { cls: 'bad', txt: 'Sem entrada' };
     const ultimo = ultima
       ? (ultima.marcado_dia === hoje ? '' : (data(ultima.marcado_dia) + ' ')) +
@@ -2040,10 +2121,12 @@ export const Rh = {
           (e.bitrix_stage_id ? '<span class="pill mut" style="padding:0 7px">Bitrix</span>' : '') +
           (e.ativo ? '' : '<span class="pill bad" style="padding:0 7px">Inativa</span>') +
           (e.afastamento ? '<span class="pill mut" style="padding:0 7px">Afastamento</span>' : '') +
+          (e.ponto_opcional && !e.afastamento ? '<span class="pill mut" style="padding:0 7px">Ponto opcional</span>' : '') +
           (e.ativo && !loc && !e.afastamento ? '<span class="pill bad" style="padding:0 7px">Sem local</span>' : '') +
         '</div>' +
         '<p class="sub" style="margin:4px 0 0">' +
           (e.afastamento ? 'Equipe de afastamento (INSS, licença): quem está aqui não bate ponto, não conta falta e não gera pendência.'
+           : loc && e.ponto_opcional ? 'Ponto opcional: quem está nesta equipe pode bater em <b>' + esc(loc.nome) + '</b> (raio ' + loc.raio_m + ' m) e as horas contam; quem não bater não tem falta.'
            : loc ? 'Quem está nesta equipe bate ponto em <b>' + esc(loc.nome) + '</b> (raio ' + loc.raio_m + ' m), todo dia, sem precisar de escala.'
                : 'Enquanto não tiver local, o ponto de quem está aqui cai em revisão.') +
         '</p></div></div>' +
@@ -2058,6 +2141,8 @@ export const Rh = {
           : '<span style="color:var(--v2-mut2)">nenhuma, usa o local</span>',
           pode(d.acesso, 'operacao') ? '<button class="v2btn ghost mini" id="eqIrEscala">' + (escalas.length || !pode(d.acesso, 'operacao', true) ? 'Ver' : 'Criar') + '</button>' : '') +
         fato('Supervisor', sup ? esc(sup.nome) : '<span style="color:var(--v2-mut2)">-</span>') +
+        (e.afastamento ? '' : fato('Ponto', e.ponto_opcional ? 'Opcional: o dia sem batida não é falta nem pendência' : 'Obrigatório',
+          edita ? '<button class="v2btn ghost mini" id="eqPontoOpcional">' + (e.ponto_opcional ? 'Tornar obrigatório' : 'Tornar opcional') + '</button>' : '')) +
         fato('Afastamento', e.afastamento ? 'Sim: não bate ponto' : 'Não',
           edita ? '<button class="v2btn ghost mini" id="eqAfastamento">' + (e.afastamento ? 'Voltar a ser equipe de trabalho' : 'Marcar como afastamento') + '</button>' : '') +
       '</div></div>' +
@@ -2108,6 +2193,18 @@ export const Rh = {
       afa.disabled = false;
       if (!r.ok) { toast(r.erro || 'Falha ao salvar', 'bad'); return; }
       toast(marcar ? e.nome + ' agora é equipe de afastamento' : e.nome + ' voltou a ser equipe de trabalho', 'ok');
+      await this.recarregar();
+    };
+
+    const opc = $('eqPontoOpcional');
+    if (opc) opc.onclick = async () => {
+      const marcar = !e.ponto_opcional;
+      if (marcar && !confirm('Tornar o ponto opcional em "' + e.nome + '"? Quem bater tem as horas contadas; quem não bater não tem falta nem pendência.')) return;
+      opc.disabled = true;
+      const r = await ApiRh.equipe(this.token, { acao: 'ponto_opcional', equipe_id: e.equipe_id, ponto_opcional: marcar });
+      opc.disabled = false;
+      if (!r.ok) { toast(r.erro || 'Falha ao salvar', 'bad'); return; }
+      toast(marcar ? 'Ponto opcional em ' + e.nome : 'Ponto obrigatório em ' + e.nome, 'ok');
       await this.recarregar();
     };
 

@@ -28,3 +28,12 @@ test('diagnóstico: base, maior desvio e quadros', () => {
   const d = det.diagnostico;
   assert.equal(d.base, 0.1); assert.equal(d.quadros, 3); assert.ok(Math.abs(d.maior_desvio - 0.1) < 1e-9);
 });
+
+test('giro de 0,12 já conta (limiar de 04/11) e a fase acompanha', () => {
+  const det = criarDetectorGiro([0.02, 0.03]);
+  assert.equal(det.fase, 'aguardando_virar');
+  det.alimentar(0.10); assert.equal(det.fase, 'aguardando_virar');
+  det.alimentar(0.15); assert.equal(det.fase, 'aguardando_voltar');
+  assert.equal(det.alimentar(0.04), true);
+  assert.equal(det.fase, 'completo');
+});

@@ -11,6 +11,7 @@ import { cercaVigente } from '../_lib/escala.js';
 import { ocorrenciaVigente } from '../_lib/ocorrencia.js';
 import { daEmpresa } from '../_lib/validar.js';
 import { comentarNoCard, montarComentario } from '../_lib/bitrix-saida.js';
+import { reforcarCadastro, descartarVetor } from '../_lib/reforco.js';
 
 export default async function handler(req, res) {
   if (cors(req, res)) return;
@@ -76,18 +77,26 @@ export default async function handler(req, res) {
       await sql`UPDATE template_facial SET estado='ativo' WHERE id=${b.id}`;
     }
   }
+  // Batida aprovada com "usar esta foto no cadastro": o vetor do rosto dela entra
+  // no template (api/_lib/reforco.js). Nos demais casos o vetor guardado é descartado.
+  let reforco = null;
+  if (tipo === 'marcacao') {
+    if (acao === 'aprovar' && b.reforcar_cadastro === true && alvoColab) reforco = await reforcarCadastro(sql, rh.empresa_id, alvoColab.id, b.id);
+    else await descartarVetor(sql, b.id);
+  }
   if (alvoColab) {
     const fuso = (await sql`SELECT fuso FROM empresa WHERE id=${rh.empresa_id} LIMIT 1`)[0];
     await comentarNoCard(alvoColab, montarComentario({
       tipo, acao, decisao: b.motivo, rh: rh.nome || rh.usuario || 'RH', alvoId: b.id, alvo, fuso: fuso && fuso.fuso
     }));
   }
-  return ok(res, { decidido: true });
+  return ok(res, { decidido: true, reforco });
 }
 
 /**
  * Batida de aparelho pendente atribuída pelo RH: continua em revisão? Mesmas
  * regras de /api/ponto, menos as de identidade (o RH acabou de confirmar quem é).
+ * Prova de vida reprovada sozinha não segura a batida (mesma regra de precisaRevisao).
  *   temCerca  há cerca no dia (escala ou local da equipe, cercaVigente)
  *   cerca     { dentro, distancia_m } medida contra ela
  *   ocorrencia  ocorrenciaVigente do dia (viagem dispensa a cerca; férias,
@@ -96,7 +105,7 @@ export default async function handler(req, res) {
  * Devolve { revisar, motivo, cerca } (cerca já com a dispensa da viagem). O motivo
  * junta todas as razões, em texto (vai para o painel e para o card do Bitrix).
  */
-export function revisaoDaAtribuicao({ temCerca, cerca, liveness_ok, afastado, ocorrencia, deriva_ms }) {
+export function revisaoDaAtribuicao({ temCerca, cerca, afastado, ocorrencia, deriva_ms }) {
   const oc = ocorrencia || null;
   let c = cerca || { dentro: null, distancia_m: null };
   const externo = !!(oc && oc.semCerca) && c.dentro !== true;
@@ -106,7 +115,6 @@ export function revisaoDaAtribuicao({ temCerca, cerca, liveness_ok, afastado, oc
   if (oc && oc.bloqueia) motivos.push('colaborador em ' + rotuloMinusculo(oc.rotulo));
   if (!temCerca && !externo) motivos.push('sem cerca no dia');
   if (c.dentro === false) motivos.push('fora da cerca');
-  if (liveness_ok === false) motivos.push('sem prova de vida');
   if (Math.abs(Number(deriva_ms) || 0) > DERIVA_MAX_MS) motivos.push('relógio do aparelho fora do horário');
   const revisar = motivos.length > 0;
   const motivo = revisar ? motivos.join(' · ') : 'identificado pelo RH' + (externo ? ' · trabalho externo (viagem)' : '');

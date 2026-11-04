@@ -166,11 +166,14 @@ export const Ponto = {
       if (this.yawsDeFrente.length > 8) this.yawsDeFrente.shift();
     }
     if (this.estado === 'liveness') {
-      $('dica').textContent = 'Vire o rosto devagar para um lado e volte';
-      $('dica').style.color = '#2d6cdf';
       if (q.rosto && Number.isFinite(q.yaw) && this.giro && this.giro.alimentar(q.yaw)) {
         this.aposLiveness();
+        return;
       }
+      // A dica acompanha o giro: a pessoa vê que virou e sabe que falta voltar.
+      const virou = this.giro && this.giro.fase === 'aguardando_voltar';
+      $('dica').textContent = virou ? 'Isso! Agora olhe de frente de novo' : 'Vire o rosto para o lado, como quem olha o ombro';
+      $('dica').style.color = virou ? '#28a745' : '#2d6cdf';
       return;
     }
     const base = !q.rosto ? DICA_ADORNO : q.msg;
@@ -330,6 +333,8 @@ export const Ponto = {
       foto_url: (veredito === 'revisar' || !livenessOk || !pos) ? cap.thumb : '',
       // Prova de vida que falhou leva a medida do olho, para ajustar o detector com dado real.
       motivo: livenessOk ? undefined : this.diagnosticoLiveness(),
+      // Rosto na zona cinzenta: o vetor vai junto para o RH poder reforçar o cadastro ao aprovar.
+      descritor: veredito === 'revisar' && !this.modoCadastro ? Array.from(cap.descritor) : undefined,
       _nome: col ? col.nome : ''
     };
     // Aparelho pendente: a 1ª marcação leva o cadastro facial (descritor + miniatura)

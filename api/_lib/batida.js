@@ -1,6 +1,7 @@
 // Regras puras da batida que chega do app (api/ponto.js): validação item a item
 // e o motivo gravado para a revisão do RH. Sem I/O, testável em Node.
 import { noFuturo } from './lancamento.js';
+import { vetorValido } from './reforco.js';
 
 const TIPOS = ['entrada', 'saida'];
 const INT_MAX = 2147483647;   // deriva_ms é integer no banco
@@ -50,7 +51,10 @@ export function normalizarBatida(m) {
       precisao_m: Number.isFinite(prec) && prec >= 0 && prec <= REAL_MAX ? prec : null,
       equipe_id: typeof m.equipe_id === 'string' && m.equipe_id.trim() ? m.equipe_id.trim() : null,
       motivo: typeof m.motivo === 'string' && m.motivo.trim() ? m.motivo.trim().slice(0, 500) : null,
-      foto_url: typeof m.foto_url === 'string' && m.foto_url ? m.foto_url : null
+      foto_url: typeof m.foto_url === 'string' && m.foto_url ? m.foto_url : null,
+      // Vetor do rosto (128 números), só da batida na zona cinzenta: o RH pode usá-lo
+      // para reforçar o cadastro ao aprovar (api/_lib/reforco.js).
+      descritor: m.veredito === 'revisar' ? vetorValido(m.descritor) : null
     }
   };
 }
@@ -71,4 +75,19 @@ export function motivoDaBatida({ afastado, bloqueio, futuro, externo, visitado, 
     cliente || null
   ].filter(Boolean);
   return partes.length ? partes.join('; ') : null;
+}
+
+const DERIVA_MAX_MS = 120000;   // relógio do aparelho a mais de 2 min do servidor
+
+/**
+ * A batida vai para a revisão do RH? Pura.
+ *   { veredito, origem, temCerca (há cerca, perímetro do gestor ou viagem), dentro,
+ *     deriva_ms, futuro, bloqueado (afastado ou ocorrência que bloqueia) }
+ * A prova de vida reprovada sozinha NÃO manda para o RH (04/11/2026): com o rosto
+ * confirmado e dentro da cerca, a Efrat aprovava 100% dessas pendências. O resultado
+ * continua gravado na batida (liveness_ok e diagnóstico no motivo) para a auditoria.
+ */
+export function precisaRevisao({ veredito, origem, temCerca, dentro, deriva_ms, futuro, bloqueado } = {}) {
+  return veredito !== 'aceito' || origem === 'manual' || !temCerca || dentro === false ||
+    Math.abs(Number(deriva_ms) || 0) > DERIVA_MAX_MS || !!futuro || !!bloqueado;
 }

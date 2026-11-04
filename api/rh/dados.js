@@ -83,7 +83,10 @@ export default async function handler(req, res) {
   const nada = Promise.resolve([]);
 
   const [equipes, pessoas, marcacoes, alocacoes, locais, jornadas, empresaRow, configRow, usuariosRh, correcoes, planos, aparelhosPendentes, papeis, ocorrencias] = await Promise.all([
-    sql`SELECT id AS equipe_id, nome, ativo, jornada_id, supervisor_id, local_id, bitrix_stage_id, afastamento FROM equipe WHERE empresa_id = ${empresa} ORDER BY nome`,
+    // ponto_opcional via to_jsonb: antes da migração de 04/11 a coluna não existe e vale false.
+    sql`SELECT id AS equipe_id, nome, ativo, jornada_id, supervisor_id, local_id, bitrix_stage_id, afastamento,
+               COALESCE((to_jsonb(e)->>'ponto_opcional')::boolean, false) AS ponto_opcional
+        FROM equipe e WHERE empresa_id = ${empresa} ORDER BY nome`,
     sql`SELECT c.id AS pessoa_id, c.nome, c.matricula, c.papel, c.equipe_padrao AS equipe_id, c.ativo, c.bitrix_contact_id,
                to_char(c.criado_em,'YYYY-MM-DD') AS desde,
                EXISTS(SELECT 1 FROM template_facial t WHERE t.colaborador_id = c.id AND t.estado='ativo') AS tem_biometria,
@@ -175,6 +178,9 @@ export default async function handler(req, res) {
     ocs = ocs.filter(o => ids.has(o.colaborador_id));
     pla = planos.filter(p => ok_.has(p.equipe_id));
   }
+  // Batidas pendentes com o vetor do rosto guardado: o RH pode reforçar o cadastro ao aprovar.
+  const comVetor = await idsComVetor(sql, empresa, mar);
+  if (comVetor.size) mar = mar.map(m => comVetor.has(m.id_cliente) ? Object.assign({}, m, { tem_vetor: true }) : m);
   const alocacoesHoje = alo.filter(a => a.dia === hoje);
   const pendentes = obras || !pode(acesso, 'ponto', true) ? [] : await comSugestoes(sql, empresa, aparelhosPendentes, configRow[0] && configRow[0].dados);
   const verConfig = pode(acesso, 'config');
@@ -195,4 +201,13 @@ export default async function handler(req, res) {
     alocacoes_hoje: alocacoesHoje,
     recadastros: []  // recadastro pendente entra quando o autocadastro do gestor existir
   });
+}
+
+/** id_cliente das batidas pendentes que têm vetor do rosto (tabela de 04/11; ausente = nenhuma). */
+async function idsComVetor(sql, empresa, marcacoes) {
+  if (!(marcacoes || []).some(m => m.pendente)) return new Set();
+  try {
+    const r = await sql`SELECT id_cliente FROM marcacao_descritor WHERE empresa_id = ${empresa}`;
+    return new Set(r.map(x => x.id_cliente));
+  } catch (e) { return new Set(); }
 }

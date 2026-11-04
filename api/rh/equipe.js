@@ -7,6 +7,8 @@
 //   • acao 'local'       { equipe_id, local_id|null }: define/limpa a cerca da equipe
 //   • acao 'afastamento' { equipe_id, afastamento }: marca a equipe como etapa de
 //     afastamento (INSS, licença): quem está nela não bate ponto nem conta falta
+//   • acao 'ponto_opcional' { equipe_id, ponto_opcional }: obra sem obrigatoriedade de
+//     ponto: quem bate tem as horas contadas; dia sem batida não é falta nem pendência
 //   • acao 'vincular'    { equipe_id, colaborador_id }: colaborador.equipe_padrao = equipe
 //   • acao 'desvincular' { colaborador_id }: equipe_padrao = NULL
 // O vínculo é a equipe PADRÃO da pessoa e, desde a integração com o Bitrix,
@@ -17,6 +19,7 @@ import { realocarColaboradores } from '../_lib/escala.js';
 import { autenticarRh } from '../_lib/auth.js';
 import { exigeAcesso } from '../_lib/acesso.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
+import { faltaTabela } from '../_lib/tabela-nova.js';
 
 export default async function handler(req, res) {
   if (cors(req, res)) return;
@@ -47,6 +50,19 @@ export default async function handler(req, res) {
                         WHERE id=${b.equipe_id} AND empresa_id=${rh.empresa_id} RETURNING id`;
     if (!r[0]) return erro(res, 404, 'EQUIPE_NAO_ENCONTRADA', 'equipe não encontrada');
     return ok(res, { equipe_id: b.equipe_id, afastamento: b.afastamento === true });
+  }
+
+  if (b.acao === 'ponto_opcional') {
+    if (!b.equipe_id) return erro(res, 400, 'CORPO_INVALIDO', 'equipe_id obrigatório');
+    try {
+      const r = await sql`UPDATE equipe SET ponto_opcional=${b.ponto_opcional === true}
+                          WHERE id=${b.equipe_id} AND empresa_id=${rh.empresa_id} RETURNING id`;
+      if (!r[0]) return erro(res, 404, 'EQUIPE_NAO_ENCONTRADA', 'equipe não encontrada');
+    } catch (e) {
+      if (faltaTabela(e)) return erro(res, 503, 'MIGRACAO_PENDENTE', 'falta rodar a migração do banco para esta função (db/schema.sql)');
+      throw e;
+    }
+    return ok(res, { equipe_id: b.equipe_id, ponto_opcional: b.ponto_opcional === true });
   }
 
   if (b.acao === 'vincular' || b.acao === 'desvincular') {

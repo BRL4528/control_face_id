@@ -480,3 +480,19 @@ CREATE INDEX IF NOT EXISTS ix_entrega_empresa ON entrega (empresa_id, estado);
 -- js/acessos.js) e as obras do gestor de obra. NULL = administrador (usuários de antes).
 ALTER TABLE usuario_rh ADD COLUMN IF NOT EXISTS perfil text;
 ALTER TABLE usuario_rh ADD COLUMN IF NOT EXISTS obras jsonb;
+
+-- ═══════════════════════════════════════════════════════ ajustes do RH (04/11/2026)
+-- Obra sem obrigatoriedade de ponto: quem está na equipe pode bater (as horas
+-- contam), mas o dia sem batida não é falta, não gera pendência nem ausência.
+ALTER TABLE equipe ADD COLUMN IF NOT EXISTS ponto_opcional boolean NOT NULL DEFAULT false;
+
+-- Vetor do rosto (128 números) da batida que caiu na zona cinzenta. Fora da
+-- marcação, que é imutável. O RH, ao aprovar, pode usá-lo para reforçar o
+-- cadastro facial (api/_lib/reforco.js); usado ou descartado na decisão, sai daqui.
+CREATE TABLE IF NOT EXISTS marcacao_descritor (
+  id_cliente     text PRIMARY KEY REFERENCES marcacao(id_cliente) ON DELETE CASCADE,
+  empresa_id     text NOT NULL REFERENCES empresa(id) ON DELETE CASCADE,
+  colaborador_id text NOT NULL REFERENCES colaborador(id) ON DELETE CASCADE,
+  vetor          jsonb NOT NULL,
+  criado_em      timestamptz NOT NULL DEFAULT now()
+);

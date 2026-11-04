@@ -9,8 +9,9 @@
 //     (cercaVigente). Fora da cerca → grava e marca para revisão (nunca nega:
 //     pode ser GPS ruim, e o ponto jamais é negado por técnica).
 //   • Vai para revisão quando: veredito != aceito, origem manual, fora da cerca,
-//     liveness reprovado, sem cerca nenhuma, relógio > 2 min fora, ou horário
-//     mais de 5 min à frente do servidor.
+//     sem cerca nenhuma, relógio > 2 min fora, ou horário mais de 5 min à frente
+//     do servidor (regra em precisaRevisao). A prova de vida reprovada sozinha não
+//     manda para o RH: fica gravada (liveness_ok=false + diagnóstico no motivo).
 //   • Item inválido (data, tipo, coordenadas) volta 'rejeitado' sem derrubar o lote.
 //   • A foto de auditoria só se guarda quando a marcação vai para revisão.
 import { db } from './_lib/db.js';
@@ -18,13 +19,12 @@ import { autenticarDispositivo } from './_lib/auth.js';
 import { dentroDaCerca } from './_lib/geo.js';
 import { cercaVigente } from './_lib/escala.js';
 import { ocorrenciaVigente, rotuloEmFrase } from './_lib/ocorrencia.js';
-import { normalizarBatida, motivoDaBatida } from './_lib/batida.js';
+import { normalizarBatida, motivoDaBatida, precisaRevisao } from './_lib/batida.js';
 import { cors, ok, erro, corpo, exigeMetodo } from './_lib/http.js';
 import { guardarMiniatura } from './_lib/blob.js';
 import { diaNoFuso, fusoDaEmpresa } from './_lib/dia.js';
 import { configGestorQualquerCerca, perimetroDoPonto } from './_lib/cerca-gestor.js';
 
-const DERIVA_MAX_MS = 120000;
 
 export default async function handler(req, res) {
   if (cors(req, res)) return;
@@ -132,15 +132,11 @@ export default async function handler(req, res) {
       // Relógio do celular: a deriva informada pelo app e, independente dela, o
       // instante comparado com o relógio do servidor (futuro além de 5 min = revisão,
       // para não aceitar batida de um dia que ainda não chegou). Antiga continua valendo.
-      const derivaFora = Math.abs(m.deriva_ms) > DERIVA_MAX_MS;
-      const revisar =
-        m.veredito !== 'aceito' ||
-        m.origem === 'manual' ||
-        m.liveness_ok === false ||
-        (!temCerca && !visitado && !externo) ||
-        cerca.dentro === false ||
-        derivaFora || m.futuro ||
-        !!(aloc && aloc.afastado) || !!(oc && oc.bloqueia);   // afastado não bate; se chegar (fila offline), o RH decide
+      const revisar = precisaRevisao({
+        veredito: m.veredito, origem: m.origem, temCerca: temCerca || !!visitado || externo, dentro: cerca.dentro,
+        deriva_ms: m.deriva_ms, futuro: m.futuro,
+        bloqueado: !!(aloc && aloc.afastado) || !!(oc && oc.bloqueia)   // afastado não bate; se chegar (fila offline), o RH decide
+      });
 
       // O servidor é a autoridade da equipe; a do app só entra se for da empresa.
       const equipeId = (aloc && aloc.equipe_id) || await equipeDaEmpresa(m.equipe_id);
@@ -174,6 +170,7 @@ export default async function handler(req, res) {
         resultados.push({ id_cliente: m.id_cliente, status: 'duplicado' });
       } else if (revisar) {
         emRevisao++;
+        await guardarVetor(sql, vinc.empresa_id, colaboradorId, m);
         resultados.push({ id_cliente: m.id_cliente, status: 'aceito', revisao: true });
       } else {
         aceitas++;
@@ -190,4 +187,16 @@ export default async function handler(req, res) {
     resumo: { aceitas, duplicadas, em_revisao: emRevisao },
     resultados
   });
+}
+
+// Vetor do rosto da batida na zona cinzenta, para o RH reforçar o cadastro ao
+// aprovar. Fica fora da marcação (livro imutável) e nunca derruba a batida: tabela
+// ausente (migração pendente) ou falha só deixam a batida sem o reforço.
+async function guardarVetor(sql, empresaId, colaboradorId, m) {
+  if (!m.descritor || !colaboradorId) return;
+  try {
+    await sql`INSERT INTO marcacao_descritor (id_cliente, empresa_id, colaborador_id, vetor)
+              VALUES (${m.id_cliente}, ${empresaId}, ${colaboradorId}, ${JSON.stringify(m.descritor)})
+              ON CONFLICT (id_cliente) DO NOTHING`;
+  } catch (e) { console.warn('[ponto] vetor da batida não guardado:', e && e.message); }
 }

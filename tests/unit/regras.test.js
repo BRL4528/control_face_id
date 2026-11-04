@@ -670,6 +670,14 @@ test('presencaPorEquipe: equipe de afastamento não entra em operação', () => 
   assert.deepEqual(presencaPorEquipe(pessoas, [], equipes, '2026-10-28').map(c => c.equipe_id), ['obra']);
 });
 
+test('presencaPorEquipe: obra de ponto opcional só conta quem bateu, ninguém fica ausente', () => {
+  const pessoas = [{ pessoa_id: 'a', nome: 'Ana', equipe_id: 'opc', ativo: true }, { pessoa_id: 'b', nome: 'Beto', equipe_id: 'opc', ativo: true }];
+  const equipes = [{ equipe_id: 'opc', nome: 'Obra 471', ponto_opcional: true }];
+  assert.deepEqual(presencaPorEquipe(pessoas, [], equipes, '2026-11-04'), []);   // ninguém bateu: sem card, sem ausente
+  const [c] = presencaPorEquipe(pessoas, [{ pessoa_id: 'a', equipe_id: 'opc', marcado_dia: '2026-11-04' }], equipes, '2026-11-04');
+  assert.equal(c.esperados, 1); assert.equal(c.presentes, 1); assert.deepEqual(c.ausentes, []);
+});
+
 test('presencaPorEquipe com jornada: domingo e feriado não cobram, quem bateu na folga conta presente', () => {
   const pessoas = [{ pessoa_id: 'a', nome: 'Ana', equipe_id: 'obra', ativo: true }, { pessoa_id: 'b', nome: 'Beto', equipe_id: 'obra', ativo: true },
                    { pessoa_id: 'c', nome: 'Caio', equipe_id: 'sab', ativo: true }];

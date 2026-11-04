@@ -11,7 +11,10 @@
 // modelo de 68 pontos não acompanha a pálpebra: com o olho fechado a medida caía
 // só ~6% (mediana mínimo/base 0,94 em ~24 quadros). Reprovava 100%. O giro da
 // cabeça é estável nesse modelo (é o mesmo usado para pedir "olhe de frente").
-const GIROU = 0.18;     // virou: afastou-se pelo menos isto do giro de base (de frente)
+// 04/11/2026: 0,18 → 0,12. Em 106 reprovações reais (01–04/11) o maior desvio
+// mediano foi 0,038 e o p90 0,143: quase ninguém virava o bastante. Com a dica que
+// muda quando a pessoa vira (fase), 0,12 ainda fica 3x acima do ruído de uma foto.
+const GIROU = 0.12;     // virou: afastou-se pelo menos isto do giro de base (de frente)
 const VOLTOU = 0.09;    // voltou: ficou a no máximo isto do giro de base
 const MIN_BASE = 2;     // quadros de frente para formar a linha de base
 
@@ -37,6 +40,8 @@ export function criarDetectorGiro(base) {
   return {
     completo: false,
     get base() { return ref; },
+    /** 'aguardando_virar' | 'aguardando_voltar' | 'completo': a tela troca a dica por fase. */
+    get fase() { return fase; },
     /** Para diagnóstico quando reprova: giro de base, maior desvio e quadros analisados. */
     get diagnostico() { return { base: ref, maior_desvio: maior, quadros }; },
     alimentar(yaw) {

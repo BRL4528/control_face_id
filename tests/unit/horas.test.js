@@ -112,6 +112,18 @@ test('equipe de afastamento (INSS): sem previsto, sem falta, dia aparece como af
   assert.equal(dia(r).status, 'afastado'); assert.equal(dia(r).previsto, 0); assert.equal(r[0].totais.faltas, 0); assert.equal(dia(r).saldo, null);
 });
 
+test('obra de ponto opcional: dia sem batida não é falta (nem com escala); dia batido conta normal', () => {
+  const eqs = [{ equipe_id: 'e1', jornada_id: 'j1', ponto_opcional: true }];
+  const pessoas = [{ pessoa_id: 'p1', nome: 'Ana', matricula: '1', ativo: true, equipe_id: 'e1' }];
+  const vazio = horasPorColaborador({ ...base, equipes: eqs, pessoas, marcacoes: [] });
+  assert.equal(vazio.reduce((n, l) => n + l.dias.length + l.totais.faltas, 0), 0);   // nem a escala do dia 05 vira falta
+  const r = horasPorColaborador({ ...base, equipes: eqs, pessoas, alocacoes: [], marcacoes: [mk('entrada', '07:00'), mk('saida', '17:00')] });
+  assert.equal(r[0].dias.length, 1); assert.equal(dia(r).status, 'ok'); assert.equal(dia(r).previsto, 540); assert.equal(r[0].totais.faltas, 0);
+  // a mesma pessoa em obra obrigatória: os dias úteis sem batida viram falta
+  const obrig = horasPorColaborador({ ...base, equipes: [{ equipe_id: 'e1', jornada_id: 'j1' }], pessoas, alocacoes: [], marcacoes: [] });
+  assert.ok(obrig[0].totais.faltas > 0);
+});
+
 // Jornada da Efrat: segunda 07:00–16:00, terça a sexta 07:00–17:00, 1h de almoço (44h/semana).
 const EFRAT = { jornada_id: 'j1', entrada: '07:00', saida: '17:00', tolerancia_min: 10, intervalo_min: 60,
   dias: { 1: { entrada: '07:00', saida: '16:00' }, 2: { entrada: '07:00', saida: '17:00' }, 3: { entrada: '07:00', saida: '17:00' },

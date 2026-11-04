@@ -12,6 +12,7 @@ import { statementsLancamento, noFuturo } from '../_lib/lancamento.js';
 import { comentarNoCard, montarComentarioLancamento } from '../_lib/bitrix-saida.js';
 import { exigeAcesso, noEscopo } from '../_lib/acesso.js';
 import { cercaVigente } from '../_lib/escala.js';
+import { descartarVetor } from '../_lib/reforco.js';
 import { cors, ok, erro, corpo, exigeMetodo } from '../_lib/http.js';
 
 export default async function handler(req, res) {
@@ -71,6 +72,7 @@ export default async function handler(req, res) {
     return stmts;
   });
 
+  await descartarVetor(sql, orig.id_cliente);   // batida anulada não reforça cadastro
   await comentarNoCard(orig, montarComentarioLancamento({
     acao, decisao: motivo, rh: quem, fuso, original: { tipo: orig.tipo, marcado_em: orig.marcado_em }, novo, alvoId: orig.id_cliente
   }));
